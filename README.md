@@ -8,7 +8,7 @@ YOLO 기반 화재·연기 탐지 모델을 활용하여 영상에서 화재·�
 
 초기 저장소 구조와 PostgreSQL 개발 실행 설정을 준비하고, Backend 라이브러리(express, pg, dotenv) 설치 및 기본 코드 작성을 마친 단계입니다. 서버 실행 시 PostgreSQL 연결을 먼저 검증한 후 구동되는 기본 뼈대가 갖추어졌습니다.
 
-Frontend는 Vue 3와 Vite 기반으로 초기 프로젝트 구성 및 백엔드 API 프록시 설정을 마쳤습니다. 아직 기능별 비즈니스 API, DB 테이블 생성 스크립트(`sql/init.sql`), AI 모듈 연동은 구현 전입니다. AI → Backend 결과 전달 JSON의 기본 형식은 아래와 같이 합의했으며, Frontend 응답 규격과 ERD는 협의 예정입니다. 초기 입력은 제공된 녹화 영상을 사용하며, 실시간 CCTV는 접근 가능 여부에 따라 추가합니다.
+Frontend는 Vue 3와 Vite 기반으로 초기 프로젝트 구성 및 백엔드 API 프록시 설정을 마쳤습니다. `POST /api/detections`의 로컬 수신·응답을 구현했습니다. 기본 입력값 검사를 추가했으며, 초기 테이블 생성 스크립트(`sql/init.sql`)를 작성했으며, 인증·DB 저장, 나머지 기능별 API, AI 모듈 연동은 구현 전입니다. AI → Backend 결과 전달 JSON의 기본 형식은 아래와 같이 합의했으며, Frontend 응답 규격은 협의 예정이며, DB 구조는 녹화영상 기준 초안입니다. 초기 입력은 제공된 녹화 영상을 사용하며, 실시간 CCTV는 접근 가능 여부에 따라 추가합니다.
 
 ## 시스템 흐름
 
@@ -47,7 +47,7 @@ AI 모듈의 탐지 결과와 위치 추정 결과는 다음 JSON 형식으로 B
 | --- | --- |
 | `camera_id` | 카메라 식별자 |
 | `video_id` | 영상 식별자 |
-| `timestamp` | 결과에 연결되는 시각 문자열 |
+| `timestamp` | AI 프로그램이 실제로 탐지한 시각 문자열 |
 | `detection.class` | 탐지 클래스 (예시: `fire`) |
 | `detection.confidence` | 탐지 신뢰도 |
 | `detection.bbox` | 탐지 영역의 두 좌표 쌍 (`x1`, `y1`, `x2`, `y2`) |
@@ -55,7 +55,7 @@ AI 모듈의 탐지 결과와 위치 추정 결과는 다음 JSON 형식으로 B
 | `location_estimation.longitude` | 추정 화재 위치의 경도 |
 | `location_estimation.error_range_m` | 위치 추정 오차 범위 (미터) |
 
-좌표는 실제 화점의 확정 위치가 아닌 추정 결과입니다. 예시의 `timestamp`에는 시간대가 없으므로 시각 기준(촬영 시각 또는 분석 시각 등)과 시간대는 추가로 정해야 합니다. bbox의 좌표 기준·단위, 오차 범위의 구체적인 의미, 위치 추정 실패 시 표현도 별도 협의 사항입니다.
+좌표는 실제 화점의 확정 위치가 아닌 추정 결과입니다. 예시의 `timestamp`에는 시간대가 없으므로 전달할 시간대 표기는 추가로 정해야 합니다. 이 값은 영상 재생 시간이 아니라 AI 프로그램이 실제로 탐지한 시각입니다. bbox의 좌표 기준·단위, 오차 범위의 구체적인 의미, 위치 추정 실패 시 표현도 별도 협의 사항입니다.
 
 ## 기술 스택
 
@@ -86,8 +86,13 @@ wildfire-detection-geolocation/
 │   │   ├── config/
 │   │   │   └── db.js    # PostgreSQL 연결 풀(Pool) 설정
 │   │   ├── server.js    # DB 사전 검증 및 서버 기동/종료
+│   │   ├── validators/
+│   │   │   └── detections.validator.js # 입력값 검사
+│   │   ├── controllers/
+│   │   │   └── detections.controller.js # JSON 수신·응답
 │   │   └── routes/
-│   │       └── index.js # API 라우터 (엔드포인트 등록)
+│   │       ├── index.js # 기능별 라우터 연결
+│   │       └── detections.routes.js # 탐지 결과 POST 경로 연결
 │   ├── package.json
 │   └── package-lock.json
 ├── frontend/            # Frontend (Vue 3 + Vite)
@@ -103,7 +108,8 @@ wildfire-detection-geolocation/
 │   ├── package.json
 │   └── package-lock.json
 ├── ai/                  # 탐지 및 위치 추정
-├── sql/                 # DB 초기화 SQL (설계 후 작성)
+├── sql/                 # DB 테이블 생성 SQL
+│   └── init.sql         # cameras, videos, detection_events 초기 생성
 ├── data/                # 로컬 영상 및 데이터
 ├── docker-compose.yml   # PostgreSQL 개발 실행 설정
 ├── .env.example         # 환경변수 예시
@@ -158,7 +164,7 @@ Docker와 Docker Compose가 설치되어 있고 Docker가 실행 중이어야 �
    docker compose ps
    ```
 
-호스트에서 실행하는 Backend가 접속할 PostgreSQL 주소는 `localhost`, 기본 포트는 `5432`입니다. 데이터는 Docker 볼륨 `postgres_data`에 보관합니다. 현재 Backend 기본 연결 코드는 작성되어 있으며, 테이블 생성 SQL(`sql/init.sql`)은 설계 후 작성 예정입니다.
+호스트에서 실행하는 Backend가 접속할 PostgreSQL 주소는 `localhost`, 기본 포트는 `5432`입니다. 데이터는 Docker 볼륨 `postgres_data`에 보관합니다. `sql/init.sql`은 DB 저장공간이 비어 있는 최초 초기화 때 자동 실행됩니다. 이미 사용하던 볼륨에는 자동 적용되지 않으므로 아래의 기존 DB 적용 방법을 사용합니다.
 
 종료할 때는 `docker compose down`을 사용합니다. 일반 종료 시 DB 볼륨은 유지됩니다. `.env`의 DB 계정 설정은 빈 볼륨을 처음 초기화할 때 적용되므로, 이후 값을 변경해도 기존 DB 계정이 자동으로 변경되지는 않습니다.
 
@@ -177,13 +183,55 @@ Docker와 Docker Compose가 설치되어 있고 Docker가 실행 중이어야 �
 
 서버 기동 시 먼저 PostgreSQL에 `SELECT 1` 쿼리를 보내 DB 연결 상태를 확인합니다. DB 연결이 성공하면 `http://127.0.0.1:3000`에서 요청을 대기합니다(기본 포트이며 `.env`의 `PORT`로 변경 가능). 연결 실패 시에는 서버를 띄우지 않고 프로세스를 즉시 종료합니다.
 
-종료 시에는 터미널에서 `Ctrl + C`를 누르면 처리 중인 요청과 DB 연결 풀을 안전하게 정리(Graceful Shutdown)한 후 종료됩니다. 현재는 비즈니스 API 등록 전이므로 요청 시 기본 404 응답을 반환합니다.
+종료 시에는 터미널에서 `Ctrl + C`를 누르면 처리 중인 요청과 DB 연결 풀을 안전하게 정리(Graceful Shutdown)한 후 종료됩니다. 현재 `POST /api/detections`는 수신 확인 응답을 반환하며, 미등록 경로는 404 응답을 반환합니다.
 
 ## DB 테이블 추가 및 변경
 
 새 테이블을 만들거나 기존 테이블의 컬럼을 변경할 때는 컨테이너를 재생성할 필요가 없습니다. 실행 중인 DB에 `CREATE TABLE`, `ALTER TABLE` 등의 SQL을 적용합니다. 변경 SQL은 `sql/`에 파일로 남겨 공유하고, 팀원들은 각자의 DB에 필요한 변경을 순서대로 적용합니다. 컬럼이나 테이블을 삭제하면 해당 데이터도 삭제되므로 적용 전에 팀원들과 확인합니다.
 
-컨테이너를 삭제하고 다시 만들어도 기존 DB 볼륨을 연결하면 테이블과 데이터는 그대로 유지됩니다. 나중에 `init.sql`을 Docker의 초기화 스크립트로 연결하더라도 이 파일은 DB 저장 공간이 비어 있는 최초 초기화 때만 실행됩니다. 파일 수정이나 컨테이너 재생성만으로 기존 DB의 테이블 구조가 자동으로 변경되지는 않습니다. 현재는 `init.sql` 작성 및 자동 실행 연결 전입니다.
+컨테이너를 삭제하고 다시 만들어도 기존 DB 볼륨을 연결하면 테이블과 데이터는 그대로 유지됩니다. `init.sql`은 Docker의 초기화 스크립트로 연결되어 있으며, DB 저장 공간이 비어 있는 최초 초기화 때만 실행됩니다. 파일 수정이나 컨테이너 재생성만으로 기존 DB의 테이블 구조가 자동으로 변경되지는 않습니다.
+
+### 초기 테이블 구성
+
+| 테이블 | 역할 | 관계 |
+| --- | --- | --- |
+| cameras | 카메라 이름과 설치 좌표 | 카메라 1대에 영상 여러 개 |
+| videos | 원본 파일명, 서버 파일 경로, 카메라 ID | 영상 1개에 이벤트 여러 개 |
+| detection_events | 탐지 시작·종료 시각, 최대 신뢰도, 추정 위치 | video_id로 영상 연결 |
+
+영상 파일 자체와 매 프레임 bbox는 DB에 저장하지 않습니다. 카메라를 모르는 제공 영상은 videos.camera_id를 비워둘 수 있게 했습니다. 이는 DB 초안의 허용 규칙이며, 현재 AI 수신 API의 필수 camera_id 검사는 그대로입니다. 카메라 좌표와 추정 위치도 모르면 비워둘 수 있습니다. 위도·경도는 함께 저장하거나 함께 비워둡니다. 참조 중인 카메라·영상은 연관 데이터와 함께 자동 삭제되지 않습니다.
+
+날짜·시간은 TIMESTAMPTZ로 저장합니다. 저장할 때 시간대가 명시된 시각을 사용하고 화면에서 한국 시각으로 표시하는 방향입니다. created_at은 DB 등록 시각이며 촬영 시각이 아닙니다. 이벤트의 started_at은 첫 탐지 시각, ended_at은 종료 시 기록하는 마지막 탐지 시각이며 진행 중에는 NULL입니다. updated_at은 수정할 때 Backend에서 갱신해야 하며 DB가 자동 갱신하지 않습니다.
+
+이벤트 그룹핑 기준과 대표 추정 위치 선정 방식은 아직 미정입니다. 테이블 생성만으로 API가 데이터를 저장하지는 않습니다. 현재 POST /api/detections는 수신·검증·응답만 수행합니다.
+
+### 이미 실행했던 DB에 최초 적용
+
+기존 볼륨에 아직 위 세 테이블이 없다면 프로젝트 루트에서 다음 명령을 **한 번** 실행합니다. DB가 실행 중이어야 합니다.
+
+```bash
+docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sql/init.sql
+```
+
+테이블 생성 결과는 다음 명령으로 확인합니다.
+
+```bash
+docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
+```
+
+이미 테이블이 있으면 init.sql을 다시 실행하지 않습니다. 중복 실행 시 오류로 중단되며 기존 테이블을 덮어쓰지 않습니다. 전체 생성은 트랜잭션으로 처리되어 중간 실패 시 일부 테이블만 생성되지 않습니다.
+
+### 다음 날 다시 개발할 때
+
+Docker를 켠 뒤 프로젝트 루트에서 실행합니다.
+
+```bash
+docker compose up -d db
+cd backend
+npm start
+```
+
+SQL을 매번 실행할 필요는 없습니다. 일반 종료에는 docker compose down을 사용하고, 데이터가 필요한 경우 볼륨까지 삭제하는 -v 옵션은 사용하지 않습니다. 이후 구조 변경은 별도 변경 SQL로 기존 DB에 적용하고, 새 설치를 위한 init.sql에도 같은 구조를 반영합니다.
 
 ## Frontend 라이브러리 설치 및 개발 서버 실행
 
@@ -302,3 +350,21 @@ Nginx의 Backend 연결 주소는 실제 배포 형태에 맞춥니다. 특히 N
 7. 회사 서버 배포 단계에서 Nginx를 구성하고 정적 파일 제공과 `/api` 전달을 검증합니다.
 
 참고: [Vue 공식 시작 안내](https://vuejs.org/guide/quick-start), [Vite 개발 프록시](https://vite.dev/config/server-options#server-proxy), [Vite 배포용 빌드](https://vite.dev/guide/build).
+
+## AI JSON 로컬 수신 테스트
+
+Backend를 실행한 뒤 Postman에서 다음과 같이 요청합니다.
+
+1. `POST http://127.0.0.1:3000/api/detections`를 선택합니다.
+2. **Body → raw → JSON**에서 위의 AI JSON 예시를 붙여넣습니다. Content-Type은 `application/json`입니다.
+3. `200 OK`와 함께 `message: "탐지 결과를 수신했습니다."`, 요청 JSON 그대로인 `data`가 반환되는지 확인합니다.
+
+Route는 요청 경로와 함수를 연결하고, Controller는 JSON을 검사한 뒤 응답합니다. 입력 검사는 `backend/src/validators/detections.validator.js`에서 담당합니다. DB 저장, 이벤트 처리, 토큰 인증은 미구현입니다. 성공 응답은 저장 완료를 의미하지 않습니다. 인증 없는 로컬 테스트용이므로 외부 공개 전 접근 제어를 추가해야 합니다.
+
+### 입력값 검사 및 테스트
+
+정상 요청은 200, 검사 실패는 400과 `error`, 필드별 오류 목록인 `details`를 반환합니다. 현재 개발용 기준으로 예시의 모든 필드를 필수로 검사합니다. ID는 양의 안전한 정수, 신뢰도는 0~1, bbox 좌표는 유한한 숫자, 위도·경도는 각각 -90~90과 -180~180, 오차 범위는 0 이상의 유한한 숫자여야 합니다. 클래스와 timestamp는 비어 있지 않은 문자열인지 확인합니다.
+
+숫자 문자열은 자동 변환하지 않고 추가 필드는 허용합니다. 날짜 유효성·시간대, 클래스 목록, bbox 단위·순서·이미지 경계는 아직 검사하지 않습니다. 위치 추정 실패 표현은 미정이므로 현재 `location_estimation`은 좌표 객체만 허용하며 null은 거절합니다. 필수 여부와 실패 표현은 AI 담당자와 확인 후 조정할 개발용 기준입니다.
+
+Backend를 실행한 상태에서 JSON을 직접 POST로 보내 확인합니다. 정상 예시는 200과 수신 데이터가 반환되어야 합니다. 같은 예시에서 `detection.confidence`를 `1.5`로 바꾸거나 `camera_id`를 삭제하면 400과 해당 필드의 오류 이유가 반환되어야 합니다. 브라우저 주소창 접속은 GET 요청이므로 이 POST API의 확인 방법이 아닙니다.
