@@ -1,3 +1,9 @@
+button { font: inherit; }
+button:focus-visible { outline: 3px solid #0f172a; outline-offset: 4px; }
+.dashboard-panel { background: white; border: 1px solid #e0e5eb; border-radius: 8px; padding: 20px; }
+.dashboard-panel h2 { margin: 0 0 16px; font-size: 19px; }
+.empty-message { color: #64748b; line-height: 1.6; }
+
 *, *::before, *::after {
   box-sizing: border-box;
 }

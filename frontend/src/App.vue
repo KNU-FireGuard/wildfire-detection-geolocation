@@ -1,5 +1,15 @@
 <script setup>
-// FireGuard AI 대시보드 진입점
+import { computed, ref } from 'vue'
+import EventList from './components/EventList.vue'
+import MonitoringMap from './components/MonitoringMap.vue'
+import EventDetail from './components/EventDetail.vue'
+import { events } from './mocks/events'
+
+const selectedEventId = ref(events[0]?.id ?? null)
+const selectedEvent = computed(() => events.find(event => event.id === selectedEventId.value) ?? null)
+function selectEvent(id) {
+  selectedEventId.value = id
+}
 </script>
 
 <template>
@@ -9,17 +19,16 @@
       <p>산불 감지 및 화재 위치 추정 모니터링 시스템</p>
     </header>
     <main class="app-main">
-      <div class="card">
-        <h2>모니터링 대시보드</h2>
-        <p>프론트엔드 기본 환경 구성이 완료되었습니다. 컴포넌트 구현이 진행될 예정입니다.</p>
-      </div>
+      <EventList :events="events" :selected-id="selectedEventId" @select="selectEvent" />
+      <MonitoringMap :events="events" :selected-id="selectedEventId" @select="selectEvent" />
+      <EventDetail :event="selectedEvent" />
     </main>
   </div>
 </template>
 
 <style scoped>
 .app-container {
-  max-width: 1200px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 32px 20px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -43,23 +52,7 @@
   font-size: 15px;
 }
 
-.card {
-  background: #ffffff;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 24px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
-}
-
-.card h2 {
-  margin: 0 0 12px 0;
-  font-size: 20px;
-  color: #333;
-}
-
-.card p {
-  margin: 0;
-  color: #555;
-  line-height: 1.5;
-}
+.app-main { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.6fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+.app-main > * { min-width: 0; }
+@media (max-width: 1000px) { .app-main { grid-template-columns: 1fr; } }
 </style>
