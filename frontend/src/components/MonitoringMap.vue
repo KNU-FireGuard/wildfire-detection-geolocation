@@ -7,13 +7,12 @@ const props = defineProps({
   cameras: { type: Array, default: () => [] }, events: { type: Array, default: () => [] },
   selectedEvent: { type: Object, default: null }, selectedCamera: { type: Object, default: null },
 })
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select-camera'])
 const container = ref(null)
 const loading = ref(true)
 const error = ref('')
 const ready = ref(false)
 const mode = ref('HYBRID')
-const noEventCamera = ref(null)
 const clientId = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 const validFire = computed(() => hasCoordinates(props.selectedEvent?.estimatedLocation))
 const unlocated = computed(() => props.cameras.filter(camera => !hasCoordinates(camera)).length)
@@ -22,11 +21,8 @@ let disposed = false
 let attempt = 0
 
 function selectCamera(camera) {
-  const latest = props.events.filter(event => event.cameraId === camera.id)
-    .reduce((current, event) => !current || Date.parse(event.detectedAt) > Date.parse(current.detectedAt) ? event : current, null)
-  noEventCamera.value = latest ? null : camera
-  if (latest) emit('select', latest.id)
-  else scene?.focus([camera])
+  emit('select-camera', camera.id)
+  scene?.focus([camera])
 }
 function render() { scene?.render(props) }
 function showAll() {
@@ -80,7 +76,6 @@ async function initialize() {
 watch(mode, value => map?.setMapTypeId(maps.MapTypeId[value]))
 watch(() => [props.cameras, props.events], () => { render(); showAll() }, { deep: true })
 watch(() => [props.selectedEvent, props.selectedCamera], () => {
-  noEventCamera.value = null
   render()
   focusSelection()
 }, { deep: true })
@@ -112,8 +107,8 @@ onBeforeUnmount(() => {
     <div class="map-selection" aria-live="polite">
       <div class="selection-heading"><h2 id="map-title">탐지 위치 현황</h2><span>CCTV {{ cameras.length }}대</span></div>
       <p v-if="unlocated" class="empty-message">좌표가 없거나 유효하지 않은 카메라 {{ unlocated }}대는 지도에 표시할 수 없습니다.</p>
-      <div class="camera-buttons" aria-label="카메라 선택"><button v-for="camera in cameras" :key="camera.id" :aria-pressed="camera.id === selectedCamera?.id || camera.id === noEventCamera?.id" @click="selectCamera(camera)">{{ camera.name }}</button></div>
-      <p v-if="noEventCamera" class="empty-message">{{ noEventCamera.name }}: 탐지 이벤트가 없습니다.</p>
+      <div class="camera-buttons" aria-label="카메라 선택"><button v-for="camera in cameras" :key="camera.id" :aria-pressed="camera.id === selectedCamera?.id" @click="selectCamera(camera)">{{ camera.name }}</button></div>
+      <p v-if="selectedCamera && !events.some(event => event.cameraId === selectedCamera.id)" class="empty-message">{{ selectedCamera.name }}: 탐지 이벤트가 없습니다.</p>
       <template v-if="selectedEvent">
         <p>이벤트 #{{ selectedEvent.id }} · {{ selectedCamera?.name ?? '카메라 정보 없음' }} <RouterLink :to="`/events/${selectedEvent.id}`">상세 보기</RouterLink></p>
         <p v-if="validFire" class="coordinates">위도 {{ selectedEvent.estimatedLocation.latitude.toFixed(6) }} · 경도 {{ selectedEvent.estimatedLocation.longitude.toFixed(6) }}</p>
