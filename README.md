@@ -20,6 +20,7 @@ AI 요청 JSON의 기본 형식은 합의했으며, 상세 규칙은 협의 중�
 ## 문서
 
 - [시스템 아키텍처](docs/System_architecture.md): 시스템 흐름도, 구성요소, DB 설계 및 배포 계획
+- [DB 명세서](docs/DATABASE.md): ERD, 컬럼 설명·제약조건 및 데이터 등록 순서
 - [개발 환경 안내](docs/DEVELOPMENT.md): 설치·실행, 기존 DB 초기화, DB 변경 및 로컬 API 테스트
 - [API 명세서](docs/API_SPEC.md): API 목록, AI 요청·응답 및 검증 규칙
 - [AI 학습 결과](ai/README.md): 모델 설정 및 학습 성능
