@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { fetchCameras, fetchEvents } from '../src/api/catalog.js'
+import { fetchCameras, fetchEvents, fetchVideos, fetchEvent } from '../src/api/catalog.js'
 
 // feature/backend catalog.controller.js의 응답 규격에 대한 회귀 테스트입니다.
 const originalFetch = globalThis.fetch
@@ -13,6 +13,41 @@ const rawEvent = {
   max_confidence: 0.93, estimated_latitude: 36.0089,
   estimated_longitude: 128.7118, error_range_m: 50,
 }
+
+test('영상 목록은 videos API 메타데이터를 그대로 조회한다', async () => {
+  const video = { id: 20, camera_id: 1, original_filename: 'sample.mp4', created_at: rawEvent.started_at }
+  globalThis.fetch = async url => {
+    assert.equal(url, '/api/videos?limit=100&offset=0')
+    return page([video])
+  }
+  assert.deepEqual(await fetchVideos(), [video])
+})
+
+test('이벤트 상세는 item 응답을 변환하며 404와 잘못된 ID를 처리한다', async () => {
+  globalThis.fetch = async url => {
+    assert.equal(url, '/api/events/10')
+    return Response.json({ item: rawEvent })
+  }
+  const event = await fetchEvent('10')
+  assert.equal(event.id, 10)
+  assert.equal(event.videoId, 20)
+  assert.equal(event.endedAt, null)
+  await assert.rejects(fetchEvent('abc'), /올바른 이벤트/)
+  await assert.rejects(fetchEvent('2147483648'), /올바른 이벤트/)
+  globalThis.fetch = async () => new Response('', { status: 404 })
+  await assert.rejects(fetchEvent('10'), /탐지 이벤트가 없습니다/)
+})
+
+test('이벤트 상세는 잘못된 응답과 서버 오류를 거부하고 취소 신호를 전달한다', async () => {
+  const controller = new AbortController()
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.signal, controller.signal)
+    return Response.json({ items: [] })
+  }
+  await assert.rejects(fetchEvent('10', { signal: controller.signal }), /응답 형식/)
+  globalThis.fetch = async () => new Response('', { status: 500 })
+  await assert.rejects(fetchEvent('10'), /HTTP 500/)
+})
 
 test('Camera/Event를 API 필드에서 UI 모델로 분리하고 숫자 ID를 유지한다', async () => {
   globalThis.fetch = async (url, options) => {

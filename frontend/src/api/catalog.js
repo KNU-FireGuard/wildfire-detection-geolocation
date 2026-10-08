@@ -23,6 +23,10 @@ function normalizeEvent(event) {
   return {
     id: event.id,
     cameraId: event.camera_id,
+    videoId: event.video_id,
+    endedAt: event.ended_at,
+    createdAt: event.created_at,
+    updatedAt: event.updated_at,
     detectedAt: event.started_at,
     type: event.class,
     confidence: event.max_confidence,
@@ -74,4 +78,20 @@ export async function fetchCameras({ signal } = {}) {
 
 export async function fetchEvents({ signal } = {}) {
   return (await fetchAll('events', '탐지 이벤트', signal)).map(normalizeEvent)
+}
+
+export async function fetchVideos({ signal } = {}) {
+  return fetchAll('videos', '영상', signal)
+}
+
+export async function fetchEvent(id, { signal } = {}) {
+  if (!/^[1-9]\d*$/.test(String(id)) || Number(id) > 2147483647) {
+    throw new Error('올바른 이벤트 번호가 아닙니다.')
+  }
+  const response = await fetch(`/api/events/${id}`, { signal, headers: { Accept: 'application/json' } })
+  if (response.status === 404) throw new Error('탐지 이벤트가 없습니다.')
+  if (!response.ok) throw new Error(`이벤트 조회에 실패했습니다. (HTTP ${response.status})`)
+  const data = await response.json()
+  if (!data?.item || typeof data.item !== 'object' || Array.isArray(data.item)) throw new Error('이벤트 응답 형식이 올바르지 않습니다.')
+  return normalizeEvent(data.item)
 }

@@ -11,7 +11,7 @@ function cameraName(cameraId) {
 
 <template>
   <section class="dashboard-panel" aria-labelledby="events-title">
-    <div class="panel-heading"><h2 id="events-title">최근 탐지 이벤트</h2><span class="event-count">총 {{ events.length }}건</span></div>
+    <div class="panel-heading"><h2 id="events-title">최근 탐지 이벤트</h2><RouterLink to="/events">전체 보기</RouterLink><span class="event-count">총 {{ events.length }}건</span></div>
     <p v-if="events.length === 0" class="empty-message">탐지 이벤트가 없습니다.</p>
     <div v-else class="table-scroll">
       <table class="event-table">
