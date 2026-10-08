@@ -8,3 +8,6 @@ export function formatDetectedAt(value) {
 export function formatType(value) {
   return { smoke: '연기', fire: '화재' }[value] ?? value
 }
+export function formatStatus(value) {
+  return { UNCONFIRMED: '확인 대기', CONFIRMED: '확인 완료' }[value] ?? value ?? '정보 없음'
+}
