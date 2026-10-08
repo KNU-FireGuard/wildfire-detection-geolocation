@@ -1,65 +1,30 @@
 <script setup>
-// FireGuard AI 대시보드 진입점
+import DashboardIcon from './components/DashboardIcon.vue'
+const links = [
+  { to: '/', label: '대시보드', icon: 'home' },
+  { to: '/cameras', label: '카메라 목록', icon: 'camera' },
+  { to: '/videos', label: '영상 목록', icon: 'monitor' },
+  { to: '/events', label: '탐지 이벤트', icon: 'bell' },
+]
 </script>
-
 <template>
-  <div class="app-container">
-    <header class="app-header">
-      <h1>FireGuard AI</h1>
-      <p>산불 감지 및 화재 위치 추정 모니터링 시스템</p>
-    </header>
-    <main class="app-main">
-      <div class="card">
-        <h2>모니터링 대시보드</h2>
-        <p>프론트엔드 기본 환경 구성이 완료되었습니다. 컴포넌트 구현이 진행될 예정입니다.</p>
-      </div>
-    </main>
+  <a class="skip-link" href="#main-content">본문으로 이동</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="주 메뉴">
+      <RouterLink class="brand" to="/"><DashboardIcon name="fire" :size="36" /><span><strong>FireGuard AI</strong><small>산불 탐지 관제 시스템</small></span></RouterLink>
+      <nav><RouterLink v-for="link in links" :key="link.to" :to="link.to" class="nav-item" :class="{ active: link.to === '/' ? $route.path === '/' : $route.path.startsWith(link.to) }"><DashboardIcon :name="link.icon" /><span>{{ link.label }}</span></RouterLink></nav>
+    </aside>
+    <main id="main-content" class="page-content"><RouterView /></main>
   </div>
 </template>
-
 <style scoped>
-.app-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 32px 20px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.app-header {
-  margin-bottom: 24px;
-  border-bottom: 1px solid #e9ecef;
-  padding-bottom: 16px;
-}
-
-.app-header h1 {
-  margin: 0 0 8px 0;
-  font-size: 28px;
-  color: #1a1a1a;
-}
-
-.app-header p {
-  margin: 0;
-  color: #666;
-  font-size: 15px;
-}
-
-.card {
-  background: #ffffff;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 24px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
-}
-
-.card h2 {
-  margin: 0 0 12px 0;
-  font-size: 20px;
-  color: #333;
-}
-
-.card p {
-  margin: 0;
-  color: #555;
-  line-height: 1.5;
-}
+.app-shell { min-height: 100vh; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+.sidebar { background: #202c38; color: #e6edf5; padding: 24px 12px; position: sticky; top: 0; height: 100vh; }
+.brand { display: flex; align-items: center; gap: 10px; color: white; text-decoration: none; margin-bottom: 40px; }
+.brand svg { color: #ff5145; }.brand strong { font-size: 20px; }.brand small { display: block; margin-top: 6px; font-size: 12px; color: #b9c5d3; }
+nav { display: grid; gap: 9px; }.nav-item { display: flex; align-items: center; gap: 14px; padding: 16px 14px; border-radius: 6px; text-decoration: none; }
+.nav-item.active, .nav-item:hover { background: #294762; }.nav-item.active { box-shadow: inset 3px 0 #4196ef; }
+.page-content { min-width: 0; }.page-content :deep(.catalog-page) { padding: 26px 28px; max-width: 1740px; margin: auto; }
+@media (max-width: 960px) { .app-shell { grid-template-columns: 72px minmax(0, 1fr); }.brand span, .nav-item span { display: none; }.brand, .nav-item { justify-content: center; }.nav-item { padding: 15px 0; } }
+@media (max-width: 600px) { .page-content :deep(.catalog-page) { padding: 18px 12px; } }
 </style>
