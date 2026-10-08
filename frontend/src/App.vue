@@ -3,10 +3,14 @@ import { computed, ref } from 'vue'
 import EventList from './components/EventList.vue'
 import MonitoringMap from './components/MonitoringMap.vue'
 import EventDetail from './components/EventDetail.vue'
-import { events } from './mocks/events'
+import { cameras as mockCameras } from './mocks/cameras'
+import { events as mockEvents } from './mocks/events'
 
-const selectedEventId = ref(events[0]?.id ?? null)
-const selectedEvent = computed(() => events.find(event => event.id === selectedEventId.value) ?? null)
+const cameras = ref(mockCameras)
+const events = ref(mockEvents)
+const selectedEventId = ref(events.value[0]?.id ?? null)
+const selectedEvent = computed(() => events.value.find(event => event.id === selectedEventId.value) ?? null)
+const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedEvent.value?.cameraId) ?? null)
 function selectEvent(id) {
   selectedEventId.value = id
 }
@@ -19,9 +23,9 @@ function selectEvent(id) {
       <p>산불 감지 및 화재 위치 추정 모니터링 시스템</p>
     </header>
     <main class="app-main">
-      <EventList :events="events" :selected-id="selectedEventId" @select="selectEvent" />
-      <MonitoringMap :events="events" :selected-id="selectedEventId" @select="selectEvent" />
-      <EventDetail :event="selectedEvent" />
+      <EventList :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" />
+      <MonitoringMap :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select="selectEvent" />
+      <EventDetail :event="selectedEvent" :camera="selectedCamera" />
     </main>
   </div>
 </template>

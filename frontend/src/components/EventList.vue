@@ -1,7 +1,10 @@
 <script setup>
 import { formatConfidence, formatDetectedAt, formatType } from '../utils/eventFormat'
-defineProps({ events: { type: Array, default: () => [] }, selectedId: { type: [Number, String], default: null } })
+const props = defineProps({ events: { type: Array, default: () => [] }, cameras: { type: Array, default: () => [] }, selectedId: { type: [Number, String], default: null } })
 const emit = defineEmits(['select'])
+function cameraName(cameraId) {
+  return props.cameras.find(camera => camera.id === cameraId)?.name ?? cameraId
+}
 </script>
 
 <template>
@@ -12,7 +15,7 @@ const emit = defineEmits(['select'])
       <li v-for="event in events" :key="event.id">
         <button type="button" class="event-button" :class="{ selected: event.id === selectedId }"
           :aria-pressed="event.id === selectedId" @click="emit('select', event.id)">
-          <strong>{{ event.cameraName }} · {{ formatType(event.type) }}</strong>
+          <strong>{{ cameraName(event.cameraId) }} · {{ formatType(event.type) }}</strong>
           <time :datetime="event.detectedAt">{{ formatDetectedAt(event.detectedAt) }} (KST)</time>
           <span>AI 신뢰도 {{ formatConfidence(event.confidence) }}</span>
         </button>
