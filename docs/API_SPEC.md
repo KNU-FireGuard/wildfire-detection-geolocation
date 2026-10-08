@@ -3,7 +3,7 @@
 이 문서는 **FireGuard AI (CCTV·영상 기반 산불 탐지 및 위치 추정 모니터링 시스템)**의 프론트엔드, AI, 백엔드 간 협업을 위한 API 및 데이터 인터페이스 명세서입니다.
 
 > **[안내]**  
-> AI → Backend 결과 전달 JSON의 기본 형식은 합의되었습니다. Frontend용 JSON과 AI 수신 응답·검증 세부 규칙은 협의 중이며, AI 수신 API는 기본 입력값 검사와 로컬 수신·응답을 구현했으며 나머지 기능별 API는 구현 전입니다.
+> AI → Backend 결과 전달 JSON의 기본 형식은 합의되었습니다. 카메라·영상·이벤트 목록과 이벤트 상세 조회를 구현했습니다. Frontend용 조회 응답은 아래 개발용 규격을 사용합니다. AI 수신 API는 기본 입력값 검사와 로컬 수신·응답을 구현했으며, 인증·탐지 결과 저장·영상 등록은 구현 전입니다.
 >
 > 아래 API 경로는 설계 초안입니다. 합의된 요청 예시와 미정 사항을 구분하여 관리합니다.
 
@@ -28,69 +28,98 @@
 
 | 분류 | HTTP Method | Endpoint | 설명 | 상태 |
 |---|---|---|---|:---:|
-| **CCTV** | `GET` | `/api/cameras` | 전체 CCTV 카메라 목록 조회 (지도 표시용) | 협의 중 |
+| **CCTV** | `GET` | `/api/cameras` | CCTV 카메라 목록 페이지 조회 (지도 표시용) | 구현 |
 | **CCTV** | `GET` | `/api/cameras/:id` | 특정 CCTV 상세 정보 조회 | 협의 중 |
-| **영상** | `GET` | `/api/videos` | 등록된 CCTV 영상 목록 조회 | 협의 중 |
+| **영상** | `GET` | `/api/videos` | 등록된 CCTV 영상 목록 조회 | 구현 |
 | **영상** | `POST` | `/api/videos` | 새 영상 파일 등록/업로드 메타데이터 생성 | 협의 중 |
-| **산불 이벤트** | `GET` | `/api/events` | 산불 감지 이벤트 목록 조회 (대시보드 목록용) | 협의 중 |
-| **산불 이벤트** | `GET` | `/api/events/:id` | 산불 감지 이벤트 상세 정보 조회 | 협의 중 |
+| **산불 이벤트** | `GET` | `/api/events` | 산불 감지 이벤트 목록 조회 (대시보드 목록용) | 구현 |
+| **산불 이벤트** | `GET` | `/api/events/:id` | 산불 감지 이벤트 상세 정보 조회 | 구현 |
 | **AI 연동** | `POST` | `/api/detections` | AI 탐지·위치 추정 결과 수신 | 로컬 수신·응답 구현 |
 
 ---
 
 ## 3. Frontend 제공 API (상세)
 
+### 공통 조회 규칙
+
+- 목록은 `{ "items": [], "limit": 50, "offset": 0 }` 형태이며, 빈 DB는 빈 배열을 반환합니다.
+- 모든 목록 API에 `limit`(기본 50, 1~100)과 `offset`(기본 0, 0~2147483647)을 사용할 수 있습니다.
+- limit·offset의 잘못된 값이나 중복 전달은 400입니다. 추가 쿼리 파라미터는 무시하며 필터는 아직 지원하지 않습니다.
+- 날짜는 ISO 8601 UTC 문자열(`Z`)로 반환합니다. 화면의 한국 시각 변환은 Frontend가 담당합니다.
+- 좌표·camera_id·ended_at·error_range_m은 DB 값에 따라 null일 수 있습니다.
+- 아래 값은 응답 형식 예시이며 실제 등록 데이터가 아닙니다. 현재 DB의 INTEGER ID 범위를 사용합니다.
+- DB 오류는 공통 오류 처리기를 통해 500과 일반 오류 메시지를 반환합니다.
+
 ### 3.1. CCTV 카메라 목록 조회
+
 - **Endpoint:** `GET /api/cameras`
-- **설명:** 지도 화면에 설치된 CCTV 아이콘을 띄우기 위해 카메라 정보 목록을 반환합니다.
-- **Request Parameters:** 없음
-- **Response JSON:**
-  ```text
-  [협의 및 확정 예정 - 논의 후 작성]
-  ```
+- **정렬:** ID 오름차순
 
----
+```json
+{
+  "items": [{ "id": 1, "name": "개발용 카메라", "latitude": 35.123456, "longitude": 128.123456, "created_at": "2026-10-01T09:00:00.000Z" }],
+  "limit": 50,
+  "offset": 0
+}
+```
 
-### 3.2. CCTV 상세 정보 조회
-- **Endpoint:** `GET /api/cameras/:id`
-- **설명:** 특정 CCTV의 세부 설치 정보(화각, 방위각, 고도 등)를 반환합니다.
-- **Request Parameters:** Path Parameter `id` (카메라 식별자)
-- **Response JSON:**
-  ```text
-  [협의 및 확정 예정 - 논의 후 작성]
-  ```
+### 3.2. CCTV 상세 정보 조회 (미구현)
 
----
+- **Endpoint (계획):** `GET /api/cameras/:id`
+- 응답 형식은 협의 예정이며 현재 요청하면 404를 반환합니다.
 
 ### 3.3. 영상 목록 조회
-- **Endpoint:** `GET /api/videos`
-- **설명:** 모니터링 분석에 사용되는 영상 메타데이터 목록을 반환합니다.
-- **Response JSON:**
-  ```text
-  [협의 및 확정 예정 - 논의 후 작성]
-  ```
 
----
+- **Endpoint:** `GET /api/videos`
+- **정렬:** ID 내림차순
+- DB에 등록된 메타데이터를 조회합니다. 로컬 영상 파일은 자동 등록되지 않습니다.
+- 서버 내부 `file_path`는 반환하지 않으며 영상 재생 URL은 아직 제공하지 않습니다.
+
+```json
+{
+  "items": [{ "id": 3, "camera_id": 1, "original_filename": "camera01_sample.mp4", "created_at": "2026-10-01T09:00:00.000Z" }],
+  "limit": 50,
+  "offset": 0
+}
+```
 
 ### 3.4. 산불 감지 이벤트 목록 조회
-- **Endpoint:** `GET /api/events`
-- **설명:** 대시보드 메인 화면의 "최근 산불 발생 내역" 및 지도 위에 화재 발생 지점을 표시하기 위한 이벤트 목록을 반환합니다.
-- **Query Parameters:** (예: `status`, `limit` 등 검토 예정)
-- **Response JSON:**
-  ```text
-  [협의 및 확정 예정 - 논의 후 작성]
-  ```
 
----
+- **Endpoint:** `GET /api/events`
+- **예시:** `GET /api/events?limit=20&offset=0`
+- **정렬:** started_at 내림차순, 같은 시각이면 ID 내림차순
+- `camera_id`는 이벤트와 연결된 영상에서 가져옵니다.
+
+```json
+{
+  "items": [{
+    "id": 1,
+    "video_id": 3,
+    "camera_id": 1,
+    "class": "fire",
+    "started_at": "2026-10-01T09:10:00.000Z",
+    "ended_at": null,
+    "max_confidence": 0.94,
+    "estimated_latitude": 35.123456,
+    "estimated_longitude": 128.123456,
+    "error_range_m": 50,
+    "created_at": "2026-10-01T09:10:00.000Z",
+    "updated_at": "2026-10-01T09:10:00.000Z"
+  }],
+  "limit": 50,
+  "offset": 0
+}
+```
 
 ### 3.5. 산불 감지 이벤트 상세 조회
+
 - **Endpoint:** `GET /api/events/:id`
-- **설명:** 특정 이벤트 클릭 시 팝업에 표시할 상세 정보(카메라 정보, 영상 정보, 추정 위·경도, 오차 범위 등)를 반환합니다.
-- **Request Parameters:** Path Parameter `id` (이벤트 고유 번호)
-- **Response JSON:**
-  ```text
-  [협의 및 확정 예정 - 논의 후 작성]
-  ```
+- **응답:** `{ "item": { ... } }`, item의 필드는 위 목록의 이벤트와 같습니다.
+- ID가 1~2147483647의 정수가 아니면 400, 해당 이벤트가 없으면 404를 반환합니다.
+
+```json
+{ "error": "탐지 이벤트가 없습니다." }
+```
 
 ---
 
