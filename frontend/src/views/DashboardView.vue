@@ -4,7 +4,7 @@ import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
 import EventDetail from '../components/EventDetail.vue'
-import { fetchCameras, fetchEvents } from '../api/catalog'
+import { fetchCameras, fetchEvents, fetchVideos } from '../api/catalog'
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
 
@@ -12,7 +12,9 @@ import { events as mockEvents } from '../mocks/events'
 const dataSource = import.meta.env.VITE_DATA_SOURCE ?? 'api'
 const cameras = ref([])
 const events = ref([])
+const videos = ref([])
 const selectedEventId = ref(null)
+const selectedCameraId = ref(null)
 const isLoading = ref(true)
 const loadError = ref('')
 const now = ref(new Date())
@@ -20,20 +22,30 @@ let requestController
 let clockInterval
 const clock = computed(() => now.value.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }))
 const selectedEvent = computed(() => events.value.find(event => event.id === selectedEventId.value) ?? null)
-const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedEvent.value?.cameraId) ?? null)
+const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedCameraId.value)
+  ?? cameras.value.find(camera => camera.id === selectedEvent.value?.cameraId) ?? null)
 const onlineCount = computed(() => cameras.value.some(camera => camera.status != null)
   ? cameras.value.filter(camera => camera.status === 'ONLINE').length : '—')
 const locatedCount = computed(() => events.value.filter(event => event.estimatedLocation != null).length)
 const pendingCount = computed(() => events.value.some(event => event.status != null)
   ? events.value.filter(event => event.status === 'UNCONFIRMED').length : '—')
 function selectEvent(id) {
+  selectedCameraId.value = null
   selectedEventId.value = id
 }
-function applyData(nextCameras, nextEvents) {
+function selectCamera(id) {
+  selectedCameraId.value = id
+  const latest = events.value.filter(event => event.cameraId === id)
+    .reduce((current, event) => !current || Date.parse(event.detectedAt) > Date.parse(current.detectedAt) ? event : current, null)
+  selectedEventId.value = latest?.id ?? null
+}
+function applyData(nextCameras, nextEvents, nextVideos = []) {
   cameras.value = nextCameras
   events.value = nextEvents
+  videos.value = nextVideos
   selectedEventId.value = nextEvents.some(event => event.id === selectedEventId.value)
     ? selectedEventId.value : nextEvents[0]?.id ?? null
+  if (!nextCameras.some(camera => camera.id === selectedCameraId.value)) selectedCameraId.value = null
 }
 async function loadData() {
   isLoading.value = true
@@ -52,11 +64,12 @@ async function loadData() {
   requestController = controller
   const timeout = setTimeout(() => controller.abort(), 15000)
   try {
-    const [nextCameras, nextEvents] = await Promise.all([
+    const [nextCameras, nextEvents, nextVideos] = await Promise.all([
       fetchCameras({ signal: controller.signal }),
       fetchEvents({ signal: controller.signal }),
+      fetchVideos({ signal: controller.signal }),
     ])
-    applyData(nextCameras, nextEvents)
+    applyData(nextCameras, nextEvents, nextVideos)
   } catch (error) {
     loadError.value = controller.signal.aborted
       ? '조회 시간이 초과되었습니다. Backend 서버 연결을 확인하고 다시 시도해주세요.'
@@ -64,7 +77,9 @@ async function loadData() {
     controller.abort()
     cameras.value = []
     events.value = []
+    videos.value = []
     selectedEventId.value = null
+    selectedCameraId.value = null
   } finally {
     clearTimeout(timeout)
     isLoading.value = false
@@ -100,8 +115,8 @@ onBeforeUnmount(() => {
           <article class="summary-card"><span class="summary-icon green"><DashboardIcon name="clock" :size="29" /></span><div><p>확인 대기 이벤트</p><strong>{{ pendingCount }}<small>건</small></strong></div></article>
         </section>
         <section class="dashboard-grid" aria-label="지도 및 탐지 현황">
-          <MonitoringMap class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select="selectEvent" />
-          <EventDetail class="detail-panel" :event="selectedEvent" :camera="selectedCamera" />
+          <MonitoringMap class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select-camera="selectCamera" />
+          <EventDetail class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" />
           <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" />
         </section>
       </template>

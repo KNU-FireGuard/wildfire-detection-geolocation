@@ -112,9 +112,22 @@ npm ci
 npm run dev
 ```
 
-기본 주소는 `http://localhost:5173`입니다. 포트가 사용 중이면 Vite가 출력한 주소를 확인합니다.
+기본 주소는 `http://127.0.0.1:5173`입니다. 포트가 사용 중이면 Vite가 출력한 주소를 확인합니다.
 `/api` 요청은 Vite 프록시를 통해 `http://127.0.0.1:3000`으로 전달됩니다.
 Backend의 `PORT`를 변경하면 `frontend/vite.config.js`의 대상 포트도 맞춥니다.
+
+### 네이버 지도 설정
+
+대시보드 지도는 네이버 지도 JavaScript API를 사용합니다. 네이버 클라우드 콘솔에서 Maps 애플리케이션을 만들고 **Dynamic Map**을 활성화한 뒤 Client ID를 발급받습니다. Web 서비스 URL에는 `http://127.0.0.1:5173`을 등록하세요. `localhost`로 접속한다면 그 주소도 등록해야 합니다.
+
+`frontend/.env.local`에 Client ID를 설정합니다. 파일이 없으면 `frontend/.env.example`을 복사하고 기존 `VITE_DATA_SOURCE` 값은 유지합니다.
+
+```dotenv
+VITE_DATA_SOURCE=api
+VITE_NAVER_MAP_CLIENT_ID=발급받은_Client_ID
+```
+
+Client ID는 브라우저에서 사용되므로 README나 소스에 직접 적지 말고, Client Secret은 프론트엔드 환경변수에 넣지 않습니다. 설정 후 Frontend 개발 서버를 재시작합니다. Client ID가 없거나 인증이 실패하면 지도 대신 안내 메시지가 표시됩니다. 기본 지도는 위성·지명(HYBRID)이며 일반·위성 지도로 전환할 수 있습니다. 실제 타일 표시는 유효한 Client ID로 브라우저에서 확인해야 합니다. [Client ID 발급 안내](https://navermaps.github.io/maps.js.ncp/docs/tutorial-1-Getting-Client-ID.html) · [지도 시작하기](https://navermaps.github.io/maps.js.ncp/docs/tutorial-2-Getting-Started.html)
 
 배포용 파일을 만들 때는 `frontend/`에서 실행합니다.
 
@@ -156,6 +169,8 @@ DB에 데이터가 없으면 목록은 빈 배열, 이벤트 상세는 404를 �
 상세 응답 및 입력 범위는 [API 명세서](API_SPEC.md)를 참고합니다.
 `data/videos/`의 파일은 Git에서 제외하며, 파일 배치만으로 DB에 등록되지 않습니다.
 
+영상 파일과 DB 등록 데이터가 준비되어 있으면 Frontend를 실행하고 `http://127.0.0.1:5173/` 대시보드 또는 `http://127.0.0.1:5173/videos`에 접속합니다. 대시보드는 연결된 이벤트의 영상이 있으면 그 영상을, 그렇지 않으면 첫 등록 영상을 재생합니다. 영상 목록에서 **재생**을 눌러 다른 영상을 선택할 수도 있습니다. 서버는 `GET /api/videos/:id/stream`으로 파일을 전달합니다. Range 응답을 직접 확인하려면 `curl -i -H 'Range: bytes=0-1023' http://127.0.0.1:3000/api/videos/1/stream`을 실행해 `206 Partial Content`를 확인합니다.
+
 Backend 디렉터리에서 `npm test`로 조회 API 테스트를 실행합니다. 이 테스트는 DB 응답을 대체해 HTTP 라우팅·응답·입력 검사·오류 처리를 확인합니다.
 
 실제 PostgreSQL 연동 검증은 DB를 실행하고 루트 `.env`를 설정한 뒤 Backend 디렉터리에서 실행합니다(macOS/Linux).
@@ -165,3 +180,13 @@ npm run test:integration
 ```
 
 통합 테스트는 `sql/init.sql`을 기반으로 세션 전용 임시 테이블을 만들고 샘플 데이터를 넣어 정렬·페이지 처리·null 값·이벤트 상세 응답을 확인합니다. 기존 테이블과 데이터는 변경하지 않으며 테스트 종료 시 롤백합니다. 일반 `npm test`에서는 이 테스트를 건너뜁니다.
+
+## 개발용 샘플 카메라·영상 등록
+
+프로젝트 루트에서 아래 SQL을 실행합니다. 카메라 ID와 영상 ID는 DB가 생성하며, 같은 카메라 이름이나 파일 경로가 이미 있으면 재등록하지 않습니다.
+
+```bash
+docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sql/seed.dev.sql
+```
+
+영상 파일은 Git에 포함되지 않습니다. 테스트에 필요한 `경북의성.mp4`, `청성.mp4`, `기도4교.mp4`, `단촌4터널.mp4`를 조장에게 받아 `data/videos/`에 넣은 뒤 seed SQL을 실행합니다. SQL은 영상 파일을 DB에 복사하지 않고 카메라 좌표와 영상 메타데이터·상대 경로를 등록합니다. 조회 결과는 `GET /api/cameras`와 `GET /api/videos`에서 확인할 수 있습니다. 파일이 없거나 경로가 DB 값과 다르면 스트리밍 API가 404를 반환합니다. ID는 DB가 생성하므로 팀원별 로컬 DB에서 값이 다를 수 있습니다.

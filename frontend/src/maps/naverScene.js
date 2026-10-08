@@ -20,13 +20,12 @@ export function createNaverScene(maps, map, onCameraSelect) {
     clear()
     for (const camera of cameras.filter(hasCoordinates)) {
       const selected = camera.id === selectedCamera?.id
-      const label = escapeHtml(camera.name ?? `카메라 ${camera.id}`)
       const marker = new maps.Marker({
         map, position: position(camera), title: camera.name,
         zIndex: selected ? 20 : 10,
         icon: {
-          content: `<div style="border:2px solid white;border-radius:8px;padding:6px 9px;background:${selected ? '#195baf' : '#337fd4'};color:white;font:12px sans-serif;white-space:nowrap;box-shadow:0 2px 6px #0006">CCTV · ${label}</div>`,
-          anchor: new maps.Point(16, 16),
+          content: `<div style="display:grid;place-items:center;width:38px;height:38px;border:2px solid white;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);background:${selected ? '#195baf' : '#337fd4'};box-shadow:0 2px 6px #0006"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(45deg)"><path d="M4 8.5h10a2 2 0 0 1 2 2v6H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z"/><path d="m16 11 6-3v9l-6-3"/><path d="M6 6h5"/></svg></div>`,
+          anchor: new maps.Point(19, 38),
         },
       })
       overlays.push(marker)

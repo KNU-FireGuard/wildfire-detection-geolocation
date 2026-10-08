@@ -1,9 +1,16 @@
 ﻿<script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import DashboardIcon from './DashboardIcon.vue'
 import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
-defineProps({ event: { type: Object, default: null }, camera: { type: Object, default: null } })
+const props = defineProps({
+  event: { type: Object, default: null },
+  camera: { type: Object, default: null },
+  videos: { type: Array, default: () => [] },
+})
 const showDetails = ref(false)
+const selectedVideo = computed(() => props.videos.find(video => video.id === props.event?.videoId)
+  ?? props.videos.find(video => video.camera_id === props.camera?.id)
+  ?? (props.camera ? null : props.videos[0] ?? null))
 </script>
 
 <template>
@@ -12,18 +19,12 @@ const showDetails = ref(false)
       <h2 id="detail-title">{{ camera?.name ?? 'CCTV' }} <span class="title-caption">영상</span></h2>
       <span class="camera-status" :class="{ online: camera?.status === 'ONLINE' }"><i />{{ camera?.status === 'ONLINE' ? '온라인' : camera?.status === 'OFFLINE' ? '오프라인' : '상태 정보 없음' }}</span>
     </div>
-    <div class="video-placeholder" aria-label="CCTV 영상 연결 예정 영역">
-      <svg class="mountain-scene" viewBox="0 0 600 360" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-        <defs><linearGradient id="video-sky" x2="0" y2="1"><stop stop-color="#5a8ca9" /><stop offset="1" stop-color="#c5d3ce" /></linearGradient></defs>
-        <rect width="600" height="360" fill="url(#video-sky)" />
-        <path d="M0 235 80 188 125 210 215 149 270 178 340 127 410 161 470 135 600 193V360H0Z" fill="#708c8d" />
-        <path d="M0 255 90 216 160 231 240 181 310 205 365 192 445 235 520 211 600 255V360H0Z" fill="#3f6764" />
-        <path d="M0 292 72 254 180 276 285 239 360 257 442 231 530 272 600 253V360H0Z" fill="#274f49" />
-        <path d="M0 336 110 303 195 318 280 285 380 327 485 296 600 329V360H0Z" fill="#193b37" />
-      </svg>
-      <span class="preview-label">CCTV PREVIEW</span>
-      <div class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>CCTV 영상 연결 예정</strong><p>{{ camera?.locationName ?? '선택한 카메라의 영상이 이곳에 표시됩니다.' }}</p></div>
-      <span class="preview-footnote">영상 미연결 · 예시 배경</span>
+    <div class="video-placeholder" aria-label="CCTV 영상">
+      <video v-if="selectedVideo" :key="selectedVideo.id" controls preload="metadata" :src="`/api/videos/${selectedVideo.id}/stream`">
+        이 브라우저는 영상 재생을 지원하지 않습니다.
+      </video>
+      <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong><p>영상 목록에 파일을 등록하고 DB에 메타데이터를 추가하세요.</p></div>
+      <span v-if="selectedVideo" class="preview-footnote">{{ selectedVideo.original_filename }}</span>
     </div>
     <div class="event-info" aria-live="polite">
       <div class="info-heading"><h3>탐지 이벤트 정보</h3><span v-if="event" class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span></div>
@@ -63,10 +64,8 @@ const showDetails = ref(false)
 <style scoped>
 .video-heading { margin-bottom: 15px; }.title-caption { font-size: 14px; font-weight: 400; color: #7b8a9e; margin-left: 5px; }
 .camera-status { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #8090a5; white-space: nowrap; }.camera-status i { width: 7px; height: 7px; background: #a0aaba; border-radius: 50%; }.camera-status.online i { background: #1eb96f; }
-.video-placeholder { position: relative; border-radius: 6px; height: 268px; overflow: hidden; background: #254d50; color: white; }
-.mountain-scene { position: absolute; width: 100%; height: 100%; opacity: .78; }.video-placeholder::after { content: ''; position: absolute; inset: 0; background: linear-gradient(#102c3315, #102c3333 40%, #102c3388); pointer-events: none; }
-.preview-label { position: absolute; z-index: 1; top: 15px; left: 15px; letter-spacing: 2px; font-size: 9px; color: #e8f0f3b3; }
-.video-message { position: absolute; z-index: 1; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 30px; text-align: center; }.video-icon { display: grid; place-items: center; width: 63px; height: 63px; border: 1px solid #ffffff44; background: #d6edf11a; border-radius: 50%; margin-bottom: 15px; }.video-message strong { font-size: 16px; font-weight: 500; }.video-message p { font-size: 11px; color: #d0dfde; margin: 9px 0 0; }.preview-footnote { position: absolute; left: 15px; bottom: 14px; z-index: 1; font-size: 10px; color: #c6d5d7; }
+.video-placeholder { position: relative; border-radius: 6px; min-height: 220px; overflow: hidden; background: #111; color: white; }
+.video-placeholder video { display: block; width: 100%; max-height: 420px; background: #111; }.video-message { min-height: 220px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 30px; text-align: center; }.video-icon { display: grid; place-items: center; width: 63px; height: 63px; border: 1px solid #ffffff44; background: #d6edf11a; border-radius: 50%; margin-bottom: 15px; }.video-message strong { font-size: 16px; font-weight: 500; }.video-message p { font-size: 11px; color: #d0dfde; margin: 9px 0 0; }.preview-footnote { position: absolute; left: 8px; bottom: 8px; z-index: 1; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 3px; padding: 4px 6px; font-size: 10px; color: white; background: #101820b3; }
 .event-info { margin-top: 22px; }.info-heading { background: #f4f7fb; padding: 11px 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; border-radius: 4px; }.info-heading h3 { margin: 0; font-size: 16px; letter-spacing: -.5px; }
 .summary-info { margin: 0 0 15px; display: grid; grid-template-columns: 90px minmax(0, 1fr); font-size: 12px; }
 .summary-info dt, .summary-info dd { margin: 0; padding: 13px 8px; border-bottom: 1px solid #edf1f6; overflow-wrap: anywhere; }.summary-info dt { color: #72829a; }.summary-info dd { color: #35475f; }.summary-info time { font-size: 11px; }.summary-info small { font-size: 9px; color: #98a4b5; }.confidence-value { font-weight: 700; }
