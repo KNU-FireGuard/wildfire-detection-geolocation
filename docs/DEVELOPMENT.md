@@ -140,3 +140,28 @@ Route는 요청 경로와 함수를 연결하고, Controller는 JSON을 검사�
 상세 검증 규칙은 [API 명세서](API_SPEC.md#4-ai--backend-결과-수신-api)에서 관리합니다.
 정상 예시는 200과 수신 데이터가 반환되어야 합니다. 같은 예시에서 `detection.confidence`를 `1.5`로 바꾸거나 `camera_id`를 삭제하면 400과 해당 필드의 오류 이유가 반환되어야 합니다.
 브라우저 주소창 접속은 GET 요청이므로 이 POST API의 확인 방법이 아닙니다.
+
+## 조회 API 확인
+
+Backend 실행 후 브라우저나 curl로 확인할 수 있습니다.
+
+```bash
+curl 'http://127.0.0.1:3000/api/cameras'
+curl 'http://127.0.0.1:3000/api/videos'
+curl 'http://127.0.0.1:3000/api/events?limit=20&offset=0'
+curl 'http://127.0.0.1:3000/api/events/1'
+```
+
+DB에 데이터가 없으면 목록은 빈 배열, 이벤트 상세는 404를 반환합니다.
+상세 응답 및 입력 범위는 [API 명세서](API_SPEC.md)를 참고합니다.
+`data/videos/`의 파일은 Git에서 제외하며, 파일 배치만으로 DB에 등록되지 않습니다.
+
+Backend 디렉터리에서 `npm test`로 조회 API 테스트를 실행합니다. 이 테스트는 DB 응답을 대체해 HTTP 라우팅·응답·입력 검사·오류 처리를 확인합니다.
+
+실제 PostgreSQL 연동 검증은 DB를 실행하고 루트 `.env`를 설정한 뒤 Backend 디렉터리에서 실행합니다(macOS/Linux).
+
+```bash
+npm run test:integration
+```
+
+통합 테스트는 `sql/init.sql`을 기반으로 세션 전용 임시 테이블을 만들고 샘플 데이터를 넣어 정렬·페이지 처리·null 값·이벤트 상세 응답을 확인합니다. 기존 테이블과 데이터는 변경하지 않으며 테스트 종료 시 롤백합니다. 일반 `npm test`에서는 이 테스트를 건너뜁니다.
