@@ -1,5 +1,5 @@
 -- 새 DB의 초기 스키마와 기존 DB의 누락된 테이블을 생성합니다.
--- 이미 존재하는 테이블의 컬럼이나 제약조건은 변경하지 않습니다.
+-- 기존 테이블은 유지하되 admins의 불필요한 시각 컬럼은 제거합니다.
 -- 모든 작업을 하나의 트랜잭션으로 처리합니다.
 BEGIN;
 
@@ -44,10 +44,11 @@ CREATE TABLE IF NOT EXISTS detection_events (
 CREATE TABLE IF NOT EXISTS admins (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     username TEXT NOT NULL UNIQUE CHECK (btrim(username) <> ''),
-    password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> ''),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> '')
 );
+
+ALTER TABLE admins DROP COLUMN IF EXISTS created_at;
+ALTER TABLE admins DROP COLUMN IF EXISTS updated_at;
 
 CREATE TABLE IF NOT EXISTS sms_recipients (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

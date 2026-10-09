@@ -4,6 +4,8 @@
 
 - 변경할 영역의 코드와 관련 문서 확인
 - API 변경 시 [API 명세](docs/API_SPEC.md), DB 변경 시 [ERD·DB 명세](docs/DATABASE.md)와 SQL을 함께 갱신
+- README에는 실행에 필요한 짧은 절차만 기록하고 설계 설명은 `docs/`에 작성
+- 문서 설명은 핵심을 유지하며 개조식으로 간단히 작성하고 문장 끝 마침표 생략
 - 팀 협업 규칙은 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md), PR 항목은 [.github/pull_request_template.md](.github/pull_request_template.md) 확인
 
 ## 프로젝트 기준
@@ -17,6 +19,7 @@
 - 현재 `POST /api/detections`는 이전 개발용 JSON을 검증·반환할 뿐 DB 저장·SMS 발송을 하지 않음
 - 목표 AI JSON을 구현할 때 기존 `video_id`·`timestamp` 필수 검사와 위치 객체 필수 검사를 함께 변경
 - 실제 영상·`.env`·`frontend/.env.local`은 Git에서 제외
+- 초기 관리자는 루트 `.env`와 `backend/`의 `npm run create-admin`으로 생성, 비밀번호 원문을 SQL이나 Git에 저장하지 않음
 - 비밀키를 Frontend 소스나 `VITE_` 환경변수에 넣지 않음
 - Frontend의 API 데이터와 개발용 mock 데이터를 구분하고 API 실패를 mock 성공으로 대체하지 않음
 
