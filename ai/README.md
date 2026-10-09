@@ -47,3 +47,7 @@
 - 연동 시 Backend가 실행 ID를 만들고 `run_id`, `camera_id`, 영상 경로와 전송 주소를 AI 프로세스 인자로 전달
 - AI는 실행 ID를 직접 생성하거나 코드에 고정하지 않음
 - 영상·JSON 요청 형식과 인증 헤더는 [API 명세](../docs/API_SPEC.md) 참고
+
+## 관련 연구
+
+- [산불 위치 추정 알고리즘 선행 연구 및 오차 분석 (Notion)](https://app.notion.com/p/3ea07da378308006b5c6ef31d8a83fd3?source=copy_link)
