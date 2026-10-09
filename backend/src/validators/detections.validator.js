@@ -25,16 +25,17 @@ function validateDetection(body) {
   };
 
   if (!object(body, 'body')) return errors;
-  for (const field of ['camera_id', 'video_id']) {
-    if (!Number.isSafeInteger(body[field]) || body[field] <= 0) {
-      add(field, '안전한 정수 범위의 양의 정수여야 합니다.');
-    }
+  if (!Number.isSafeInteger(body.run_id) || body.run_id <= 0) {
+    add('run_id', '안전한 정수 범위의 양의 정수여야 합니다.');
   }
-  // 시간대와 촬영/분석 시각 기준은 협의 전이므로 문자열 여부만 검사합니다.
-  text(body.timestamp, 'timestamp');
+  if (!Number.isSafeInteger(body.camera_id) || body.camera_id <= 0 || body.camera_id > 2147483647) {
+    add('camera_id', '1~2147483647의 정수여야 합니다.');
+  }
 
   if (object(body.detection, 'detection')) {
-    text(body.detection.class, 'detection.class');
+    if (!['fire', 'smoke'].includes(body.detection.class)) {
+      add('detection.class', 'fire 또는 smoke여야 합니다.');
+    }
     number(body.detection.confidence, 'detection.confidence', 0, 1);
     if (object(body.detection.bbox, 'detection.bbox')) {
       for (const field of ['x1', 'y1', 'x2', 'y2']) {
@@ -43,11 +44,14 @@ function validateDetection(body) {
     }
   }
 
-  // 위치 추정 실패 표현은 미정입니다. 현재는 합의된 좌표 객체만 지원합니다.
-  if (object(body.location_estimation, 'location_estimation')) {
-    number(body.location_estimation.latitude, 'location_estimation.latitude', -90, 90);
-    number(body.location_estimation.longitude, 'location_estimation.longitude', -180, 180);
-    number(body.location_estimation.error_range_m, 'location_estimation.error_range_m', 0);
+  if (body.location_estimation !== null) {
+    if (object(body.location_estimation, 'location_estimation')) {
+      number(body.location_estimation.latitude, 'location_estimation.latitude', -90, 90);
+      number(body.location_estimation.longitude, 'location_estimation.longitude', -180, 180);
+      if (body.location_estimation.error_range_m !== null) {
+        number(body.location_estimation.error_range_m, 'location_estimation.error_range_m', 0);
+      }
+    }
   }
   return errors;
 }

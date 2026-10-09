@@ -34,19 +34,21 @@
 | `yolo26n_fire_50/weights/best.pt` | 성능 기준 최적 가중치, 추론에 사용 |
 | `yolo26n_fire_50/weights/last.pt` | 마지막 epoch 가중치, 학습 재개용 |
 | `inference/test.py` | 고정된 `ai/test.mp4`를 추론하는 독립 테스트 코드, Backend 연동용 CLI 아님 |
+| `inference/backend_connect.py` | Backend가 실행하는 CLI, MJPEG 영상과 탐지 JSON 전송 |
 | `args.yaml` | 학습 설정 |
 | `results.csv`, `results.png` | 학습 지표와 그래프 |
 | `BoxF1_curve.png`, `BoxP_curve.png`, `BoxPR_curve.png`, `BoxR_curve.png` | 성능 곡선 |
 | `confusion_matrix*.png` | 혼동 행렬 |
 | `labels.jpg`, `train_batch*.jpg`, `val_batch*_labels.jpg`, `val_batch*_pred.jpg` | 데이터·예측 시각화 |
 
-## 시스템 연동 계획
+## Backend 연동
 
-- 현재 `inference/test.py`는 `ai/test.mp4`를 사용하는 독립 테스트 코드
-- Backend 연동용 추론 코드는 아직 구현되지 않음
-- 연동 시 Backend가 실행 ID를 만들고 `run_id`, `camera_id`, 영상 경로와 전송 주소를 AI 프로세스 인자로 전달
-- AI는 실행 ID를 직접 생성하거나 코드에 고정하지 않음
-- 영상·JSON 요청 형식과 인증 헤더는 [API 명세](../docs/API_SPEC.md) 참고
+- Backend는 `inference/backend_connect.py`를 실행해 `run_id`, `camera_id`, 원본 영상 경로, 영상 업로드 URL, 탐지 결과 URL 전달
+- AI 콜백 인증은 Backend와 같은 `AI_CALLBACK_TOKEN` 환경변수 사용
+- Python 패키지: `ultralytics`, `opencv-python`, `requests`
+- 설치 명령은 프로젝트 [README](../README.md) 참고
+- 영상·JSON 형식과 인증 헤더는 [API 명세](../docs/API_SPEC.md) 참고
+- 추론 프레임은 원본 영상 FPS에 맞춰 대기하지 않고 모델 처리 속도로 전송
 
 ## 관련 연구
 

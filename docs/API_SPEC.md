@@ -125,6 +125,7 @@
 - 탐지 결과 주소: `http://127.0.0.1:3000/api/detections`
 - Header: `Content-Type: application/json`
 - Header: `X-AI-Token: <AI_CALLBACK_TOKEN>`
+- `AI_CALLBACK_TOKEN`은 Backend와 AI가 동일하게 설정
 - 탐지 1건당 요청 1회
 - 성공 `202` `{ "accepted": true }`
 
