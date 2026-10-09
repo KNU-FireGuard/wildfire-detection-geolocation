@@ -109,3 +109,7 @@ npm run dev
 
 - Backend와 Frontend 터미널에서 `Ctrl + C`
 - 프로젝트 루트에서 `docker compose down`, DB 데이터는 유지
+
+## 문서
+
+- [API 명세](docs/API_SPEC.md) · [DB와 ERD](docs/DATABASE.md) · [시스템 아키텍처](docs/System_architecture.md) · [ADR](docs/ADR.md)

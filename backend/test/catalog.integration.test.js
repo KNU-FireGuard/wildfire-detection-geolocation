@@ -26,8 +26,8 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     assert.match(adminRows.rows[0].password_hash, /^scrypt\$/);
 
     await client.query(`
-      INSERT INTO cameras (name, latitude, longitude)
-      VALUES ('test camera', 35.1, 128.1), ('unknown location', NULL, NULL);
+      INSERT INTO cameras (name, source_type, latitude, longitude)
+      VALUES ('test camera', 'test', 35.1, 128.1), ('live camera', 'live', NULL, NULL);
       INSERT INTO videos (camera_id, original_filename, file_path)
       VALUES (1, 'known.mp4', 'data/videos/known.mp4'),
              (NULL, 'unknown.mp4', 'data/videos/unknown.mp4');
@@ -59,6 +59,7 @@ test('PostgreSQL: catalog queries and initial admin insert', {
 
     const cameras = await get('/api/cameras');
     assert.deepEqual(cameras.items.map(row => row.id), [1, 2]);
+    assert.deepEqual(cameras.items.map(row => row.source_type), ['test', 'live']);
     assert.equal(cameras.items[1].latitude, null);
     const videos = await get('/api/videos');
     assert.deepEqual(videos.items.map(row => row.id), [2, 1]);
@@ -80,6 +81,16 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     const detail = await get('/api/events/2');
     assert.deepEqual(detail.item, events.items[1]);
     await get('/api/events/999', 404);
+
+    await client.query("INSERT INTO cameras (name, source_type) VALUES ('경북의성', 'live')");
+    const seed = readFileSync(path.join(__dirname, '../../sql/seed.dev.sql'), 'utf8')
+      .replace(/^--[^\n]*\n(?:--[^\n]*\n)*BEGIN;\s*/, '')
+      .replace(/COMMIT;\s*$/, '');
+    await client.query(seed);
+    const seeded = await client.query("SELECT name, source_type FROM cameras WHERE name = '경북의성' ORDER BY id");
+    assert.deepEqual(seeded.rows.map(row => row.source_type), ['live', 'test']);
+    const demoCameras = await client.query("SELECT COUNT(*)::int AS count FROM cameras WHERE source_type = 'test' AND name IN ('경북의성', '청성', '기도4교', '단촌4터널')");
+    assert.equal(demoCameras.rows[0].count, 4);
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     if (client) {

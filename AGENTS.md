@@ -14,7 +14,9 @@
 - `frontend/`: Vue 화면
 - `sql/`: PostgreSQL 스키마와 개발용 데이터
 - `ai/`: 현재 YOLO 학습 결과와 향후 추론 코드
-- 목표 데모: Test 버튼 한 번에 영상 4개 동시 재생·분석, 사용자 재생 조작과 실시간 바운딩박스 표시 제외
+- 목표 데모: `test` 카메라별 Test 버튼으로 해당 영상 하나를 YOLO 분석하고 MJPEG 영상·탐지 JSON 전달
+- 카메라별 실행 API와 AI의 MJPEG 영상·탐지 JSON 전송 계약은 [API 명세](docs/API_SPEC.md)를 따름
+- Backend가 실행 ID를 만들고 `run_id`, `camera_id`, 영상 경로와 전송 주소를 AI 프로세스 인자로 전달, AI 코드에 실행 ID를 하드코딩하지 않음
 - 현재 구현과 목표 설계는 [시스템 아키텍처](docs/System_architecture.md)와 [API 명세](docs/API_SPEC.md)의 상태 구분을 따름
 - 현재 `POST /api/detections`는 이전 개발용 JSON을 검증·반환할 뿐 DB 저장·SMS 발송을 하지 않음
 - 목표 AI JSON을 구현할 때 기존 `video_id`·`timestamp` 필수 검사와 위치 객체 필수 검사를 함께 변경

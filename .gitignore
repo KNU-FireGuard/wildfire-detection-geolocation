@@ -5,6 +5,9 @@ frontend/.env.*.local
 
 # 실제 데이터 제외
 data/*
+!data/videos/
+data/videos/*
+!data/videos/.gitkeep
 
 # npm으로 설치한 라이브러리 폴더 및 빌드 결과물은 Git에서 제외
 # package.json과 package-lock.json은 공유하고, 각자 npm ci로 설치

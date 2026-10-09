@@ -33,6 +33,7 @@
 | --- | --- |
 | `yolo26n_fire_50/weights/best.pt` | 성능 기준 최적 가중치, 추론에 사용 |
 | `yolo26n_fire_50/weights/last.pt` | 마지막 epoch 가중치, 학습 재개용 |
+| `inference/test.py` | 고정된 `ai/test.mp4`를 추론하는 독립 테스트 코드, Backend 연동용 CLI 아님 |
 | `args.yaml` | 학습 설정 |
 | `results.csv`, `results.png` | 학습 지표와 그래프 |
 | `BoxF1_curve.png`, `BoxP_curve.png`, `BoxPR_curve.png`, `BoxR_curve.png` | 성능 곡선 |
@@ -41,11 +42,8 @@
 
 ## 시스템 연동 계획
 
-- 현재는 학습 결과와 가중치만 있으며 영상 추론 실행 코드 없음
-- Backend가 Test 버튼 한 번에 영상 4개의 파일 경로와 카메라 ID를 Python 추론 코드에 전달
-- `ai/infer.py`가 영상을 재생 시간에 맞춰 병행 처리하고 탐지 결과를 Backend에 전송할 계획
-- AI 결과 형식은 [API 명세의 목표 JSON](../docs/API_SPEC.md) 기준
-- `fire`와 `smoke` 모두 전송, 화점 위치를 추정하지 못하면 `location_estimation: null`
-- Frontend 프레임 업로드와 별도 AI FastAPI 서버는 현재 계획에 없음
-- Backend가 결과를 받은 현재 시각을 탐지 시각으로 기록, 과거 영상 촬영 시각은 사용하지 않음
-- 4개 영상 동시 추론 성능과 전송 주기는 실제 실행 서버에서 검증 필요
+- 현재 `inference/test.py`는 `ai/test.mp4`를 사용하는 독립 테스트 코드
+- Backend 연동용 추론 코드는 아직 구현되지 않음
+- 연동 시 Backend가 실행 ID를 만들고 `run_id`, `camera_id`, 영상 경로와 전송 주소를 AI 프로세스 인자로 전달
+- AI는 실행 ID를 직접 생성하거나 코드에 고정하지 않음
+- 영상·JSON 요청 형식과 인증 헤더는 [API 명세](../docs/API_SPEC.md) 참고

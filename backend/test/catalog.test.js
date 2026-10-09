@@ -38,6 +38,19 @@ test('list serializes nullable fields and UTC dates', async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { items: [{ id: 1, latitude: null, longitude: null, created_at: '2026-10-01T09:00:00.000Z' }], limit: 50, offset: 0 });
 });
+test('camera list exposes test and live source types', async () => {
+  query = async (sql, params) => {
+    assert.match(sql, /SELECT id, name, source_type, latitude, longitude, created_at/);
+    assert.deepEqual(params, [50, 0]);
+    return { rows: [
+      { id: 1, name: 'demo', source_type: 'test' },
+      { id: 2, name: 'ITS', source_type: 'live' },
+    ] };
+  };
+  const response = await fetch(`${base}/api/cameras`);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).items.map(camera => camera.source_type), ['test', 'live']);
+});
 test('invalid pagination rejected before database access', async () => {
   query = () => assert.fail('unexpected DB query');
   for (const params of ['limit=0', 'limit=101', 'offset=-1', 'offset=2147483648', 'limit=1.5', 'limit=1&limit=2', 'limit=', 'offset=abc']) {
@@ -76,4 +89,11 @@ test('database failure returns 500 without exposing database details', async () 
   const response = await fetch(`${base}/api/videos`);
   assert.equal(response.status, 500);
   assert.deepEqual(await response.json(), { error: '서버 내부 오류가 발생했습니다.' });
+});
+test('retired bulk demo endpoints are unavailable', async () => {
+  query = () => assert.fail('unexpected DB query');
+  const started = await fetch(`${base}/api/demo-runs`, { method: 'POST' });
+  assert.equal(started.status, 404);
+  const status = await fetch(`${base}/api/demo-runs/1`);
+  assert.equal(status.status, 404);
 });

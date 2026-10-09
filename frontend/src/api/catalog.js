@@ -4,6 +4,7 @@ function normalizeCamera(camera) {
   return {
     id: camera.id,
     name: camera.name,
+    sourceType: camera.source_type,
     latitude: camera.latitude,
     longitude: camera.longitude,
     locationName: null,
