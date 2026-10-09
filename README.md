@@ -13,6 +13,8 @@
   - `경북의성.mp4`, `청성.mp4`, `기도4교.mp4`, `단촌4터널.mp4`
 - 네이버 지도 Client ID는 선택, 없으면 지도 설정 안내 표시
 - 아래 명령의 기본 실행 위치는 프로젝트 루트
+- Bash 명령은 macOS·Linux·Git Bash용, Windows 명령은 CMD용
+- 별도 표시가 없는 `docker compose`, `cd`, `npm` 명령은 두 환경에서 동일
 
 ## 1 DB 실행
 
@@ -20,8 +22,17 @@
 - `DB_PASSWORD`를 로컬 비밀번호로 변경
 - 기존 `.env`가 있으면 유지
 
+### Bash
+
 ```bash
 test -f .env || cp .env.example .env
+docker compose up -d db
+```
+
+### Windows CMD
+
+```cmd
+if not exist ".env" copy ".env.example" ".env"
 docker compose up -d db
 ```
 
@@ -34,8 +45,16 @@ docker compose up -d db
 - 아래 명령으로 카메라·영상 메타데이터 등록
 - 파일만 배치하면 DB 목록에 자동 등록되지 않음
 
+### Bash
+
 ```bash
 docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sql/seed.dev.sql
+```
+
+### Windows CMD
+
+```cmd
+docker compose exec -T db sh -c "psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $POSTGRES_DB" < sql\seed.dev.sql
 ```
 
 - 영상 없이 화면 구조만 확인할 때는 이 단계 생략 가능
@@ -60,8 +79,16 @@ npm run dev
 - Web 서비스 URL에 `http://127.0.0.1:5173` 등록, `localhost:5173`을 사용하면 해당 주소도 등록
 - Client Secret은 Frontend에 넣지 않음
 
+### Bash
+
 ```bash
 test -f frontend/.env.local || cp frontend/.env.example frontend/.env.local
+```
+
+### Windows CMD
+
+```cmd
+if not exist "frontend\.env.local" copy "frontend\.env.example" "frontend\.env.local"
 ```
 
 - 새 터미널에서 실행
@@ -82,8 +109,16 @@ npm run dev
 - 기존 카메라·영상·이벤트 테이블은 유지하고 누락된 관리자·SMS 수신자 테이블 생성
 - 이미 존재하는 테이블의 컬럼·제약조건은 변경하지 않음
 
+### Bash
+
 ```bash
 docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sql/init.sql
+```
+
+### Windows CMD
+
+```cmd
+docker compose exec -T db sh -c "psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $POSTGRES_DB" < sql\init.sql
 ```
 
 - `sql/seed.dev.sql`은 개발용 데이터만 등록
