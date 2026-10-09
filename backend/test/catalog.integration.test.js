@@ -4,7 +4,7 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 
 test('PostgreSQL: populated lists, pagination, nullable relations and event detail', {
-  skip: process.env.RUN_DB_TESTS !== '1',
+  skip: process.env.npm_lifecycle_event !== 'test:integration' && process.env.RUN_DB_TESTS !== '1',
 }, async () => {
   const pool = require('../src/config/db');
   let client;
@@ -13,7 +13,7 @@ test('PostgreSQL: populated lists, pagination, nullable relations and event deta
     client = await pool.connect();
     // 세션 전용 임시 테이블로 검증하며 기존 테이블과 데이터는 변경하지 않습니다.
     const schema = readFileSync(path.join(__dirname, '../../sql/init.sql'), 'utf8')
-      .replaceAll('CREATE TABLE ', 'CREATE TEMP TABLE ')
+      .replaceAll('CREATE TABLE IF NOT EXISTS ', 'CREATE TEMP TABLE ')
       .replace(/COMMIT;\s*$/, '');
     await client.query(schema);
     await client.query(`

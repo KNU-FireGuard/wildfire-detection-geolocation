@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test",
-    "test:integration": "RUN_DB_TESTS=1 node --test test/catalog.integration.test.js"
+    "test:integration": "node --test test/catalog.integration.test.js"
   },
   "keywords": [],
   "author": "",

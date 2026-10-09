@@ -1,8 +1,9 @@
--- 녹화영상 기반 초기 스키마. 기존 DB의 구조 변경용 스크립트가 아닙니다.
--- 모든 테이블을 하나의 트랜잭션으로 생성합니다.
+-- 새 DB의 초기 스키마와 기존 DB의 누락된 테이블을 생성합니다.
+-- 이미 존재하는 테이블의 컬럼이나 제약조건은 변경하지 않습니다.
+-- 모든 작업을 하나의 트랜잭션으로 처리합니다.
 BEGIN;
 
-CREATE TABLE cameras (
+CREATE TABLE IF NOT EXISTS cameras (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL CHECK (btrim(name) <> ''),
     latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
@@ -11,7 +12,7 @@ CREATE TABLE cameras (
     CHECK ((latitude IS NULL) = (longitude IS NULL))
 );
 
-CREATE TABLE videos (
+CREATE TABLE IF NOT EXISTS videos (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- 카메라 정보를 알 수 없는 제공 영상은 NULL을 허용합니다.
     camera_id INTEGER REFERENCES cameras(id),
@@ -20,7 +21,7 @@ CREATE TABLE videos (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE detection_events (
+CREATE TABLE IF NOT EXISTS detection_events (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     video_id INTEGER NOT NULL REFERENCES videos(id),
     class TEXT NOT NULL CHECK (btrim(class) <> ''),
@@ -40,7 +41,24 @@ CREATE TABLE detection_events (
     CHECK (error_range_m IS NULL OR estimated_latitude IS NOT NULL)
 );
 
-CREATE INDEX videos_camera_id_idx ON videos(camera_id);
-CREATE INDEX detection_events_video_id_idx ON detection_events(video_id);
+CREATE TABLE IF NOT EXISTS admins (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE CHECK (btrim(username) <> ''),
+    password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> ''),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sms_recipients (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL CHECK (btrim(name) <> ''),
+    phone_number TEXT NOT NULL UNIQUE CHECK (btrim(phone_number) <> ''),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS videos_camera_id_idx ON videos(camera_id);
+CREATE INDEX IF NOT EXISTS detection_events_video_id_idx ON detection_events(video_id);
 
 COMMIT;
