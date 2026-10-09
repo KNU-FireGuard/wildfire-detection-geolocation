@@ -151,12 +151,17 @@
 ### `POST /auth/login`
 
 - Request: `{ "username": "admin", "password": "비밀번호" }`
-- `200` `{ "access_token": "JWT", "token_type": "Bearer" }`
+- `200` `{ "access_token": "JWT", "token_type": "Bearer", "expires_in": 3600 }`
+- `400` 요청 형식 오류
+- `401` ID 또는 비밀번호 오류
+- Access token 만료: 1시간
+- JWT 서명 키: Backend 환경변수 `JWT_SECRET` · 32바이트 이상의 임의 문자열
 
 ### `GET /auth/me`
 
 - Header: `Authorization: Bearer <JWT>`
 - `200` `{ "id": 1, "username": "admin" }`
+- `401` 토큰 누락·오류·만료
 
 ## SMS 수신자
 

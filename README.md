@@ -25,7 +25,8 @@ test -f .env || cp .env.example .env
 if not exist ".env" copy ".env.example" ".env"
 ```
 
-- `.env`의 `DB_PASSWORD`, `ADMIN_USERNAME`, `ADMIN_INITIAL_PASSWORD` 입력
+- `.env`의 `DB_PASSWORD`, `ADMIN_USERNAME`, `ADMIN_INITIAL_PASSWORD`, `JWT_SECRET` 입력
+- `JWT_SECRET`은 32바이트 이상의 임의 문자열로 설정
 - 초기 관리자 비밀번호는 12자 이상으로 설정
 
 ```text
