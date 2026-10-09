@@ -2,6 +2,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, scryptSync } = require('node:crypto');
 const jwt = require('jsonwebtoken');
+const { getJwtSecret } = require('../src/middleware/require-admin');
 
 process.env.JWT_SECRET = 'test-only-jwt-secret-with-more-than-32-characters';
 
@@ -37,6 +38,19 @@ const admin = {
   username: 'admin',
   password_hash: passwordHash('correct-password'),
 };
+
+test('JWT_SECRET이 없거나 짧거나 공개 placeholder면 거부한다', () => {
+  const original = process.env.JWT_SECRET;
+  try {
+    for (const secret of ['', 'too-short', 'replace_with_random_secret_at_least_32_characters']) {
+      process.env.JWT_SECRET = secret;
+      assert.throws(() => getJwtSecret(), /JWT_SECRET/);
+    }
+  } finally {
+    process.env.JWT_SECRET = original;
+  }
+  assert.equal(getJwtSecret(), original);
+});
 
 before(async () => {
   server = app.listen(0, '127.0.0.1');

@@ -1,10 +1,12 @@
 async function start() {
   // config/db.js에서 .env를 읽은 후 서버 포트를 확인합니다.
   const pool = require('./config/db');
+  const { getJwtSecret } = require('./middleware/require-admin');
   const app = require('./app');
   const port = Number(process.env.PORT || 3000);
 
   try {
+    getJwtSecret();
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error('PORT는 1부터 65535 사이의 정수여야 합니다.');
     }

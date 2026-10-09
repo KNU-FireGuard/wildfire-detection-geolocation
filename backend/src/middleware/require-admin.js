@@ -2,7 +2,11 @@ const jwt = require('jsonwebtoken');
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
-  if (typeof secret !== 'string' || Buffer.byteLength(secret, 'utf8') < 32) {
+  if (
+    typeof secret !== 'string'
+    || Buffer.byteLength(secret, 'utf8') < 32
+    || /^replace_with_/i.test(secret)
+  ) {
     throw new Error('JWT_SECRET을 32바이트 이상의 임의 문자열로 설정하세요.');
   }
   return secret;

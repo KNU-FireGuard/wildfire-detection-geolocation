@@ -155,7 +155,7 @@
 - `400` 요청 형식 오류
 - `401` ID 또는 비밀번호 오류
 - Access token 만료: 1시간
-- JWT 서명 키: Backend 환경변수 `JWT_SECRET`
+- JWT 서명 키: Backend 환경변수 `JWT_SECRET` · 32바이트 이상의 임의 문자열
 
 ### `GET /auth/me`
 
