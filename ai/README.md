@@ -1,66 +1,49 @@
-# YOLO26n Wildfire Detection
+# YOLO26n 산불 탐지 모델
 
-산불 객체 탐지를 위해 YOLO26n 모델을 학습한 결과입니다.
+## 학습 정보
 
-## Model
+| 항목 | 값 |
+| --- | --- |
+| 작업 | 객체 탐지 |
+| 모델 | YOLO26n |
+| 클래스 | `0 smoke`, `1 fire` |
+| 이미지 크기 | 640 × 640 |
+| 배치 크기 | 16 |
+| 학습 횟수 | 50 epoch |
+| Optimizer | `auto` |
+| 학습 장치 | CUDA GPU · Tesla T4 |
+| 전체 이미지 | 57,479장 |
+| 학습 / 검증 | 45,983장 / 11,496장 |
 
--   Model: YOLO26n
--   Task: Object Detection
--   Classes:
-    -   `0`: smoke
-    -   `1`: fire
--   Image size: 640 × 640
--   Batch size: 16
--   Epochs: 50
--   Optimizer: `auto`
--   Device: CUDA GPU (Tesla T4)
--   Dataset: `/home/guest/fire_project/ai/data.yaml`에 정의된 산불
-    데이터셋
+- 학습 당시 데이터셋 설정 경로: `/home/guest/fire_project/ai/data.yaml`
+- 위 경로는 학습 환경의 경로이며 현재 프로젝트의 실행 파일 경로가 아님
 
-## Training Dataset
+## 50 epoch 학습 결과
 
-전체 이미지 57,479장을 8:2로 분할하여 학습/검증에 사용했습니다.
+| 지표 | 값 |
+| --- | ---: |
+| Precision | 0.8476 |
+| Recall | 0.7344 |
+| mAP@50 | 0.8060 |
+| mAP@50-95 | 0.5034 |
 
--   Train: 45,983 images
--   Validation: 11,496 images
+## 파일
 
-## Training Result
+| 파일 | 용도 |
+| --- | --- |
+| `yolo26n_fire_50/weights/best.pt` | 성능 기준 최적 가중치, 추론에 사용 |
+| `yolo26n_fire_50/weights/last.pt` | 마지막 epoch 가중치, 학습 재개용 |
+| `inference/test.py` | 고정된 `ai/test.mp4`를 추론하는 독립 테스트 코드, Backend 연동용 CLI 아님 |
+| `args.yaml` | 학습 설정 |
+| `results.csv`, `results.png` | 학습 지표와 그래프 |
+| `BoxF1_curve.png`, `BoxP_curve.png`, `BoxPR_curve.png`, `BoxR_curve.png` | 성능 곡선 |
+| `confusion_matrix*.png` | 혼동 행렬 |
+| `labels.jpg`, `train_batch*.jpg`, `val_batch*_labels.jpg`, `val_batch*_pred.jpg` | 데이터·예측 시각화 |
 
-50 epoch 학습 결과:
+## 시스템 연동 계획
 
-  Metric         Value
-  ----------- --------
-  Precision     0.8476
-  Recall        0.7344
-  mAP@50        0.8060
-  mAP@50-95     0.5034
-
-## Files
-
--   `args.yaml` --- 학습 당시 사용된 전체 Ultralytics 설정
--   `results.csv` --- epoch별 학습/검증 결과
--   `results.png` --- 학습 결과 그래프
--   `BoxF1_curve.png` --- F1-Confidence curve
--   `BoxP_curve.png` --- Precision-Confidence curve
--   `BoxPR_curve.png` --- Precision-Recall curve
--   `BoxR_curve.png` --- Recall-Confidence curve
--   `confusion_matrix.png` --- confusion matrix
--   `confusion_matrix_normalized.png` --- normalized confusion matrix
--   `labels.jpg` --- 데이터셋 라벨 분포 시각화
--   `train_batch*.jpg` --- 학습 배치 시각화
--   `val_batch*_labels.jpg` --- validation 정답 라벨 시각화
--   `val_batch*_pred.jpg` --- validation 예측 결과 시각화
-
-### Weights
-
-`weights/`에는 학습 가중치가 포함되어 있습니다.
-
--   `best.pt` --- validation 성능 기준 best model. **추론/배포에 사용**
--   `last.pt` --- 마지막 epoch의 model. **학습 재개 등에 사용**
-
-
-``` yaml
-data: /home/guest/fire_project/ai/data.yaml
-```
-
-
+- 현재 `inference/test.py`는 `ai/test.mp4`를 사용하는 독립 테스트 코드
+- Backend 연동용 추론 코드는 아직 구현되지 않음
+- 연동 시 Backend가 실행 ID를 만들고 `run_id`, `camera_id`, 영상 경로와 전송 주소를 AI 프로세스 인자로 전달
+- AI는 실행 ID를 직접 생성하거나 코드에 고정하지 않음
+- 영상·JSON 요청 형식과 인증 헤더는 [API 명세](../docs/API_SPEC.md) 참고

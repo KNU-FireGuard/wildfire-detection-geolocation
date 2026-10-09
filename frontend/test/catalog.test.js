@@ -6,7 +6,7 @@ import { fetchCameras, fetchEvents, fetchVideos, fetchEvent } from '../src/api/c
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 const page = (items, offset = 0) => Response.json({ items, limit: 100, offset })
-const rawCamera = { id: 1, name: 'CAM 01', latitude: 36.0157, longitude: 128.6951 }
+const rawCamera = { id: 1, name: 'CAM 01', source_type: 'test', latitude: 36.0157, longitude: 128.6951 }
 const rawEvent = {
   id: 10, video_id: 20, camera_id: 1, class: 'smoke',
   started_at: '2026-10-07T05:30:00.000Z', ended_at: null,
@@ -57,6 +57,7 @@ test('Camera/Event를 API 필드에서 UI 모델로 분리하고 숫자 ID를 �
   const [cameras, events] = await Promise.all([fetchCameras(), fetchEvents()])
   assert.equal(cameras[0].id, events[0].cameraId)
   assert.equal(cameras[0].name, 'CAM 01')
+  assert.equal(cameras[0].sourceType, 'test')
   for (const key of ['locationName', 'status', 'ptzModel', 'altitudeM', 'panDeg', 'tiltDeg', 'zoom', 'hfovDeg', 'vfovDeg']) {
     assert.equal(cameras[0][key], null)
   }

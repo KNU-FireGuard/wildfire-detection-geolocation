@@ -1,17 +1,23 @@
--- 녹화영상 기반 초기 스키마. 기존 DB의 구조 변경용 스크립트가 아닙니다.
--- 모든 테이블을 하나의 트랜잭션으로 생성합니다.
+-- 새 DB의 초기 스키마와 기존 DB의 누락된 테이블을 생성합니다.
+-- 기존 테이블은 유지하되 admins의 불필요한 시각 컬럼은 제거합니다.
+-- 모든 작업을 하나의 트랜잭션으로 처리합니다.
 BEGIN;
 
-CREATE TABLE cameras (
+CREATE TABLE IF NOT EXISTS cameras (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL CHECK (btrim(name) <> ''),
+    source_type TEXT NOT NULL DEFAULT 'test' CHECK (source_type IN ('test', 'live')),
     latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
     longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((latitude IS NULL) = (longitude IS NULL))
 );
 
-CREATE TABLE videos (
+-- 기존 DB의 카메라는 개발용 영상으로 등록되었으므로 test로 채웁니다.
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'test'
+    CHECK (source_type IN ('test', 'live'));
+
+CREATE TABLE IF NOT EXISTS videos (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- 카메라 정보를 알 수 없는 제공 영상은 NULL을 허용합니다.
     camera_id INTEGER REFERENCES cameras(id),
@@ -20,7 +26,7 @@ CREATE TABLE videos (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE detection_events (
+CREATE TABLE IF NOT EXISTS detection_events (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     video_id INTEGER NOT NULL REFERENCES videos(id),
     class TEXT NOT NULL CHECK (btrim(class) <> ''),
@@ -40,7 +46,25 @@ CREATE TABLE detection_events (
     CHECK (error_range_m IS NULL OR estimated_latitude IS NOT NULL)
 );
 
-CREATE INDEX videos_camera_id_idx ON videos(camera_id);
-CREATE INDEX detection_events_video_id_idx ON detection_events(video_id);
+CREATE TABLE IF NOT EXISTS admins (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE CHECK (btrim(username) <> ''),
+    password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> '')
+);
+
+ALTER TABLE admins DROP COLUMN IF EXISTS created_at;
+ALTER TABLE admins DROP COLUMN IF EXISTS updated_at;
+
+CREATE TABLE IF NOT EXISTS sms_recipients (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL CHECK (btrim(name) <> ''),
+    phone_number TEXT NOT NULL UNIQUE CHECK (btrim(phone_number) <> ''),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS videos_camera_id_idx ON videos(camera_id);
+CREATE INDEX IF NOT EXISTS detection_events_video_id_idx ON detection_events(video_id);
 
 COMMIT;

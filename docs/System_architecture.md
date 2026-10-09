@@ -1,106 +1,45 @@
 # FireGuard AI 시스템 아키텍처
 
-[프로젝트 소개](../README.md) · [개발 환경 안내](DEVELOPMENT.md) · [API 명세서](API_SPEC.md)
+[API 명세](API_SPEC.md) · [ERD](DATABASE.md) · [ADR](ADR.md)
 
-## 목표 구성 및 데이터 흐름
+## 카메라별 Test 흐름
 
-![FireGuard AI 시스템 흐름도](system-flow.png)
-
-위 그림은 목표 구성입니다. 현재 구현 범위와 향후 연동 계획은 아래에서 구분합니다.
-초기 입력은 제공된 녹화 영상이며, 실시간 CCTV는 접근 가능 여부에 따라 추가합니다.
-
-1. AI 모듈이 영상에서 화재·연기를 탐지하고 화점 좌표를 추정합니다.
-2. AI가 탐지·위치 추정 결과를 Backend에 JSON으로 전달합니다.
-3. Backend가 결과를 검증하고 연속 탐지를 이벤트로 묶어 PostgreSQL에 저장합니다.
-4. Frontend가 Backend API를 통해 이벤트를 조회하고 지도와 대시보드에 표시합니다.
-5. 알림 조건에 따른 SMS 연동은 추후 구현합니다.
-
-현재는 2단계의 수신 API와 기본 입력값 검사까지 구현했습니다. AI의 자동 전송, 이벤트 처리·DB 저장, SMS 연동은 구현 전입니다. 카메라·영상·이벤트 조회 API와 로컬 영상 스트리밍, 네이버 지도 연동을 구현했습니다. 지도 서비스 키를 설정하면 Frontend 대시보드에서 카메라·추정 위치를 표시하고, 등록한 로컬 영상을 재생할 수 있습니다.
-
-## 구성요소와 역할
-
-| 구성요소 | 역할 | 현재 상태 |
-| --- | --- | --- |
-| AI | YOLO 화재·연기 탐지 및 화점 위치 추정 | YOLO26n 학습 결과·가중치 보관, 시스템 연동 전 |
-| Backend | AI 결과 수신·검증, 이벤트 관리, 조회 API, 알림 연동 | DB 연결 검증, 탐지 결과 수신·검증 및 조회 API 구현 |
-| PostgreSQL | 카메라·영상 메타데이터 및 탐지 이벤트 저장 | Docker 개발 설정 및 초기 스키마 작성 |
-| Frontend | 지도·이벤트 목록·영상 모니터링 화면 | Vue 대시보드, 네이버 위성 지도·위치 마커, 로컬 영상 플레이어, Vite API 프록시 |
-| Nginx | Frontend 정적 파일 제공 및 API 리버스 프록시 | 배포 계획, 설정 미작성 |
-| SMS API | 산불 알림 전달 | 연동 예정 |
-
-AI와 Frontend는 Backend를 통해 데이터를 주고받습니다. AI는 PostgreSQL에 직접 접근하지 않습니다.
-요청·응답 JSON과 검증 규칙은 [API 명세서](API_SPEC.md)에서 관리합니다.
-
-## 영상 및 이벤트 저장 설계 (초안)
-
-영상 파일은 서버 파일시스템에 저장하고 DB에는 경로와 메타데이터를 저장합니다. Backend의 `GET /api/videos/:id/stream`은 프로젝트의 `data/videos/` 안에 있는 파일만 스트리밍하고, 브라우저 탐색을 위한 HTTP Range 요청을 지원합니다. 실제 영상은 크기 때문에 Git에 포함하지 않습니다.
-연속 탐지는 하나의 이벤트로 묶으며, 묶음 기준과 대표 추정 위치 선정 방식은 아직 미정입니다.
-
-### 초기 테이블 구성
-
-| 테이블 | 역할 | 관계 |
-| --- | --- | --- |
-| cameras | 카메라 이름과 설치 좌표 | 카메라 1대에 영상 여러 개 |
-| videos | 원본 파일명, 서버 파일 경로, 카메라 ID | 영상 1개에 이벤트 여러 개 |
-| detection_events | 탐지 시작·종료 시각, 최대 신뢰도, 추정 위치 | video_id로 영상 연결 |
-
-컬럼별 의미·필수 여부·제약조건·ERD와 실제 영상 등록 순서는 [DB 명세서](DATABASE.md)에서 관리합니다.
-영상 파일 자체와 매 프레임 bbox는 DB에 저장하지 않습니다. 현재 `POST /api/detections`는 수신·검증·응답만 수행하며, 이벤트 저장 로직은 아직 구현 전입니다.
-
-## 로컬 개발 구성
-
-```text
-브라우저 → Vite 개발 서버 (기본 localhost:5173)
-               ├─ Vue 화면 제공
-               └─ /api 요청 전달 → Backend (127.0.0.1:3000)
-                                      └─ PostgreSQL (localhost:5432)
+```mermaid
+flowchart LR
+    F[Vue: CCTV별 Test] --> B[Express: 실행 관리]
+    B --> A[Python: YOLO 분석]
+    A -->|MJPEG 영상 POST| B
+    A -->|탐지 JSON POST| B
+    B -->|MJPEG 스트림| F
+    B --> DB[(PostgreSQL: 이벤트)]
+    B --> S[SMS API]
 ```
 
-Frontend는 `fetch('/api/...')`와 같은 상대 경로로 요청합니다. Backend도 `/api` 접두사를 사용하므로 프록시에서 경로를 제거하지 않습니다.
-브라우저가 Vite 서버의 같은 출처로 요청하고 Vite가 Backend에 전달하므로 이 통신에 별도의 CORS 허용 설정은 필요하지 않습니다.
-`changeOrigin`은 전달 요청의 Host 헤더를 대상에 맞추는 옵션입니다.
-프록시가 API를 구현해주지는 않으며, 미구현 API는 404를 반환합니다.
+- `source_type=test` 카메라마다 등록된 영상 하나를 분석
+- Backend가 Python에 원본 파일 경로와 실행 ID를 전달
+- AI가 바운딩박스 프레임과 탐지 JSON을 각각 Backend API로 전송
+- Backend가 프레임을 즉시 전달하고 탐지 이벤트 저장·SMS 발송
+- 결과 영상 파일은 저장하지 않음
 
-## 배포 구성 (계획)
+## 구성 요소
 
-```text
-사용자 브라우저 ↔ Nginx
-                    ├─ Frontend 빌드 파일 제공
-                    └─ /api 요청을 Backend로 전달 (리버스 프록시)
-                                      ├─ PostgreSQL
-                                      ├─ AI 모듈
-                                      └─ SMS API
-```
+| 구성 요소 | 역할 |
+| --- | --- |
+| Frontend · Vue/Vite | CCTV·탐지 정보 표시, Test 요청, MJPEG 재생 |
+| Backend · Node.js/Express | API, Python 실행, 영상 중계, 이벤트 저장, SMS |
+| AI · Python/YOLO26n | 영상 프레임 분석, 바운딩박스·탐지 JSON 생성 |
+| DB · PostgreSQL | 카메라·영상·이벤트·관리자·SMS 수신자 저장 |
+| 지도 · 네이버 Maps | CCTV와 추정 화점 위치 표시 |
 
-Nginx는 회사 서버에 설치하거나 컨테이너로 실행합니다. 빌드한 파일을 제공하는 웹 서버 역할과 `/api` 요청을 Backend에 전달하는 리버스 프록시 역할을 함께 맡습니다. Frontend 코드는 전달받은 사용자 브라우저에서 실행됩니다.
+## 영상 입력
 
-화면과 API를 동일한 출처로 제공하도록 구성하면 Frontend의 상대 경로 요청을 유지할 수 있고, 이 통신에는 별도의 CORS 허용 설정이 필요하지 않습니다. 서로 다른 출처로 배포하기로 변경하면 Backend에서 허용할 Frontend 출처와 인증 방식에 맞는 CORS 설정을 검토합니다.
+- `test` 카메라: `data/videos/`의 등록 MP4
+- `live` 카메라: ITS API에서 조회한 CCTV 영상 주소
+- 원본 파일과 결과 프레임은 DB에 저장하지 않음
+- 컬럼과 관계는 [ERD](DATABASE.md), 요청·응답은 [API 명세](API_SPEC.md) 참고
 
-Nginx의 Backend 연결 주소는 실제 배포 형태에 맞춥니다. 특히 Nginx와 Backend가 서로 다른 컨테이너라면 `127.0.0.1`은 각 컨테이너 자신을 가리키므로, 컨테이너 간 통신 주소와 Backend 수신 주소를 별도로 설정해야 합니다. 구체적인 구성은 회사 서버 환경 확인 후 정합니다.
+## 현재 구현 상태
 
-## 소스 및 배포 파일 관리
-
-로컬에서 빌드한 결과를 회사 서버에 배포하는 방식을 기준으로 합니다.
-
-| 항목 | GitHub 관리 | 회사 서버 배포 |
-| --- | --- | --- |
-| Frontend 소스·설정·패키지 파일 | 계속 관리 | 빌드 결과만 배포한다면 실행에 불필요 |
-| Frontend `node_modules/` | 제외 | 업로드 불필요 |
-| Frontend `dist/` | 제외 | 빌드 결과 배포 |
-| Nginx 설정 | 작성 후 관리 | 서버에 적용하고 Nginx 실행 |
-| Backend·AI | 코드와 의존성 목록 관리 | 코드 및 실행에 필요한 의존성 준비 |
-| 실제 비밀번호·영상 데이터 | 저장소 밖에서 별도 관리 | 필요한 환경과 저장 위치에 배치 |
-| AI 학습 가중치 | 현재 `ai/yolo26n_fire_50/weights/`에서 Git으로 관리 | 추론용 가중치 배치 |
-
-**배포 서버에 Frontend 소스 전체가 필요하지 않더라도, GitHub에는 소스를 계속 보관합니다.** 화면을 수정한 뒤 다시 빌드하려면 원본이 필요합니다. Frontend에 포함되는 값은 브라우저에서 볼 수 있으므로 DB 비밀번호나 SMS 서비스의 비밀키는 Backend에서만 관리합니다.
-
-## 추가로 결정할 사항
-
-- 연속 탐지의 이벤트 시작·종료 및 그룹핑 기준
-- 이벤트의 대표 추정 위치와 오차 범위 선정 방식
-- 카메라 정보를 모르는 영상의 AI 요청 표현
-- 위치 추정 실패 시 전달 형식과 처리 방식
-- 다중 객체 결과와 전송 주기, timestamp 시간대 표기
-- Frontend와 조회 응답 규격 검토 및 SMS 알림 조건
-- 회사 서버 환경에 맞는 Nginx·Backend·AI 실행 구성
-- 학습 가중치의 장기 보관·배포 방식
+- 구현: 카메라·영상·이벤트 조회, 로컬 영상 스트리밍, 데이터베이스 스키마
+- 미구현: 카메라별 Test 실행, MJPEG 중계, 새 탐지 JSON 저장, SMS 발송, JWT 로그인
+- 개발 환경: 브라우저 → Vite → Express → PostgreSQL
