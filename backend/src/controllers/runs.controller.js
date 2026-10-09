@@ -3,6 +3,7 @@ const { constants: fsConstants } = require('node:fs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const pool = require('../config/db');
+const { getAiCallbackToken } = require('../middleware/require-ai-callback');
 const { finalizeRunEvents } = require('../services/detection-events');
 const testRuns = require('../services/run-manager');
 
@@ -10,6 +11,21 @@ const PROJECT_ROOT = path.resolve(__dirname, '../../../');
 const AI_RUNNER = path.join(PROJECT_ROOT, 'ai', 'inference', 'backend_connect.py');
 const DEFAULT_MODEL = path.join(PROJECT_ROOT, 'ai', 'yolo26n_fire_50', 'weights', 'best.pt');
 const FINAL_BOUNDARY = Buffer.from('--frame--\r\n');
+const AI_RUNTIME_ENV_KEYS = [
+  'PATH', 'PATHEXT', 'SystemRoot', 'WINDIR', 'SystemDrive', 'COMSPEC',
+  'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'LANG', 'LC_ALL',
+  'CUDA_VISIBLE_DEVICES', 'CUDA_PATH', 'CUDA_HOME', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH',
+  'OMP_NUM_THREADS',
+];
+
+function getAiProcessEnv() {
+  const env = {};
+  for (const key of AI_RUNTIME_ENV_KEYS) {
+    if (typeof process.env[key] === 'string') env[key] = process.env[key];
+  }
+  env.AI_CALLBACK_TOKEN = getAiCallbackToken();
+  return env;
+}
 
 function getModelPath() {
   return path.resolve(PROJECT_ROOT, process.env.AI_MODEL_PATH || DEFAULT_MODEL);
@@ -85,7 +101,7 @@ function launchAi(run, sourcePath) {
   ];
 
   try {
-    const child = spawn(python, args, { cwd: PROJECT_ROOT, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(python, args, { cwd: PROJECT_ROOT, env: getAiProcessEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     attachProcess(run, child);
   } catch {
     testRuns.markFailed(run, 'AI 분석을 시작하지 못했습니다.');

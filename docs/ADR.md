@@ -4,7 +4,7 @@
 
 ## ADR 0001 · 관리자와 SMS 수신자
 
-- 상태: 제안
+- 상태: 채택
 - 관리자 계정은 `admins`에 저장하고 로그인은 JWT 사용
 - 수신자는 관리자별이 아닌 시스템 공용 목록으로 관리
 - 비밀번호는 해시로 저장하고 SMS 인증 정보는 Backend에서 관리
@@ -34,7 +34,7 @@
 
 ## ADR 0006 · AI 영상·탐지 결과 전송
 
-- 상태: 채택, 구현 전
+- 상태: 현행
 - AI는 MJPEG 영상을 `POST /api/test-runs/:id/video`로 전송
 - AI는 탐지 JSON을 `POST /api/detections`로 전송
 - Backend는 영상을 저장하지 않고 `GET /api/test-runs/:id/stream`으로 중계
