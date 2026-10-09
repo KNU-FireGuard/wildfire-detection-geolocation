@@ -6,11 +6,16 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS cameras (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL CHECK (btrim(name) <> ''),
+    source_type TEXT NOT NULL DEFAULT 'test' CHECK (source_type IN ('test', 'live')),
     latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
     longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((latitude IS NULL) = (longitude IS NULL))
 );
+
+-- 기존 DB의 카메라는 개발용 영상으로 등록되었으므로 test로 채웁니다.
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'test'
+    CHECK (source_type IN ('test', 'live'));
 
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
