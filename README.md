@@ -1,6 +1,5 @@
 # FireGuard AI
 
-- 녹화 영상 4개로 산불 탐지·SMS 알림 흐름을 준비하는 프로젝트
 - 모든 명령은 별도 안내가 없으면 프로젝트 루트에서 실행
 - Bash는 macOS·Linux·Git Bash용, Windows 명령은 CMD용
 - 실제 영상 4개는 Git에 없으므로 조장에게 요청
@@ -78,7 +77,6 @@ npm run dev
 ```
 
 - Backend 주소: `http://127.0.0.1:3000`
-- 관리자 로그인 API는 아직 미구현
 
 ## 4 Frontend
 
@@ -111,7 +109,3 @@ npm run dev
 
 - Backend와 Frontend 터미널에서 `Ctrl + C`
 - 프로젝트 루트에서 `docker compose down`, DB 데이터는 유지
-
-## 문서
-
-- [API 명세](docs/API_SPEC.md) · [DB와 ERD](docs/DATABASE.md) · [시스템 아키텍처](docs/System_architecture.md) · [ADR](docs/ADR.md)
