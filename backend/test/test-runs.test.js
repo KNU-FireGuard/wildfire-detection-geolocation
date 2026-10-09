@@ -179,4 +179,9 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
   child.child.emit('close', 0);
   const completed = await fetch(`${base}/test-runs/${run.id}`, { headers: adminHeaders });
   assert.equal((await completed.json()).status, 'completed');
+  assert.ok(queryCalls.some(call => (
+    /UPDATE detection_events/.test(call.sql)
+    && /ended_at = GREATEST\(started_at, updated_at\)/.test(call.sql)
+    && /id = ANY\(\$1::INTEGER\[\]\)/.test(call.sql)
+  )));
 });

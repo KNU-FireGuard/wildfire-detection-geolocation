@@ -75,6 +75,8 @@ test('명세의 탐지 JSON을 검증하고 202 accepted를 반환한다', async
   assert.equal(response.status, 202);
   assert.deepEqual(await response.json(), { accepted: true });
   assert.ok(queryCalls.some(call => /INSERT INTO detection_events/.test(call.sql)));
+  const insert = queryCalls.find(call => /INSERT INTO detection_events/.test(call.sql));
+  assert.match(insert.sql, /CURRENT_TIMESTAMP, NULL, \$3/);
 });
 
 test('탐지 결과의 run ID, 클래스, confidence, bbox를 검증한다', async () => {
@@ -118,4 +120,20 @@ test('위치 추정은 null 또는 유효한 좌표 객체를 허용한다', asy
 
   assert.equal(response.status, 202);
   assert.deepEqual(await response.json(), { accepted: true });
+  const update = queryCalls.filter(call => /UPDATE detection_events/.test(call.sql)).at(-1);
+  assert.match(update.sql, /COALESCE\(\$3, estimated_latitude\)/);
+  assert.match(update.sql, /COALESCE\(\$4, estimated_longitude\)/);
+
+  const noLocationResponse = await fetch(base, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-AI-Token': process.env.AI_CALLBACK_TOKEN,
+    },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(noLocationResponse.status, 202);
+  const noLocationUpdate = queryCalls.filter(call => /UPDATE detection_events/.test(call.sql)).at(-1);
+  assert.equal(noLocationUpdate.params[2], null);
+  assert.match(noLocationUpdate.sql, /COALESCE\(\$3, estimated_latitude\)/);
 });

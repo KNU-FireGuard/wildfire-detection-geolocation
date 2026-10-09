@@ -31,11 +31,10 @@ async function receiveDetection(req, res) {
   if (eventId) {
     await pool.query(`
       UPDATE detection_events
-      SET ended_at = CURRENT_TIMESTAMP,
-          max_confidence = GREATEST(max_confidence, $2),
-          estimated_latitude = $3,
-          estimated_longitude = $4,
-          error_range_m = $5,
+      SET max_confidence = GREATEST(max_confidence, $2),
+          estimated_latitude = COALESCE($3, estimated_latitude),
+          estimated_longitude = COALESCE($4, estimated_longitude),
+          error_range_m = CASE WHEN $3 IS NULL THEN error_range_m ELSE $5 END,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
     `, [eventId, confidence, ...coordinates]);
@@ -44,7 +43,7 @@ async function receiveDetection(req, res) {
       INSERT INTO detection_events
         (video_id, class, started_at, ended_at, max_confidence,
          estimated_latitude, estimated_longitude, error_range_m)
-      VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3, $4, $5, $6)
+      VALUES ($1, $2, CURRENT_TIMESTAMP, NULL, $3, $4, $5, $6)
       RETURNING id
     `, [run.video_id, className, confidence, ...coordinates]);
     run.eventIdsByClass.set(className, rows[0].id);

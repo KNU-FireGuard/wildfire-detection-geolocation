@@ -3,6 +3,7 @@ const { constants: fsConstants } = require('node:fs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const pool = require('../config/db');
+const { finalizeRunEvents } = require('../services/detection-events');
 const testRuns = require('../services/run-manager');
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../../');
@@ -41,7 +42,19 @@ function attachProcess(run, child) {
     if (run.status === 'ready') run.status = 'running';
   });
   child.once('error', () => testRuns.markFailed(run, 'AI 분석을 시작하지 못했습니다.'));
-  child.once('close', (code) => {
+  child.once('close', async (code) => {
+    const alreadyFailed = run.status === 'failed';
+    try {
+      await finalizeRunEvents(run);
+    } catch {
+      console.error(`[AI run=${run.id}] 탐지 이벤트 종료 시각을 저장하지 못했습니다.`);
+      if (!alreadyFailed) {
+        testRuns.markFailed(run, '탐지 이벤트 종료 시각을 저장하지 못했습니다.');
+      }
+      testRuns.closeSubscribers(run);
+      return;
+    }
+
     if (run.status === 'failed') {
       testRuns.closeSubscribers(run);
     } else if (code === 0 && run.videoFinished) {
