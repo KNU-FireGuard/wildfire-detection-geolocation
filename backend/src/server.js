@@ -2,11 +2,13 @@ async function start() {
   // config/db.js에서 .env를 읽은 후 서버 포트를 확인합니다.
   const pool = require('./config/db');
   const { getJwtSecret } = require('./middleware/require-admin');
+  const { getAiCallbackToken } = require('./middleware/require-ai-callback');
   const app = require('./app');
   const port = Number(process.env.PORT || 3000);
 
   try {
     getJwtSecret();
+    getAiCallbackToken();
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error('PORT는 1부터 65535 사이의 정수여야 합니다.');
     }
@@ -25,6 +27,7 @@ async function start() {
       if (stopping) return;
       stopping = true;
       console.log('Backend 서버 종료 중');
+      require('./services/run-manager').stopAll();
       const timeout = setTimeout(() => process.exit(1), 10000);
       timeout.unref();
       server.close(async () => {
