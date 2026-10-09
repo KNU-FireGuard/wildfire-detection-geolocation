@@ -6,6 +6,7 @@ const props = defineProps({
   event: { type: Object, default: null },
   camera: { type: Object, default: null },
   videos: { type: Array, default: () => [] },
+  showVideo: { type: Boolean, default: true },
 })
 const showDetails = ref(false)
 const selectedVideo = computed(() => props.videos.find(video => video.id === props.event?.videoId)
@@ -15,11 +16,11 @@ const selectedVideo = computed(() => props.videos.find(video => video.id === pro
 
 <template>
   <section class="dashboard-panel" aria-labelledby="detail-title">
-    <div class="panel-heading video-heading">
+    <div v-if="showVideo" class="panel-heading video-heading">
       <h2 id="detail-title">{{ camera?.name ?? 'CCTV' }} <span class="title-caption">영상</span></h2>
       <span class="camera-status" :class="{ online: camera?.status === 'ONLINE' }"><i />{{ camera?.status === 'ONLINE' ? '온라인' : camera?.status === 'OFFLINE' ? '오프라인' : '상태 정보 없음' }}</span>
     </div>
-    <div class="video-placeholder" aria-label="CCTV 영상">
+    <div v-if="showVideo" class="video-placeholder" aria-label="CCTV 영상">
       <video v-if="selectedVideo" :key="selectedVideo.id" controls preload="metadata" :src="`/api/videos/${selectedVideo.id}/stream`">
         이 브라우저는 영상 재생을 지원하지 않습니다.
       </video>

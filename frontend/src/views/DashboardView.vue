@@ -4,6 +4,8 @@ import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
 import EventDetail from '../components/EventDetail.vue'
+import DemoPanel from '../components/DemoPanel.vue'
+import { admin } from '../auth'
 import { fetchCameras, fetchEvents, fetchVideos } from '../api/catalog'
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
@@ -17,6 +19,7 @@ const selectedEventId = ref(null)
 const selectedCameraId = ref(null)
 const isLoading = ref(true)
 const loadError = ref('')
+const refreshError = ref('')
 const now = ref(new Date())
 let requestController
 let clockInterval
@@ -85,6 +88,23 @@ async function loadData() {
     isLoading.value = false
   }
 }
+async function refreshEvents(signal) {
+  const timeoutController = new AbortController()
+  const abort = () => timeoutController.abort()
+  signal?.addEventListener('abort', abort, { once: true })
+  if (signal?.aborted) abort()
+  const timeout = setTimeout(abort, 15000)
+  try {
+    const nextEvents = await fetchEvents({ signal: timeoutController.signal })
+    if (timeoutController.signal.aborted) return
+    applyData(cameras.value, nextEvents, videos.value)
+    refreshError.value = ''
+  } catch (cause) {
+    if (signal?.aborted) return
+    refreshError.value = '탐지 결과를 갱신하지 못했습니다. 기존 조회 결과를 표시합니다.'
+    throw cause
+  } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort) }
+}
 onMounted(() => {
   loadData()
   clockInterval = setInterval(() => { now.value = new Date() }, 1000)
@@ -101,10 +121,12 @@ onBeforeUnmount(() => {
         <div><h1>산불로부터 안전한 대한민국</h1><p>AI가 더 빠르게, 더 안전하게 지켜줍니다.</p></div>
         <div class="header-tools">
           <time class="live-clock" :datetime="now.toISOString()">{{ clock }}</time>
-          <span class="user-profile"><span class="avatar"><DashboardIcon name="user" :size="20" /></span>admin</span>
+          <span class="user-profile"><span class="avatar"><DashboardIcon name="user" :size="20" /></span>{{ admin?.username ?? '조회 사용자' }}</span>
         </div>
       </header>
       <div class="workspace-heading"><span>실시간 관제 현황</span><span class="mode-badge">{{ dataSource === 'mock' ? '데모 데이터' : 'Backend 데이터' }}</span></div>
+      <DemoPanel :cameras="cameras" :enabled="dataSource === 'api'" :refresh-events="refreshEvents" />
+      <p v-if="refreshError" role="alert">{{ refreshError }}</p>
       <p v-if="isLoading" class="load-status" role="status">카메라와 탐지 이벤트를 불러오는 중입니다.</p>
       <div v-else-if="loadError" class="load-status" role="alert"><p>{{ loadError }}</p><button class="primary-button" @click="loadData">다시 시도</button></div>
       <template v-else>
@@ -116,7 +138,7 @@ onBeforeUnmount(() => {
         </section>
         <section class="dashboard-grid" aria-label="지도 및 탐지 현황">
           <MonitoringMap class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select-camera="selectCamera" />
-          <EventDetail class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" />
+          <EventDetail class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" :show-video="false" />
           <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" />
         </section>
       </template>

@@ -74,8 +74,12 @@ async function initialize() {
   }
 }
 watch(mode, value => map?.setMapTypeId(maps.MapTypeId[value]))
-watch(() => [props.cameras, props.events], () => { render(); showAll() }, { deep: true })
-watch(() => [props.selectedEvent, props.selectedCamera], () => {
+watch(() => props.cameras, () => { render(); showAll() }, { deep: true })
+watch(() => [props.events, props.selectedEvent, props.selectedCamera], render, { deep: true })
+// 이벤트 목록 갱신으로 객체가 교체되어도 선택 좌표가 같으면 사용자의 지도 시점을 유지합니다.
+watch(() => [props.selectedEvent?.id, props.selectedEvent?.estimatedLocation?.latitude,
+  props.selectedEvent?.estimatedLocation?.longitude, props.selectedCamera?.id,
+  props.selectedCamera?.latitude, props.selectedCamera?.longitude].join('|'), () => {
   render()
   focusSelection()
 }, { deep: true })
