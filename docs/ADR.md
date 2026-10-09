@@ -40,3 +40,16 @@
 - Backend는 영상을 저장하지 않고 `GET /api/test-runs/:id/stream`으로 중계
 - 실행 ID로 영상과 탐지 결과를 연결
 - Backend가 실행 ID를 생성해 `run_id`, `camera_id`, 영상 경로와 전송 주소를 AI 프로세스 인자로 전달
+
+## ADR 0007 · Test API 인증
+
+- 상태: 채택
+- Frontend가 호출하는 Test 실행·상태·영상 스트림 API는 관리자 JWT로 인증
+- AI가 호출하는 영상·탐지 콜백 API는 `AI_CALLBACK_TOKEN`으로 인증
+
+## ADR 0008 · Test 실행 중 SMS 중복 방지
+
+- 상태: 제안
+- 데모에서는 같은 `run_id`와 탐지 클래스 조합에 SMS를 한 번만 발송
+- `fire`와 `smoke`는 각각 별도 알림
+- 실시간 CCTV의 연속 탐지 이벤트 구분과 재알림 간격은 실제 탐지 누락·오탐을 확인한 뒤 결정

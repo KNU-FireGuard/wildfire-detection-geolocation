@@ -81,6 +81,10 @@
 
 ## 카메라별 Test
 
+- Frontend에서 호출하는 Test 실행·상태·영상 스트림 API는 관리자 JWT 필요
+- Header: `Authorization: Bearer <JWT>`
+- AI 콜백 API는 관리자 JWT 대신 `X-AI-Token` 사용
+
 ### `POST /cameras/:camera_id/test-runs`
 
 - 성공 `202`
@@ -105,7 +109,7 @@
 ### `GET /test-runs/:run_id`
 
 - 성공 `200`
-- `status`: `ready` | `running` | `completed` | `failed` | `cancelled`
+- `status`: `ready` | `running` | `completed` | `failed`
 - 응답: `{ "id": 123, "camera_id": 1, "video_id": 7, "status": "running", "error": null }`
 
 ### `POST /test-runs/:run_id/video`
