@@ -1,268 +1,280 @@
-# FireGuard AI - API 명세서 (초안)
+# FireGuard AI API 명세
 
-이 문서는 **FireGuard AI (CCTV·영상 기반 산불 탐지 및 위치 추정 모니터링 시스템)**의 프론트엔드, AI, 백엔드 간 협업을 위한 API 및 데이터 인터페이스 명세서입니다.
+[README](../README.md) · [시스템 아키텍처](System_architecture.md) · [ERD](DATABASE.md)
 
-> **[안내]**  
-> AI → Backend 결과 전달 JSON의 기본 형식은 합의되었습니다. 카메라·영상·이벤트 목록, 이벤트 상세 조회, 로컬 영상 스트리밍을 구현했습니다. Frontend용 조회 응답은 아래 개발용 규격을 사용합니다. AI 수신 API는 기본 입력값 검사와 로컬 수신·응답을 구현했으며, 인증·탐지 결과 저장·영상 등록은 구현 전입니다.
->
-> 아래 API 경로는 설계 초안입니다. 합의된 요청 예시와 미정 사항을 구분하여 관리합니다.
+## 상태 구분
 
----
+- **구현**: 현재 Backend 코드에서 호출 가능
+- **부분 구현**: 경로는 있지만 목표 요청·처리는 아직 미구현
+- **계획**: 팀이 작업할 목표 계약이며 현재 호출하면 `404`
+- **보류**: 데모에 필요하지 않아 요청·응답을 아직 정하지 않음
+- 로컬 Base URL: `http://127.0.0.1:3000/api`
+- JSON 요청·응답: `Content-Type: application/json; charset=utf-8`
+- 공통 오류 JSON: `{ "error": "오류 메시지" }`
+- JSON 문법 오류 `400`, 본문 크기 초과 `413`, 서버 오류 `500`
 
-## 1. 기본 정보
+## 데모 목표
 
-- **Base URL:** `http://127.0.0.1:3000/api` (로컬 개발 기준)
-- **데이터 형식:** JSON 요청·응답은 `Content-Type: application/json; charset=utf-8`을 사용합니다. 영상 파일 업로드 방식과 요청 형식은 별도 협의 예정입니다.
-- **공통 응답 규칙:**
-  - 성공 시: HTTP 상태 코드 `200 OK` 또는 `201 Created`
-  - 실패 시: HTTP 에러 코드(`400`, `404`, `500`)와 함께 에러 메시지 반환
-    ```json
+- Test 버튼 한 번으로 준비된 영상 4개를 처음부터 동시에 재생하고 분석 시작
+- 사용자 일시정지·되감기·탐색 기능 없음
+- Frontend는 영상 스트리밍 API로 재생하고 프레임을 AI로 업로드하지 않음
+- 같은 서버의 Backend가 Python 추론 코드에 영상 파일 경로와 카메라 ID 전달
+- AI는 재생 시간에 맞춰 영상 처리, `fire`·`smoke` 탐지 결과 전송
+- Backend는 AI 결과를 받은 현재 시각을 탐지 시각으로 기록
+- 실시간 바운딩박스 표시는 이번 단계에서 제외
+- `fire`와 `smoke` 모두 SMS 대상이며 문구는 종류별로 구분
+- 이벤트 확정 기준과 정확한 SMS 문구·중복 발송·재시도 규칙은 SMS 구현 전에 결정
+
+## API 목록
+
+| 상태 | Method | 경로 | 용도 |
+| --- | --- | --- | --- |
+| 구현 | `GET` | `/api/cameras` | 카메라 목록 |
+| 구현 | `GET` | `/api/videos` | 영상 목록 |
+| 구현 | `GET` | `/api/videos/:id/stream` | 로컬 영상 스트리밍 |
+| 구현 | `GET` | `/api/events` | 탐지 이벤트 목록 |
+| 구현 | `GET` | `/api/events/:id` | 탐지 이벤트 상세 |
+| 부분 구현 | `POST` | `/api/detections` | 기존 JSON 수신·반환만 가능, 목표 JSON과 저장은 미구현 |
+| 계획 | `POST` | `/api/demo-runs` | 영상 4개 일괄 재생·분석 시작 |
+| 계획 | `GET` | `/api/demo-runs/:id` | 전체·카메라별 분석 상태 |
+| 계획 | `POST` | `/api/auth/login` | 관리자 JWT 발급 |
+| 계획 | `GET` | `/api/auth/me` | 로그인 관리자 조회 |
+| 계획 | `GET` | `/api/sms-recipients` | SMS 수신자 목록 |
+| 계획 | `POST` | `/api/sms-recipients` | SMS 수신자 추가 |
+| 계획 | `PATCH` | `/api/sms-recipients/:id` | SMS 수신자 변경 |
+| 계획 | `DELETE` | `/api/sms-recipients/:id` | SMS 수신자 삭제 |
+| 보류 | `GET` | `/api/cameras/:id` | 카메라 상세 |
+| 보류 | `POST` | `/api/videos` | 일반 영상 등록·업로드 |
+
+## 구현된 조회 API
+
+### 목록 공통 규칙
+
+- 응답 형식: `{ "items": [], "limit": 50, "offset": 0 }`
+- `limit`: 기본 `50`, 허용 `1~100`
+- `offset`: 기본 `0`, 허용 `0~2147483647`
+- 잘못된 값·중복 파라미터는 `400`, 그 외 쿼리 파라미터는 무시
+- 날짜는 UTC ISO 8601 문자열 `Z`, 한국 시각 표시는 Frontend 담당
+- 빈 DB는 `items: []`
+- 아래 ID와 값은 응답 형식 예시이며 고정된 데이터가 아님
+
+### `GET /api/cameras`
+
+- ID 오름차순
+- 항목 필드: `id`, `name`, `latitude`, `longitude`, `created_at`
+- 설치 좌표를 모르면 위도·경도 모두 `null`
+
+```json
+{
+  "items": [
     {
-      "error": "에러 메시지"
+      "id": 1,
+      "name": "개발용 카메라",
+      "latitude": 35.123456,
+      "longitude": 128.123456,
+      "created_at": "2026-10-01T09:00:00.000Z"
     }
-    ```
-
----
-
-## 2. API 목록 요약
-
-| 분류 | HTTP Method | Endpoint | 설명 | 상태 |
-|---|---|---|---|:---:|
-| **CCTV** | `GET` | `/api/cameras` | CCTV 카메라 목록 페이지 조회 (지도 표시용) | 구현 |
-| **CCTV** | `GET` | `/api/cameras/:id` | 특정 CCTV 상세 정보 조회 | 협의 중 |
-| **영상** | `GET` | `/api/videos` | 등록된 CCTV 영상 목록 조회 | 구현 |
-| **영상** | `GET` | `/api/videos/:id/stream` | 등록된 로컬 영상 스트리밍 (HTTP Range 지원) | 구현 |
-| **영상** | `POST` | `/api/videos` | 새 영상 파일 등록/업로드 메타데이터 생성 | 협의 중 |
-| **산불 이벤트** | `GET` | `/api/events` | 산불 감지 이벤트 목록 조회 (대시보드 목록용) | 구현 |
-| **산불 이벤트** | `GET` | `/api/events/:id` | 산불 감지 이벤트 상세 정보 조회 | 구현 |
-| **AI 연동** | `POST` | `/api/detections` | AI 탐지·위치 추정 결과 수신 | 로컬 수신·응답 구현 |
-
----
-
-## 3. Frontend 제공 API (상세)
-
-### 공통 조회 규칙
-
-- 목록은 `{ "items": [], "limit": 50, "offset": 0 }` 형태이며, 빈 DB는 빈 배열을 반환합니다.
-- 모든 목록 API에 `limit`(기본 50, 1~100)과 `offset`(기본 0, 0~2147483647)을 사용할 수 있습니다.
-- limit·offset의 잘못된 값이나 중복 전달은 400입니다. 추가 쿼리 파라미터는 무시하며 필터는 아직 지원하지 않습니다.
-- 날짜는 ISO 8601 UTC 문자열(`Z`)로 반환합니다. 화면의 한국 시각 변환은 Frontend가 담당합니다.
-- 좌표·camera_id·ended_at·error_range_m은 DB 값에 따라 null일 수 있습니다.
-- 아래 값은 응답 형식 예시이며 실제 등록 데이터가 아닙니다. 현재 DB의 INTEGER ID 범위를 사용합니다.
-- DB 오류는 공통 오류 처리기를 통해 500과 일반 오류 메시지를 반환합니다.
-
-### 3.1. CCTV 카메라 목록 조회
-
-- **Endpoint:** `GET /api/cameras`
-- **정렬:** ID 오름차순
-
-```json
-{
-  "items": [{ "id": 1, "name": "개발용 카메라", "latitude": 35.123456, "longitude": 128.123456, "created_at": "2026-10-01T09:00:00.000Z" }],
+  ],
   "limit": 50,
   "offset": 0
 }
 ```
 
-### 3.2. CCTV 상세 정보 조회 (미구현)
+### `GET /api/videos`
 
-- **Endpoint (계획):** `GET /api/cameras/:id`
-- 응답 형식은 협의 예정이며 현재 요청하면 404를 반환합니다.
-
-### 3.3. 영상 목록 조회
-
-- **Endpoint:** `GET /api/videos`
-- **정렬:** ID 내림차순
-- DB에 등록된 메타데이터를 조회합니다. 로컬 영상 파일은 자동 등록되지 않습니다.
-- 서버 내부 `file_path`는 반환하지 않습니다. 영상은 `GET /api/videos/:id/stream`으로 재생하며, 브라우저 탐색을 위해 단일 HTTP Range 요청을 지원합니다. 파일은 프로젝트의 `data/videos/` 아래에서만 제공합니다.
+- ID 내림차순
+- 항목 필드: `id`, `camera_id`, `original_filename`, `created_at`
+- `camera_id`는 `null` 가능
+- 내부 `file_path`는 반환하지 않음
+- 파일만 `data/videos/`에 놓아도 자동 등록되지 않으며 현재 데모 데이터는 `sql/seed.dev.sql`로 등록
 
 ```json
 {
-  "items": [{ "id": 3, "camera_id": 1, "original_filename": "camera01_sample.mp4", "created_at": "2026-10-01T09:00:00.000Z" }],
+  "items": [
+    {
+      "id": 3,
+      "camera_id": 1,
+      "original_filename": "camera01_sample.mp4",
+      "created_at": "2026-10-01T09:00:00.000Z"
+    }
+  ],
   "limit": 50,
   "offset": 0
 }
 ```
 
-### 3.4. 영상 스트리밍
+### `GET /api/videos/:id/stream`
 
-- **Endpoint:** `GET /api/videos/:id/stream`
-- **성공:** 일반 요청은 `200 OK`, Range 요청은 `206 Partial Content`와 `Content-Range`를 반환합니다.
-- 브라우저의 `<video controls>`에서 URL을 지정하면 재생 및 탐색을 처리할 수 있습니다. 서버는 `Accept-Ranges: bytes`를 제공합니다.
-- 서버 내부 저장 경로는 노출하지 않으며, 등록 파일이 `data/videos/` 바깥을 가리키면 제공하지 않습니다.
-- 잘못된 영상 ID는 400, 등록되지 않은 영상이나 파일이 없으면 404, 문법이 잘못되었거나 파일 범위를 벗어난 Range 요청은 `Content-Range: bytes */파일크기`와 함께 416을 반환합니다.
+- `data/videos/` 아래에 실제 파일이 있는 등록 영상만 제공
+- 일반 요청 `200`, 단일 HTTP Range 요청 `206`와 `Content-Range`
+- `Accept-Ranges: bytes` 제공
+- 잘못된 ID `400`, 영상·파일 없음 또는 허용 경로 밖 `404`
+- 잘못된 Range `416`과 `Content-Range: bytes */파일크기`
+- 브라우저의 영상 재생·탐색은 지원하지만 데모 화면에는 사용자 재생 조작을 제공하지 않음
 
-### 3.5. 산불 감지 이벤트 목록 조회
+### `GET /api/events` · `GET /api/events/:id`
 
-- **Endpoint:** `GET /api/events`
-- **예시:** `GET /api/events?limit=20&offset=0`
-- **정렬:** started_at 내림차순, 같은 시각이면 ID 내림차순
-- `camera_id`는 이벤트와 연결된 영상에서 가져옵니다.
+- 목록은 `started_at` 내림차순, 같은 시각이면 ID 내림차순
+- `camera_id`는 연결된 영상에서 조회하며 `null` 가능
+- 상세 응답은 `{ "item": { ... } }`이고 항목 필드는 목록과 동일
+- 상세 ID가 1~2147483647의 정수가 아니면 `400`, 항목이 없으면 `404`
 
 ```json
 {
-  "items": [{
-    "id": 1,
-    "video_id": 3,
-    "camera_id": 1,
-    "class": "fire",
-    "started_at": "2026-10-01T09:10:00.000Z",
-    "ended_at": null,
-    "max_confidence": 0.94,
-    "estimated_latitude": 35.123456,
-    "estimated_longitude": 128.123456,
-    "error_range_m": 50,
-    "created_at": "2026-10-01T09:10:00.000Z",
-    "updated_at": "2026-10-01T09:10:00.000Z"
-  }],
+  "items": [
+    {
+      "id": 1,
+      "video_id": 3,
+      "camera_id": 1,
+      "class": "fire",
+      "started_at": "2026-10-01T09:10:00.000Z",
+      "ended_at": null,
+      "max_confidence": 0.94,
+      "estimated_latitude": null,
+      "estimated_longitude": null,
+      "error_range_m": null,
+      "created_at": "2026-10-01T09:10:00.000Z",
+      "updated_at": "2026-10-01T09:10:00.000Z"
+    }
+  ],
   "limit": 50,
   "offset": 0
 }
 ```
 
-### 3.6. 산불 감지 이벤트 상세 조회
+## 계획된 일괄 데모 API
 
-- **Endpoint:** `GET /api/events/:id`
-- **응답:** `{ "item": { ... } }`, item의 필드는 위 목록의 이벤트와 같습니다.
-- ID가 1~2147483647의 정수가 아니면 400, 해당 이벤트가 없으면 404를 반환합니다.
+### `POST /api/demo-runs`
+
+- 요청 본문 없음
+- DB의 영상이 정확히 4개이고 서로 다른 카메라에 연결되며 모든 파일을 읽을 수 있어야 시작
+- 조건을 충족하지 못하거나 이미 실행 중이면 `409` 오류 JSON
+- 영상 4개를 병행 분석하고 각 스트리밍 URL 반환
+- `202 Accepted`는 실행 접수만 뜻하며 AI·SMS 처리 성공을 보장하지 않음
+- Test 버튼의 JWT 요구 여부는 관리자 기능 구현 전에 결정
 
 ```json
-{ "error": "탐지 이벤트가 없습니다." }
+{
+  "id": 1,
+  "status": "running",
+  "videos": [
+    { "camera_id": 1, "video_id": 1, "stream_url": "/api/videos/1/stream" },
+    { "camera_id": 2, "video_id": 2, "stream_url": "/api/videos/2/stream" },
+    { "camera_id": 3, "video_id": 3, "stream_url": "/api/videos/3/stream" },
+    { "camera_id": 4, "video_id": 4, "stream_url": "/api/videos/4/stream" }
+  ]
+}
 ```
 
----
+### Backend → AI 실행 계약
 
-### 3.7. 영상 등록
+- 영상마다 같은 서버의 Python 프로세스 하나 실행
+- 아래 경로와 ID는 예시이며 `ai/infer.py`는 아직 미구현
 
-- **Endpoint:** `POST /api/videos`
-- **설명:** 분석에 사용할 영상을 등록합니다. 실제 파일 업로드와 서버에 저장된 영상의 메타데이터 등록 중 어떤 방식을 사용할지는 협의 예정입니다.
-- **Request:**
-  ```text
-  [전송 방식과 요청 필드 협의 예정]
-  ```
-- **Response JSON:**
-  ```text
-  [협의 및 확정 예정 - 논의 후 작성]
-  ```
+```text
+python3 ai/infer.py --video-path /absolute/path/to/video.mp4 --camera-id 1 --callback-url http://127.0.0.1:3000/api/detections
+```
 
----
+- `--video-path`: Backend가 `data/videos/` 안의 등록 파일을 검사해 얻은 절대 경로
+- `--camera-id`: 해당 영상의 카메라 ID이며 탐지 JSON의 `camera_id`와 일치
+- `--callback-url`: 탐지 결과를 보낼 Backend 주소, 별도 AI용 FastAPI 서버 없음
+- 영상 재생 시간에 맞춰 추론하고 파일을 정상 처리하면 종료 코드 `0`, 실패하면 `0`이 아닌 코드
+- Python 의존성 설치와 AI 요청 인증 방식은 연동 전에 정함
 
-## 4. AI → Backend 결과 수신 API
+### `GET /api/demo-runs/:id`
 
-### 4.1. 탐지 및 위치 추정 결과 수신
+- 시작 후 발생한 AI 실패를 전체·카메라별 상태로 조회
+- 전체 상태: `running`, `completed`, `completed_with_errors`, `failed`
+- 카메라 상태: `running`, `completed`, `failed`
+- 카메라 한 곳의 실패가 나머지 분석을 중단하지 않음
+- 잘못된 ID `400`, 없는 실행 `404`
+- 상태 저장 범위와 서버 재시작 후 조회 방식은 구현 전에 정함
 
-- **Endpoint (초안):** `POST /api/detections`
-- **상태:** 로컬 수신·응답 구현 (입력값 검사 구현, 인증·DB 저장 미구현)
-- **Content-Type:** `application/json`
-- **처리 방향:** AI 결과는 Backend가 받아 처리·저장하며, AI가 PostgreSQL에 직접 접근하지 않습니다. 이 요청 하나를 DB 이벤트 하나로 저장한다는 의미는 아니며, 연속 탐지의 이벤트 묶음 기준은 별도로 정합니다.
+```json
+{
+  "id": 1,
+  "status": "completed_with_errors",
+  "cameras": [
+    { "camera_id": 1, "status": "completed", "error": null },
+    { "camera_id": 2, "status": "completed", "error": null },
+    { "camera_id": 3, "status": "failed", "error": "AI 분석에 실패했습니다" },
+    { "camera_id": 4, "status": "completed", "error": null }
+  ]
+}
+```
 
-#### 요청 JSON 및 필드 설명
+## AI → Backend 탐지 JSON
 
-AI 모듈의 탐지 결과와 위치 추정 결과는 다음 JSON 형식으로 Backend에 전달하기로 했습니다. 아래 값은 예시이며, 이 형식의 합의가 수신 API 구현 완료를 의미하지는 않습니다. Backend가 처리한 Frontend용 응답 JSON은 별도로 정의합니다.
+### 목표 계약 · 미구현
+
+- 경로: `POST /api/detections`
+- 탐지 객체 하나당 요청 한 건, 탐지가 없는 프레임은 요청하지 않음
+- `camera_id`로 현재 실행의 영상 ID를 Backend가 찾음
+- AI JSON에 `video_id`, 촬영 시각, 재생 위치, 실행 ID를 넣지 않음
+- Backend가 결과 수신 시각을 UTC 탐지 시각으로 기록
+- 위치를 추정할 수 없으면 `location_estimation: null`
+- 카메라 설치 좌표를 화재 위치로 대체하지 않음
 
 ```json
 {
   "camera_id": 1,
-  "video_id": 3,
-  "timestamp": "2026-10-01T18:10:00",
   "detection": {
     "class": "fire",
     "confidence": 0.94,
-    "bbox": {
-      "x1": 420,
-      "y1": 210,
-      "x2": 550,
-      "y2": 300
-    }
+    "bbox": { "x1": 420, "y1": 210, "x2": 550, "y2": 300 }
   },
-  "location_estimation": {
-    "latitude": 35.123456,
-    "longitude": 128.123456,
-    "error_range_m": 50
-  }
+  "location_estimation": null
 }
 ```
 
-| 필드 | 의미 |
+| 필드 | 목표 규칙 |
 | --- | --- |
-| `camera_id` | 카메라 식별자 |
-| `video_id` | 영상 식별자 |
-| `timestamp` | AI 프로그램이 실제로 탐지한 시각 문자열 |
-| `detection.class` | 탐지 클래스 (예시: `fire`) |
-| `detection.confidence` | 탐지 신뢰도 |
-| `detection.bbox` | 탐지 영역의 두 좌표 쌍 (`x1`, `y1`, `x2`, `y2`) |
-| `location_estimation.latitude` | 추정 화재 위치의 위도 |
-| `location_estimation.longitude` | 추정 화재 위치의 경도 |
-| `location_estimation.error_range_m` | 위치 추정 오차 범위 (미터) |
-
-좌표는 실제 화점의 확정 위치가 아닌 추정 결과입니다. 예시의 `timestamp`에는 시간대가 없으므로 시간대 표기는 추가로 정해야 합니다. 이 값은 영상 재생 시간이 아니라 AI 프로그램이 실제로 탐지한 시각입니다. bbox의 좌표 기준·단위, 오차 범위의 구체적인 의미, 위치 추정 실패 시 표현도 별도 협의 사항입니다.
-
-#### 추가로 정할 규칙
-
-- 각 필드의 필수 여부와 null 허용 여부
-- 허용할 탐지 클래스 목록과 값의 검증 범위
-- 한 영상에서 여러 객체가 탐지될 때의 전달 방식과 전송 주기
-- 성공 응답의 상태 코드·JSON 및 오류별 응답 규칙
-
-#### 응답 JSON
-
-현재 로컬 테스트 응답은 `200 OK`입니다. `data`는 요청 JSON 그대로이며 저장 완료를 의미하지 않습니다. 최종 연동용 응답 규칙은 추후 확정합니다.
-
-```json
-{
-  "message": "탐지 결과를 수신했습니다.",
-  "data": {
-    "camera_id": 1,
-    "video_id": 3,
-    "timestamp": "2026-10-01T18:10:00",
-    "detection": {
-      "class": "fire",
-      "confidence": 0.94,
-      "bbox": {
-        "x1": 420,
-        "y1": 210,
-        "x2": 550,
-        "y2": 300
-      }
-    },
-    "location_estimation": {
-      "latitude": 35.123456,
-      "longitude": 128.123456,
-      "error_range_m": 50
-    }
-  }
-}
-```
-
-기본 입력값 검사는 구현했으며 인증은 미구현입니다. 기존 JSON 파서가 문법 오류는 400, 본문 크기 제한 초과는 413으로 처리합니다. 외부 공개 전 접근 제어를 추가해야 합니다.
-
-#### 입력값 검사 규칙 (현재 개발용 기준)
-
-예시의 모든 필드를 필수로 검사합니다. 필수 여부와 null 처리의 최종 팀 합의는 별도로 진행합니다.
-
-| 필드 | 검사 규칙 |
-| --- | --- |
-| 본문, `detection`, `detection.bbox`, `location_estimation` | 배열·null이 아닌 JSON 객체 |
-| `camera_id`, `video_id` | 1 이상 `Number.MAX_SAFE_INTEGER` 이하의 정수 |
-| `timestamp`, `detection.class` | 공백만 있지 않은 문자열 |
+| `camera_id` | 현재 데모 카메라 ID, 1~2147483647의 정수 |
+| `detection.class` | `fire` 또는 `smoke` |
 | `detection.confidence` | 0~1의 유한한 숫자 |
-| bbox의 `x1`, `y1`, `x2`, `y2` | 각각 유한한 숫자 |
-| `location_estimation.latitude` | -90~90의 유한한 숫자 |
-| `location_estimation.longitude` | -180~180의 유한한 숫자 |
-| `location_estimation.error_range_m` | 0 이상의 유한한 숫자 |
+| `detection.bbox` | 원본 프레임의 픽셀 좌표, `x1 < x2` 및 `y1 < y2` |
+| `location_estimation` | `null` 또는 위도·경도·오차 범위 객체 |
 
-숫자 문자열을 자동 변환하지 않으며 추가 필드는 허용합니다. timestamp의 날짜 유효성·시간대, 클래스 목록, bbox 순서·단위·이미지 경계는 검사하지 않습니다. 위치 추정 실패 표현이 미정이므로 현재 null 위치는 거절합니다.
+- 위치 객체의 `latitude`: -90~90
+- 위치 객체의 `longitude`: -180~180
+- 위치 객체의 `error_range_m`: 0 이상의 숫자 또는 `null`
+- 목표 응답: 탐지 결과 검증·처리에 성공한 경우 `200 { "accepted": true }`, 이벤트 확정이나 SMS 발송 완료를 뜻하지 않음
+- 실패 시 성공 응답을 보내지 않음
+- AI 요청의 접근 제한 방식은 연동 전에 결정
+- `fire`·`smoke`는 종류별 SMS 문구 사용
+- 이벤트 확정 기준, 두 종류가 함께 탐지될 때 발송 건수, 재실행·재시도 규칙은 미정
 
-검사 실패 시 `400 Bad Request` 응답 예시:
+### 현재 코드 · 이전 개발용 JSON
 
-```json
-{
-  "error": "입력값이 올바르지 않습니다.",
-  "details": [
-    {
-      "field": "detection.confidence",
-      "message": "0 이상 1 이하의 숫자여야 합니다."
-    }
-  ]
-}
-```
+- 현재 `POST /api/detections`는 새 목표 JSON을 받지 못하며 `400` 반환
+- 현재 필수 항목: `camera_id`, `video_id`, `timestamp`, `detection`, `detection.bbox`, `location_estimation` 객체
+- 현재 검증: 두 ID는 양의 안전한 정수, `timestamp`·클래스는 비어 있지 않은 문자열, 신뢰도 0~1, bbox 좌표는 유한한 숫자, 위치 좌표는 범위 검사
+- 현재 코드는 날짜 유효성·시간대, 클래스 종류, bbox 순서·영상 경계는 검사하지 않음
+- 현재 성공 응답: `200 { "message": "탐지 결과를 수신했습니다.", "data": 요청 JSON }`
+- 현재 성공 응답은 DB 저장이나 SMS 발송을 뜻하지 않음
+- 입력 오류 `400`과 `{ "error": "입력값이 올바르지 않습니다.", "details": [{ "field": "필드명", "message": "설명" }] }`
+- 새 계약 구현 시 검증 코드와 응답을 함께 변경하고 이 현행 안내를 제거
+
+## 관리자·SMS API · 모두 미구현
+
+| Method · 경로 | 요청 | 성공 응답 |
+| --- | --- | --- |
+| `POST /api/auth/login` | `{ "username": "admin", "password": "입력값" }` | `200 { "access_token": "JWT", "token_type": "Bearer", "expires_in": 3600 }` |
+| `GET /api/auth/me` | `Authorization: Bearer <JWT>` | `200 { "id": 1, "username": "admin" }` |
+| `GET /api/sms-recipients` | JWT | `200 { "items": [{ "id": 1, "name": "담당자", "phone_number": "01012345678", "is_active": true }] }` |
+| `POST /api/sms-recipients` | JWT · `{ "name": "담당자", "phone_number": "01012345678" }` | `201`과 생성 항목 |
+| `PATCH /api/sms-recipients/:id` | JWT · `name`, `phone_number`, `is_active` 중 변경할 필드 | `200`과 수정 항목 |
+| `DELETE /api/sms-recipients/:id` | JWT | `204`, 본문 없음 |
+
+- 로그인 입력 오류 `400`, 인증 실패 `401`
+- 수신자 입력 오류 `400`, 인증 실패 `401`, 대상 없음 `404`, 전화번호 중복 `409`
+- `expires_in: 3600`은 예시이며 실제 만료·폐기 규칙은 구현 전에 결정
+- 비밀번호 원문·해시, SMS 업체 비밀키는 응답에 포함하지 않음
+- 수신자 관리 요청에는 모두 JWT 필요
+- 기존 조회·영상 스트리밍과 Test 버튼의 인증 범위는 구현 전에 결정
+- 전화번호 형식과 `fire`·`smoke`별 SMS 문구·발송 기준·실패 처리는 SMS 연동 전에 결정
+
+## 보류한 API
+
+- `GET /api/cameras/:id`: 데모에 필요하지 않아 응답 미정, 현재 `404`
+- `POST /api/videos`: 데모 영상은 `sql/seed.dev.sql`로 등록, 업로드·메타데이터 등록 형식 미정
