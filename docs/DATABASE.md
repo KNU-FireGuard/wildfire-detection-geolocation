@@ -47,8 +47,6 @@ erDiagram
         integer id PK
         text username UK
         text password_hash
-        timestamptz created_at
-        timestamptz updated_at
     }
     sms_recipients {
         integer id PK
@@ -134,11 +132,15 @@ erDiagram
 | `id` | 자동 | 기본 키 |
 | `username` | 필수 | 공백 불가, 고유 |
 | `password_hash` | 필수 | 공백 불가, 원문 비밀번호 저장 금지 |
-| `created_at`, `updated_at` | 자동 | 수정 시 `updated_at` 갱신 |
 
 - 초기 관리자 계정은 하나로 계획
+- 고정 관리자 계정의 생성·수정 시각은 저장하지 않음
+- 루트 `.env`의 `ADMIN_USERNAME`, `ADMIN_INITIAL_PASSWORD`로 `backend/`에서 `npm run create-admin`을 최초 한 번 실행
+- 스크립트가 비밀번호를 scrypt 해시로 변환한 뒤 관리자 계정이 없는 경우에만 INSERT
+- 해시 형식: `scrypt$N$r$p$salt$hash`, 로그인 구현에서 같은 설정으로 검증
+- 생성 후 `.env`의 `ADMIN_INITIAL_PASSWORD` 값 삭제, 원문 비밀번호는 DB와 Git에 저장하지 않음
 - JWT는 DB에 저장하지 않음
-- 최초 계정 생성과 JWT 만료·폐기는 구현 전에 결정
+- JWT 만료·폐기는 로그인 구현 전에 결정
 
 ### `sms_recipients` · 공용 SMS 수신자
 
@@ -159,7 +161,7 @@ erDiagram
 
 - 새 DB: `sql/init.sql`로 다섯 테이블 생성
 - 기존 DB: `sql/init.sql`을 실행해 누락된 관리자·SMS 수신자 테이블 생성
-- 이미 존재하는 테이블의 컬럼·제약조건은 `sql/init.sql`로 변경되지 않음
+- 기존 DB에서 `sql/init.sql`을 다시 실행하면 `admins.created_at`, `admins.updated_at`을 제거하고 다른 기존 테이블의 컬럼·제약조건은 변경하지 않음
 - 샘플 영상: 조장에게 받은 파일을 `data/videos/`에 놓고 `sql/seed.dev.sql`로 메타데이터 등록
 - 등록 순서: 카메라 → 생성 ID 확인 → 영상과 카메라 연결 → 영상 ID 확인
 - 파일만 배치해도 DB에 자동 등록되지 않음

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 
-test('PostgreSQL: populated lists, pagination, nullable relations and event detail', {
+test('PostgreSQL: catalog queries and initial admin insert', {
   skip: process.env.npm_lifecycle_event !== 'test:integration' && process.env.RUN_DB_TESTS !== '1',
 }, async () => {
   const pool = require('../src/config/db');
@@ -16,6 +16,15 @@ test('PostgreSQL: populated lists, pagination, nullable relations and event deta
       .replaceAll('CREATE TABLE IF NOT EXISTS ', 'CREATE TEMP TABLE ')
       .replace(/COMMIT;\s*$/, '');
     await client.query(schema);
+
+    const { createAdmin } = require('../src/scripts/create-admin');
+    assert.equal(await createAdmin(client, 'admin', 'long-local-password'), true);
+    assert.equal(await createAdmin(client, 'admin', 'long-local-password'), false);
+    const adminRows = await client.query('SELECT username, password_hash FROM admins');
+    assert.equal(adminRows.rows.length, 1);
+    assert.equal(adminRows.rows[0].username, 'admin');
+    assert.match(adminRows.rows[0].password_hash, /^scrypt\$/);
+
     await client.query(`
       INSERT INTO cameras (name, latitude, longitude)
       VALUES ('test camera', 35.1, 128.1), ('unknown location', NULL, NULL);
