@@ -28,7 +28,7 @@ if not exist ".env" copy ".env.example" ".env"
 
 - `.env`의 `DB_PASSWORD`, `ADMIN_USERNAME`, `ADMIN_INITIAL_PASSWORD`, `JWT_SECRET`, `AI_CALLBACK_TOKEN` 입력
 - `JWT_SECRET`은 32바이트 이상의 임의 문자열로 설정
-- `AI_CALLBACK_TOKEN`은 AI 콜백 인증에 사용할 임의 문자열로 설정
+- `AI_CALLBACK_TOKEN`은 32바이트 이상의 임의 문자열로 설정
 - 초기 관리자 비밀번호는 12자 이상으로 설정
 
 카메라 Test 기능을 사용하려면 AI 패키지 설치
