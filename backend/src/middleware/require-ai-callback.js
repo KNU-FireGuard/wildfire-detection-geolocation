@@ -2,8 +2,12 @@ const { timingSafeEqual } = require('node:crypto');
 
 function getAiCallbackToken() {
   const token = process.env.AI_CALLBACK_TOKEN;
-  if (typeof token !== 'string' || token.length === 0) {
-    throw new Error('AI_CALLBACK_TOKEN을 프로젝트 루트의 .env에 설정하세요.');
+  if (
+    typeof token !== 'string'
+    || Buffer.byteLength(token, 'utf8') < 32
+    || /^replace_with_/i.test(token)
+  ) {
+    throw new Error('AI_CALLBACK_TOKEN은 32바이트 이상의 임의 문자열로 설정하세요.');
   }
   return token;
 }
