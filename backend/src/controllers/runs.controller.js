@@ -9,7 +9,7 @@ const testRuns = require('../services/run-manager');
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../../');
 const AI_RUNNER = path.join(PROJECT_ROOT, 'ai', 'inference', 'backend_connect.py');
-const DEFAULT_MODEL = path.join(PROJECT_ROOT, 'ai', 'yolo26n_fire_50', 'weights', 'best.pt');
+const DEFAULT_MODEL = path.join(PROJECT_ROOT, 'ai', 'weights', 'yolo26n_fire_50', 'weights', 'best.pt');
 const FINAL_BOUNDARY = Buffer.from('--frame--\r\n');
 const AI_RUNTIME_ENV_KEYS = [
   'PATH', 'PATHEXT', 'SystemRoot', 'WINDIR', 'SystemDrive', 'COMSPEC',
