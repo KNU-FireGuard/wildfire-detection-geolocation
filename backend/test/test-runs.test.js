@@ -16,6 +16,11 @@ delete process.env.AI_MODEL_PATH;
 
 const fixtureFilename = `test-run-${randomUUID()}.mp4`;
 const fixturePath = path.resolve(__dirname, '../../data/videos', fixtureFilename);
+const expectedModelPath = path.resolve(__dirname, '../../ai/weights/yolo26n_fire_50/weights/best.pt');
+const originalAccess = fs.access;
+fs.access = (file, ...args) => file === expectedModelPath
+  ? Promise.resolve()
+  : originalAccess(file, ...args);
 const queryCalls = [];
 const poolPath = require.resolve('../src/config/db');
 require.cache[poolPath] = {
@@ -71,6 +76,7 @@ before(async () => {
 after(async () => {
   if (server) await new Promise(resolve => server.close(resolve));
   await fs.rm(fixturePath, { force: true });
+  fs.access = originalAccess;
   if (originalDbPassword === undefined) delete process.env.DB_PASSWORD;
   else process.env.DB_PASSWORD = originalDbPassword;
 });
@@ -110,6 +116,7 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
   assert.ok(child.args.includes('http://127.0.0.1:3000/api/detections'));
   assert.ok(child.args.includes(`http://127.0.0.1:3000/api/test-runs/${run.id}/video`));
   assert.ok(child.args.includes(path.resolve(__dirname, '../../data/videos', fixtureFilename)));
+  assert.equal(child.args[child.args.indexOf('--model-path') + 1], expectedModelPath);
   assert.equal(child.options.env.AI_CALLBACK_TOKEN, process.env.AI_CALLBACK_TOKEN);
   assert.equal(child.options.env.PATH, process.env.PATH);
   assert.equal(Object.hasOwn(child.options.env, 'DB_PASSWORD'), false);
