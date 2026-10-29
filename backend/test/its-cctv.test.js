@@ -15,23 +15,26 @@ const entries = [
   cctvname: name,
   coordx: String(longitude),
   coordy: String(latitude),
-  cctvtype: '4',
-  cctvurl: `https://video.example.test/${encodeURIComponent(name)}.m3u8`,
+  cctvtype: '1',
+  cctvformat: 'HLS',
+  cctvurl: `http://video.example.test/${encodeURIComponent(name)}.m3u8`,
   roadsectionid: name,
 }));
 
-test('ITS 응답에서 HTTPS 실시간 영상과 유효한 좌표만 추출한다', () => {
+test('ITS 응답에서 공식 유형 1의 HLS 영상과 유효한 좌표만 추출한다', () => {
   const cameras = normalizeItsResponse({ response: { data: [
     entries[0],
-    { ...entries[1], cctvurl: 'http://video.example.test/plain.m3u8' },
+    { ...entries[1], cctvurl: 'ftp://video.example.test/plain.m3u8' },
     { ...entries[2], coordx: 'not-a-number' },
-    { ...entries[3], cctvtype: '2' },
+    { ...entries[3], cctvtype: '4', cctvurl: 'https://video.example.test/undocumented.m3u8' },
+    { ...entries[4], cctvformat: 'MP4' },
   ] } });
 
   assert.equal(cameras.length, 1);
   assert.equal(cameras[0].name, '서울');
   assert.equal(cameras[0].latitude, 37.57);
   assert.equal(cameras[0].longitude, 126.98);
+  assert.equal(cameras[0].streamUrl, entries[0].cctvurl);
   assert.match(cameras[0].providerKey, /^[a-f0-9]{32}$/);
 });
 
@@ -64,7 +67,7 @@ test('ITS 클라이언트는 명시적으로 호출될 때만 키를 사용하�
   assert.equal(urls[0].pathname, '/cctvInfo');
   assert.equal(urls[0].searchParams.get('apiKey'), 'test-key');
   assert.equal(urls[0].searchParams.get('type'), 'its');
-  assert.equal(urls[0].searchParams.get('cctvType'), '4');
+  assert.equal(urls[0].searchParams.get('cctvType'), '1');
   assert.equal(urls[0].searchParams.get('getType'), 'json');
 
   const broken = createItsClient({ apiKey: 'test-key', fetchImpl: async () => ({ ok: false, status: 503 }) });

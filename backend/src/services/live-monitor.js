@@ -171,7 +171,7 @@ function createLiveMonitor({
     const items = listing.items || [];
     const valid = items.length === 6 && items.every(item =>
       Number.isSafeInteger(item.cameraId) && item.cameraId > 0
-      && typeof item.streamUrl === 'string' && item.streamUrl.startsWith('https://'));
+      && typeof item.streamUrl === 'string' && /^https?:\/\//.test(item.streamUrl));
     const next = valid ? items.map(item => ({
       cameraId: item.cameraId, providerKey: item.providerKey, name: item.name,
       streamUrl: item.streamUrl, run: null, state: 'waiting_for_ai', lastFrameAt: null,

@@ -35,7 +35,8 @@ flowchart LR
 ## 영상 입력
 
 - `test` 카메라: `data/videos/`의 등록 MP4
-- `live` 카메라: 수동 갱신한 ITS CCTV HTTPS HLS 주소, 브라우저에서 직접 재생
+- `live` 카메라: 수동 갱신한 ITS CCTV HTTP 또는 HTTPS HLS 주소, 브라우저에서 직접 재생
+- 공식 HLS 유형 `cctvType=1`의 운영 응답은 HTTP 주소, HTTPS 화면 배포 시 영상 전달 경로 추가 필요
 - ITS 키는 Backend 환경변수에만 저장, 지도 조회와 영상 재생은 ITS 목록 API를 호출하지 않음
 - 키가 없거나 목록을 갱신하지 않은 경우 저장된 목록만 표시, 최초 목록은 비어 있음
 - ITS 목록은 `data/its-cctv-cache.json`에 저장, 관리자 수동 요청으로만 갱신

@@ -65,7 +65,7 @@ function createCctvCatalog({
         await readCache();
         await fs.mkdir(path.dirname(cachePath), { recursive: true });
         const candidates = await itsClient.fetchCctvs();
-        if (candidates.length < 6) throw new Error('재생 가능한 HTTPS HLS CCTV가 6개 미만입니다. 캐시는 유지됩니다.');
+        if (candidates.length < 6) throw new Error('재생 가능한 HLS CCTV가 6개 미만입니다. 캐시는 유지됩니다.');
         const selected = { refreshedAt: now().toISOString(), items: selectDistributed(candidates, 6) };
         await writePrivate(`${cachePath}.pending`, selected);
         return savePending(selected);

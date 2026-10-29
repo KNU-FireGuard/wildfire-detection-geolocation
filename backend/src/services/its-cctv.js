@@ -11,7 +11,8 @@ function normalizeItsResponse(body) {
     const longitude = Number(item.coordx);
     let url;
     try { url = new URL(item.cctvurl); } catch { return []; }
-    if (String(item.cctvtype) !== '4' || url.protocol !== 'https:'
+    if (String(item.cctvtype) !== '1' || String(item.cctvformat).trim().toUpperCase() !== 'HLS'
+      || !['http:', 'https:'].includes(url.protocol)
       || !Number.isFinite(latitude) || !Number.isFinite(longitude)
       || latitude < 33 || latitude > 39 || longitude < 124.5 || longitude > 132) return [];
     const name = String(item.cctvname || '').trim();
@@ -51,7 +52,7 @@ function createItsClient({ apiKey, fetchImpl = fetch } = {}) {
     async fetchCctvs() {
       if (!apiKey) throw new Error('ITS_CCTV_API_KEY가 설정되지 않았습니다.');
       const url = new URL(ENDPOINT);
-      Object.entries({ apiKey, type: 'its', cctvType: '4', getType: 'json', ...KOREA_BOUNDS })
+      Object.entries({ apiKey, type: 'its', cctvType: '1', getType: 'json', ...KOREA_BOUNDS })
         .forEach(([key, value]) => url.searchParams.set(key, value));
       let response;
       try { response = await fetchImpl(url.href, { signal: AbortSignal.timeout(12000) }); }

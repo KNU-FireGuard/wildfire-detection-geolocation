@@ -27,15 +27,16 @@
 - ITS API 호출 없음, 저장된 목록만 반환
 - 성공 `200` `{ "source": "live", "refreshedAt": null, "items": [] }`
 - `source`는 항상 `live`, 키 설정 여부와 관계없이 저장된 목록만 반환
-- `live`에서 갱신 전 목록은 빈 배열, 갱신 후 항목의 `cameraId`는 DB 카메라 ID, `streamUrl`은 제공자가 반환한 HTTPS HLS 주소
+- `live`에서 갱신 전 목록은 빈 배열, 갱신 후 항목의 `cameraId`는 DB 카메라 ID, `streamUrl`은 제공자가 반환한 HTTP 또는 HTTPS HLS 주소
 - 목록은 최대 6개, 서버 시작과 목록 조회는 ITS 호출 없음
 - 목록은 관리자 수동 요청으로만 갱신, 서버 시작·화면 조회·재생 실패 시 ITS 자동 호출 없음
 
 ### `POST /live-cctvs/refresh`
 
 - 관리자 Bearer JWT와 서버의 `ITS_CCTV_API_KEY` 필요
-- ITS `cctvInfo`에 전국 범위·`cctvType=4`·JSON으로 1회 요청
-- HTTPS HLS 주소·유효 좌표만 추려 분산된 6개를 저장하고 `GET /live-cctvs`와 같은 형식 반환
+- ITS `cctvInfo`에 전국 범위·공식 HLS 유형 `cctvType=1`·JSON으로 1회 요청
+- `cctvtype=1`·`cctvformat=HLS`·HTTP 또는 HTTPS 주소·유효 좌표만 추려 분산된 6개를 저장하고 `GET /live-cctvs`와 같은 형식 반환
+- 2026-10-29 운영 응답의 `cctvType=1` 주소는 HTTP, HTTPS 화면 배포 시 브라우저의 혼합 콘텐츠 차단 가능
 - 진행 중인 갱신과 중복 요청은 거부, 완료 후 관리자가 다시 요청할 수 있음
 - ITS 응답 후 DB 저장 실패 시 대기 목록으로 재시도, 추가 ITS 호출 없음
 - `401` 인증 실패, `409` 갱신 진행 중, `502` ITS 응답 오류·후보 부족, `503` 키 없음
@@ -70,7 +71,7 @@
   "result_url": "http://127.0.0.1:3000/api/detections",
   "heartbeat_url": "http://127.0.0.1:3000/api/live-monitor/heartbeat",
   "cameras": [
-    { "run_id": 123, "camera_id": 9, "source_url": "https://provider.example/cctv.m3u8" }
+    { "run_id": 123, "camera_id": 9, "source_url": "http://provider.example/cctv.m3u8" }
   ]
 }
 ```

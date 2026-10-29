@@ -21,7 +21,7 @@ router.post('/live-cctvs/refresh', requireAdmin, async (req, res, next) => {
   catch (error) {
     if (/이미 진행 중/.test(error.message)) return res.status(409).json({ error: error.message });
     if (/ITS_CCTV_API_KEY/.test(error.message)) return res.status(503).json({ error: error.message });
-    if (/ITS CCTV|HTTPS HLS/.test(error.message)) return res.status(502).json({ error: error.message });
+    if (/ITS CCTV|HLS CCTV/.test(error.message)) return res.status(502).json({ error: error.message });
     return next(error);
   }
 });

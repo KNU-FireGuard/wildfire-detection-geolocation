@@ -39,7 +39,7 @@ test('지도 목록 조회는 저장된 실제 데이터만 반환하고 갱신�
   const body = await list.json();
   assert.equal(body.source, 'live');
   assert.ok(body.items.length <= 6);
-  assert.ok(body.items.every(item => item.streamUrl?.startsWith('https://')));
+  assert.ok(body.items.every(item => /^https?:\/\//.test(item.streamUrl || '')));
 
   const anonymous = await fetch(`${base}/refresh`, { method: 'POST' });
   assert.equal(anonymous.status, 401);

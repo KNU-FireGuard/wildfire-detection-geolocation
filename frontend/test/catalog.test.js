@@ -142,13 +142,13 @@ test('ITS 카메라는 DB 카메라 ID와 실제 영상 주소를 유지한다',
   globalThis.fetch = async url => {
     assert.equal(url, '/api/live-cctvs')
     return Response.json({ source: 'live', refreshedAt: '2026-10-29T00:00:00Z', items: [
-      { providerKey: 'key-1', cameraId: 9, name: '서울 CCTV', latitude: 37.5, longitude: 127, streamUrl: 'https://video.example.test/live.m3u8' },
+      { providerKey: 'key-1', cameraId: 9, name: '서울 CCTV', latitude: 37.5, longitude: 127, streamUrl: 'http://video.example.test/live.m3u8' },
     ] })
   }
   const result = await fetchLiveCctvs()
   assert.equal(result.source, 'live')
   assert.equal(result.cameras[0].id, 9)
-  assert.equal(result.cameras[0].streamUrl, 'https://video.example.test/live.m3u8')
+  assert.equal(result.cameras[0].streamUrl, 'http://video.example.test/live.m3u8')
 })
 
 test('관리자 인증으로만 CCTV 목록을 수동 갱신하고 서버 오류를 전달한다', async () => {

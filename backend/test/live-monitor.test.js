@@ -6,7 +6,7 @@ const { createLiveMonitor } = require('../src/services/live-monitor');
 
 const cameras = Array.from({ length: 6 }, (_, index) => ({
   providerKey: String(index + 1).padStart(32, 'a'), cameraId: index + 1,
-  name: `CCTV ${index + 1}`, streamUrl: `https://video.example.test/${index + 1}.m3u8`,
+  name: `CCTV ${index + 1}`, streamUrl: `http://video.example.test/${index + 1}.m3u8`,
 }));
 
 function fakeRuns() {
