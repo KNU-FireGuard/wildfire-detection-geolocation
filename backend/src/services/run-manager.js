@@ -23,6 +23,10 @@ function getRun(id) {
   return runs.get(id) || null;
 }
 
+function removeRun(run) {
+  runs.delete(run.id);
+}
+
 function hasActiveRun(cameraId) {
   return [...runs.values()].some(run => (
     run.camera_id === cameraId && ['ready', 'running'].includes(run.status)
@@ -108,6 +112,7 @@ module.exports = {
   getRun,
   hasActiveRun,
   markFailed,
+  removeRun,
   publicStatus,
   publish,
   stopAll,

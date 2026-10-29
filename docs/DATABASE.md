@@ -9,12 +9,14 @@
 ```mermaid
 erDiagram
     cameras |o--o{ videos : has
-    videos ||--o{ detection_events : has
+    videos |o--o{ detection_events : recorded_source
+    cameras |o--o{ detection_events : live_source
 
     cameras {
         integer id PK
         text name
         text source_type
+        text provider_key UK
         double_precision latitude
         double_precision longitude
         timestamptz created_at
@@ -29,6 +31,7 @@ erDiagram
     detection_events {
         integer id PK
         integer video_id FK
+        integer camera_id FK
         text class
         timestamptz started_at
         timestamptz ended_at
@@ -56,7 +59,7 @@ erDiagram
 
 - 카메라 1대는 영상 0개 이상 보유
 - 영상은 카메라 0대 또는 1대와 연결
-- 탐지 이벤트는 영상 1개에 연결
+- 탐지 이벤트는 녹화 영상 1개 또는 실시간 카메라 1개에 연결
 - SMS 수신자 목록은 시스템 공용
 - `PK`는 기본 키, `FK`는 외래 키, `UK`는 고유 제약
 
@@ -75,6 +78,7 @@ erDiagram
 | `id` | 자동 | 기본 키 |
 | `name` | 필수 | 공백 불가, 고유 제약 없음 |
 | `source_type` | 필수 | `test`는 로컬 테스트 영상, `live`는 실시간 CCTV, 기존 카메라는 `test` |
+| `provider_key` | 선택 | ITS CCTV의 안정 식별자, 고유, 기존 카메라는 `NULL` |
 | `latitude`, `longitude` | 선택 | 설치 위도 -90~90, 경도 -180~180, 둘 다 값이 있거나 둘 다 `NULL` |
 | `created_at` | 자동 | 등록 시각 |
 
@@ -100,7 +104,8 @@ erDiagram
 | 필드 | 입력 | 의미·제약 |
 | --- | --- | --- |
 | `id` | 자동 | 기본 키 |
-| `video_id` | 필수 | `videos.id` 참조 |
+| `video_id` | 선택 | 녹화 탐지 시 `videos.id` 참조, 실시간 탐지 시 `NULL` |
+| `camera_id` | 선택 | 실시간 탐지 시 `cameras.id` 참조, 녹화 탐지 시 `NULL` |
 | `class` | 필수 | 공백 불가, DB는 클래스 종류를 제한하지 않음 |
 | `started_at` | 필수 | 첫 탐지를 받은 실제 시각 |
 | `ended_at` | 선택 | 마지막 탐지 시각, `started_at` 이상 |
@@ -110,6 +115,7 @@ erDiagram
 | `created_at`, `updated_at` | 자동 | `updated_at`은 수정 시 Backend가 갱신 |
 
 - AI 목표 JSON은 `camera_id`를 보내고 Backend가 실행 중인 영상의 `video_id`를 찾아 저장
+- `video_id`와 `camera_id`는 정확히 하나만 값이 있어야 함
 - `started_at`: Backend가 탐지를 받은 시각
 - 위치 추정이 없으면 위치 필드는 `NULL`
 

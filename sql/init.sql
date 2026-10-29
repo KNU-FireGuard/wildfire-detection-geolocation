@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL CHECK (btrim(name) <> ''),
     source_type TEXT NOT NULL DEFAULT 'test' CHECK (source_type IN ('test', 'live')),
+    provider_key TEXT UNIQUE,
     latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
     longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -16,6 +17,8 @@ CREATE TABLE IF NOT EXISTS cameras (
 -- 기존 DB의 카메라는 개발용 영상으로 등록되었으므로 test로 채웁니다.
 ALTER TABLE cameras ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'test'
     CHECK (source_type IN ('test', 'live'));
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS provider_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS cameras_provider_key_idx ON cameras(provider_key);
 
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -28,7 +31,8 @@ CREATE TABLE IF NOT EXISTS videos (
 
 CREATE TABLE IF NOT EXISTS detection_events (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    video_id INTEGER NOT NULL REFERENCES videos(id),
+    video_id INTEGER REFERENCES videos(id),
+    camera_id INTEGER REFERENCES cameras(id),
     class TEXT NOT NULL CHECK (btrim(class) <> ''),
     -- 영상 재생 시간이 아니라 프로그램이 탐지한 실제 시각입니다.
     started_at TIMESTAMPTZ NOT NULL,
@@ -45,6 +49,19 @@ CREATE TABLE IF NOT EXISTS detection_events (
     CHECK ((estimated_latitude IS NULL) = (estimated_longitude IS NULL)),
     CHECK (error_range_m IS NULL OR estimated_latitude IS NOT NULL)
 );
+
+ALTER TABLE detection_events ALTER COLUMN video_id DROP NOT NULL;
+ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS camera_id INTEGER REFERENCES cameras(id);
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'detection_events_source_check'
+          AND conrelid = 'detection_events'::regclass
+    ) THEN
+        ALTER TABLE detection_events ADD CONSTRAINT detection_events_source_check
+            CHECK ((video_id IS NOT NULL) <> (camera_id IS NOT NULL));
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS admins (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -66,5 +83,6 @@ CREATE TABLE IF NOT EXISTS sms_recipients (
 
 CREATE INDEX IF NOT EXISTS videos_camera_id_idx ON videos(camera_id);
 CREATE INDEX IF NOT EXISTS detection_events_video_id_idx ON detection_events(video_id);
+CREATE INDEX IF NOT EXISTS detection_events_camera_id_idx ON detection_events(camera_id);
 
 COMMIT;
