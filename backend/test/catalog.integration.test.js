@@ -82,6 +82,14 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     assert.deepEqual(detail.item, events.items[1]);
     await get('/api/events/999', 404);
 
+    const liveEvent = await client.query(`
+      INSERT INTO detection_events (camera_id, class, started_at, max_confidence)
+      VALUES (2, 'smoke', CURRENT_TIMESTAMP, 0.7) RETURNING id
+    `);
+    const liveDetail = await get(`/api/events/${liveEvent.rows[0].id}`);
+    assert.equal(liveDetail.item.camera_id, 2);
+    assert.equal(liveDetail.item.video_id, null);
+
     await client.query("INSERT INTO cameras (name, source_type) VALUES ('경북의성', 'live')");
     const seed = readFileSync(path.join(__dirname, '../../sql/seed.dev.sql'), 'utf8')
       .replace(/^--[^\n]*\n(?:--[^\n]*\n)*BEGIN;\s*/, '')

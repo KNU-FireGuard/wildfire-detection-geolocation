@@ -41,11 +41,11 @@ async function receiveDetection(req, res) {
   } else {
     const { rows } = await pool.query(`
       INSERT INTO detection_events
-        (video_id, class, started_at, ended_at, max_confidence,
+        (video_id, camera_id, class, started_at, ended_at, max_confidence,
          estimated_latitude, estimated_longitude, error_range_m)
-      VALUES ($1, $2, CURRENT_TIMESTAMP, NULL, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, $4, $5, $6, $7)
       RETURNING id
-    `, [run.video_id, className, confidence, ...coordinates]);
+    `, [run.video_id, run.video_id ? null : run.camera_id, className, confidence, ...coordinates]);
     run.eventIdsByClass.set(className, rows[0].id);
   }
 

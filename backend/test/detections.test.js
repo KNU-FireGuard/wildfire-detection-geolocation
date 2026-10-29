@@ -76,7 +76,20 @@ test('명세의 탐지 JSON을 검증하고 202 accepted를 반환한다', async
   assert.deepEqual(await response.json(), { accepted: true });
   assert.ok(queryCalls.some(call => /INSERT INTO detection_events/.test(call.sql)));
   const insert = queryCalls.find(call => /INSERT INTO detection_events/.test(call.sql));
-  assert.match(insert.sql, /CURRENT_TIMESTAMP, NULL, \$3/);
+  assert.match(insert.sql, /CURRENT_TIMESTAMP, NULL, \$4/);
+  assert.deepEqual(insert.params.slice(0, 2), [7, null]);
+});
+
+test('실시간 실행의 탐지 이벤트는 영상 ID 대신 카메라 ID에 연결한다', async () => {
+  const liveRun = testRuns.createRun({ cameraId: 42, videoId: null, sourceUrl: 'https://video.example.test/live.m3u8' });
+  const response = await fetch(base, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-AI-Token': process.env.AI_CALLBACK_TOKEN },
+    body: JSON.stringify({ ...payload, run_id: liveRun.id, camera_id: 42 }),
+  });
+  assert.equal(response.status, 202);
+  const insert = queryCalls.findLast(call => /INSERT INTO detection_events/.test(call.sql));
+  assert.deepEqual(insert.params.slice(0, 2), [null, 42]);
 });
 
 test('탐지 결과의 run ID, 클래스, confidence, bbox를 검증한다', async () => {

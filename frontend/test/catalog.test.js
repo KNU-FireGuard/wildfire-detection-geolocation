@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { fetchCameras, fetchEvents, fetchVideos, fetchEvent } from '../src/api/catalog.js'
+import { fetchCameras, fetchEvents, fetchVideos, fetchEvent, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, loginAdmin, startTestRun, fetchTestRunStatus, openTestRunStream } from '../src/api/catalog.js'
 
 // feature/backend catalog.controller.js의 응답 규격에 대한 회귀 테스트입니다.
 const originalFetch = globalThis.fetch
@@ -136,4 +136,76 @@ test('요청 취소 신호를 fetch에 전달한다', async () => {
     options.signal.throwIfAborted()
   }
   await assert.rejects(fetchEvents({ signal: controller.signal }), { name: 'AbortError' })
+})
+
+test('ITS 카메라는 DB 카메라 ID와 실제 영상 주소를 유지한다', async () => {
+  globalThis.fetch = async url => {
+    assert.equal(url, '/api/live-cctvs')
+    return Response.json({ source: 'live', refreshedAt: '2026-10-29T00:00:00Z', items: [
+      { providerKey: 'key-1', cameraId: 9, name: '서울 CCTV', latitude: 37.5, longitude: 127, streamUrl: 'http://video.example.test/live.m3u8' },
+    ] })
+  }
+  const result = await fetchLiveCctvs()
+  assert.equal(result.source, 'live')
+  assert.equal(result.cameras[0].id, 9)
+  assert.equal(result.cameras[0].streamUrl, 'http://video.example.test/live.m3u8')
+})
+
+test('관리자 인증으로만 CCTV 목록을 수동 갱신하고 서버 오류를 전달한다', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    if (url === '/api/auth/login') return Response.json({ access_token: 'short-lived-token' })
+    return Response.json({ source: 'live', refreshedAt: '2026-10-29T08:00:00Z', items: [] })
+  }
+  const result = await refreshLiveCctvs('admin', 'password')
+  assert.equal(result.refreshedAt, '2026-10-29T08:00:00Z')
+  assert.equal(calls.length, 2)
+  assert.deepEqual(JSON.parse(calls[0].options.body), { username: 'admin', password: 'password' })
+  assert.equal(calls[1].url, '/api/live-cctvs/refresh')
+  assert.equal(calls[1].options.headers.Authorization, 'Bearer short-lived-token')
+  globalThis.fetch = async () => Response.json({ error: '다시 시도하세요.' }, { status: 409 })
+  await assert.rejects(refreshLiveCctvs('admin', 'bad'), /다시 시도하세요/)
+})
+
+test('Test 실행과 상태 조회는 관리자 토큰과 카메라·실행 ID를 사용한다', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    if (url === '/api/auth/login') return Response.json({ access_token: 'test-token' })
+    if (url === '/api/cameras/3/test-runs') return Response.json({ id: 77, camera_id: 3, video_id: 12, status: 'ready', stream_url: '/api/test-runs/77/stream' }, { status: 202 })
+    return Response.json({ id: 77, camera_id: 3, status: 'running', error: null })
+  }
+  const token = await loginAdmin('admin', 'password')
+  const run = await startTestRun(3, token)
+  const status = await fetchTestRunStatus(run.id, token)
+  assert.equal(run.stream_url, '/api/test-runs/77/stream')
+  assert.equal(status.status, 'running')
+  assert.equal(calls[1].options.headers.Authorization, 'Bearer test-token')
+  assert.equal(calls[2].url, '/api/test-runs/77')
+  assert.equal(calls[2].options.headers.Authorization, 'Bearer test-token')
+})
+
+test('MJPEG 영상 요청은 관리자 토큰을 전송하고 응답 형식을 검증한다', async () => {
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer test-token')
+    return new Response('frame', { headers: { 'Content-Type': 'multipart/x-mixed-replace; boundary=frame' } })
+  }
+  const response = await openTestRunStream('/api/test-runs/77/stream', 'test-token')
+  assert.equal(response.status, 200)
+  globalThis.fetch = async () => new Response('bad', { headers: { 'Content-Type': 'application/json' } })
+  await assert.rejects(openTestRunStream('/api/test-runs/77/stream', 'test-token'), /MJPEG/)
+})
+
+test('AI 감시 상태는 카메라 ID와 마지막 프레임 시각을 유지한다', async () => {
+  globalThis.fetch = async url => {
+    assert.equal(url, '/api/live-monitor/status')
+    return Response.json({ state: 'running', cameras: [
+      { camera_id: 9, state: 'running', last_frame_at: '2026-10-29T02:00:00Z' },
+    ] })
+  }
+  const status = await fetchLiveMonitorStatus()
+  assert.equal(status.state, 'running')
+  assert.equal(status.cameras[0].camera_id, 9)
+  assert.equal(status.cameras[0].last_frame_at, '2026-10-29T02:00:00Z')
 })

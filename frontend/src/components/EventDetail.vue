@@ -1,7 +1,9 @@
 ﻿<script setup>
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import DashboardIcon from './DashboardIcon.vue'
 import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
+const LiveVideo = defineAsyncComponent(() => import('./LiveVideo.vue'))
+const TestRunPanel = defineAsyncComponent(() => import('./TestRunPanel.vue'))
 const props = defineProps({
   event: { type: Object, default: null },
   camera: { type: Object, default: null },
@@ -10,22 +12,33 @@ const props = defineProps({
 const showDetails = ref(false)
 const selectedVideo = computed(() => props.videos.find(video => video.id === props.event?.videoId)
   ?? props.videos.find(video => video.camera_id === props.camera?.id)
-  ?? (props.camera ? null : props.videos[0] ?? null))
+  ?? null)
+const cameraStatusLabel = computed(() => {
+  if (props.camera?.sourceType === 'live') return ({
+    running: 'AI 감시 중', starting: 'AI 시작 중', restarting: 'AI 재시작 중',
+    waiting_for_ai: 'AI 연결 대기', waiting_for_cctv: 'CCTV 연결 대기',
+  })[props.camera.monitorState] ?? 'AI 감시 상태 없음'
+  return props.camera?.status === 'ONLINE' ? '온라인'
+    : props.camera?.status === 'OFFLINE' ? '오프라인' : '상태 정보 없음'
+})
 </script>
 
 <template>
   <section class="dashboard-panel" aria-labelledby="detail-title">
     <div class="panel-heading video-heading">
       <h2 id="detail-title">{{ camera?.name ?? 'CCTV' }} <span class="title-caption">영상</span></h2>
-      <span class="camera-status" :class="{ online: camera?.status === 'ONLINE' }"><i />{{ camera?.status === 'ONLINE' ? '온라인' : camera?.status === 'OFFLINE' ? '오프라인' : '상태 정보 없음' }}</span>
+      <span class="camera-status" :class="{ online: camera?.monitorState === 'running' || camera?.status === 'ONLINE' }"><i />{{ cameraStatusLabel }}</span>
     </div>
     <div class="video-placeholder" aria-label="CCTV 영상">
-      <video v-if="selectedVideo" :key="selectedVideo.id" controls preload="metadata" :src="`/api/videos/${selectedVideo.id}/stream`">
+      <LiveVideo v-if="camera?.sourceType === 'live' && camera.streamUrl" :key="camera.id" :url="camera.streamUrl" />
+      <div v-else-if="camera?.sourceType === 'live'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>실시간 영상 주소가 없습니다.</strong><p>CCTV 목록을 갱신한 뒤 다시 확인하세요.</p></div>
+      <video v-else-if="selectedVideo" :key="selectedVideo.id" controls preload="metadata" :src="`/api/videos/${selectedVideo.id}/stream`">
         이 브라우저는 영상 재생을 지원하지 않습니다.
       </video>
       <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong><p>영상 목록에 파일을 등록하고 DB에 메타데이터를 추가하세요.</p></div>
-      <span v-if="selectedVideo" class="preview-footnote">{{ selectedVideo.original_filename }}</span>
+      <span v-if="selectedVideo && camera?.sourceType !== 'live'" class="preview-footnote">{{ selectedVideo.original_filename }}</span>
     </div>
+    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" />
     <div class="event-info" aria-live="polite">
       <div class="info-heading"><h3>탐지 이벤트 정보</h3><span v-if="event" class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span></div>
       <p v-if="!event" class="empty-message">이벤트를 선택하면 상세 정보를 확인할 수 있습니다.</p>

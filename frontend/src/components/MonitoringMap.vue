@@ -28,7 +28,7 @@ function render() { scene?.render(props) }
 function showAll() {
   const locations = [...props.cameras, ...props.events.map(event => event.estimatedLocation)]
   if (locations.some(hasCoordinates)) scene?.focus(locations)
-  else { map?.setCenter(new maps.LatLng(36.0089, 128.7118)); map?.setZoom(13) }
+  else { map?.setCenter(new maps.LatLng(36, 127.8)); map?.setZoom(7) }
 }
 function focusSelection() {
   const locations = [props.selectedCamera, props.selectedEvent?.estimatedLocation]
@@ -57,7 +57,7 @@ async function initialize() {
     maps = await loadNaverMaps(clientId)
     if (disposed || current !== attempt || error.value) return
     map = new maps.Map(container.value, {
-      center: new maps.LatLng(36.0089, 128.7118), zoom: 13,
+      center: new maps.LatLng(36, 127.8), zoom: 7,
       mapTypeId: maps.MapTypeId[mode.value], zoomControl: true,
       zoomControlOptions: { position: maps.Position.RIGHT_CENTER },
     })
@@ -108,6 +108,7 @@ onBeforeUnmount(() => {
       <div class="selection-heading"><h2 id="map-title">탐지 위치 현황</h2><span>CCTV {{ cameras.length }}대</span></div>
       <p v-if="unlocated" class="empty-message">좌표가 없거나 유효하지 않은 카메라 {{ unlocated }}대는 지도에 표시할 수 없습니다.</p>
       <div class="camera-buttons" aria-label="카메라 선택"><button v-for="camera in cameras" :key="camera.id" :aria-pressed="camera.id === selectedCamera?.id" @click="selectCamera(camera)">{{ camera.name }}</button></div>
+      <p v-if="selectedCamera && hasCoordinates(selectedCamera)" class="coordinates">{{ selectedCamera.sourceType === 'live' ? 'ITS 제공 좌표' : '등록된 카메라 좌표' }} · 위도 {{ selectedCamera.latitude.toFixed(6) }} · 경도 {{ selectedCamera.longitude.toFixed(6) }}</p>
       <p v-if="selectedCamera && !events.some(event => event.cameraId === selectedCamera.id)" class="empty-message">{{ selectedCamera.name }}: 탐지 이벤트가 없습니다.</p>
       <template v-if="selectedEvent">
         <p>이벤트 #{{ selectedEvent.id }} · {{ selectedCamera?.name ?? '카메라 정보 없음' }} <RouterLink :to="`/events/${selectedEvent.id}`">상세 보기</RouterLink></p>
@@ -120,10 +121,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.monitoring-map { padding: 0; overflow: hidden; }.map-area { position: relative; height: clamp(410px, 38vw, 540px); background: #e9eef4; }
+.monitoring-map { padding: 0; overflow: hidden; }.map-area { position: relative; height: clamp(560px, 68vh, 850px); background: #e9eef4; }
 .naver-map { width: 100%; height: 100%; }.map-message { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; background: #edf2f8; color: #536781; }
 .map-toolbar { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 8px #0003; }.map-toolbar button { padding: 9px 12px; border: 0; background: white; color: #536781; font-size: 12px; }.map-toolbar button[aria-pressed='true'] { color: white; background: #337fd4; }
 .map-legend { position: absolute; top: 60px; left: 12px; display: flex; gap: 14px; padding: 8px 12px; background: #fff; border-radius: 5px; font-size: 11px; }.camera-key { color: #337fd4; }.fire-key { color: #df4036; }
 .map-selection { padding: 16px 18px; font-size: 12px; }.selection-heading { display: flex; justify-content: space-between; align-items: center; color: #7d90a8; }.selection-heading h2 { font-size: 14px; color: #536781; }.camera-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }.camera-buttons button { border: 1px solid #dce5ef; background: #f4f7fb; color: #59708a; border-radius: 5px; padding: 6px 10px; font-size: 11px; }.camera-buttons button[aria-pressed='true'] { background: #337fd4; color: white; }a { color: #337fd4; margin-left: 12px; }.coordinates { color: #64748b; font-variant-numeric: tabular-nums; }
-@media (max-width: 600px) { .map-area { height: 410px; }.map-toolbar button { padding: 8px; font-size: 11px; } }
+@media (max-width: 600px) { .map-area { height: min(72vh, 650px); min-height: 430px; }.map-toolbar button { padding: 8px; font-size: 11px; } }
 </style>

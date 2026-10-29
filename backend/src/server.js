@@ -4,7 +4,9 @@ async function start() {
   const { getJwtSecret } = require('./middleware/require-admin');
   const { getAiCallbackToken } = require('./middleware/require-ai-callback');
   const app = require('./app');
+  const { monitor } = require('./services/live-cctv-runtime');
   const port = Number(process.env.PORT || 3000);
+  let server;
 
   try {
     getJwtSecret();
@@ -15,21 +17,24 @@ async function start() {
     await pool.query('SELECT 1');
     console.log('PostgreSQL 연결 성공');
 
-    const server = app.listen(port, '127.0.0.1');
+    server = app.listen(port, '127.0.0.1');
     await new Promise((resolve, reject) => {
       server.once('listening', resolve);
       server.once('error', reject);
     });
     console.log(`Backend 서버 실행: http://127.0.0.1:${port}`);
+    await monitor.start();
+    console.log(`실시간 CCTV 감시 상태: ${monitor.status().state}`);
 
     let stopping = false;
-    function shutdown() {
+    async function shutdown() {
       if (stopping) return;
       stopping = true;
       console.log('Backend 서버 종료 중');
-      require('./services/run-manager').stopAll();
       const timeout = setTimeout(() => process.exit(1), 10000);
       timeout.unref();
+      await monitor.stop();
+      require('./services/run-manager').stopAll();
       server.close(async () => {
         try {
           await pool.end();
@@ -44,6 +49,7 @@ async function start() {
     process.once('SIGINT', shutdown);
     process.once('SIGTERM', shutdown);
   } catch (error) {
+    if (server?.listening) await new Promise(resolve => server.close(resolve));
     await pool.end();
     throw error;
   }

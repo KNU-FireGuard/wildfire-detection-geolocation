@@ -49,7 +49,7 @@ python -m pip install -r ai/requirements.txt
 docker compose up -d db
 ```
 
-- 기존 DB 볼륨을 사용하는 경우 아래 명령을 한 번 실행
+- 기존 DB 볼륨을 사용하는 경우 아래 명령을 다시 실행해 ITS 카메라·실시간 탐지 컬럼 반영
 
 ### Bash
 
@@ -94,12 +94,17 @@ npm run dev
 ```
 
 - Backend 주소: `http://127.0.0.1:3000`
+- ITS 실영상 사용 시 루트 `.env`에 `ITS_CCTV_API_KEY=발급키` 설정 후 Backend 재시작
+- 대시보드의 CCTV 주소 갱신 버튼에서 관리자 계정으로 최초 목록 조회 또는 영상 주소 수동 갱신
+- Test 카메라를 선택한 뒤 `Test 분석 시작`에서 관리자 계정으로 등록 영상 분석 실행
+- AI 실시간 작업자가 준비되면 `.env`의 `AI_LIVE_RUNNER_PATH`에 저장소 루트 기준 Python 파일 경로 입력 후 Backend 재시작
 
 ## 4 Frontend
 
 - 다른 터미널에서 프로젝트 루트 기준으로 환경 파일 준비
 - 지도 사용 시 `frontend/.env.local`에 `VITE_NAVER_MAP_CLIENT_ID` 설정
-- 네이버 클라우드 Maps에 `http://127.0.0.1:5173`을 Web 서비스 URL로 등록
+- 네이버 클라우드 Maps의 Web 서비스 URL에는 포트 없이 `http://127.0.0.1` 등록
+- 브라우저에서 `localhost:5173`으로 접속한다면 `http://localhost`도 등록
 
 ### Bash
 
