@@ -23,7 +23,7 @@ watch(() => [props.url, video.value], ([url, element]) => {
   if (!url || !element) return
   if (element.canPlayType('application/vnd.apple.mpegurl')) element.src = url
   else if (Hls.isSupported()) {
-    player = new Hls({ enableWorker: true })
+    player = new Hls({ enableWorker: true, liveSyncDurationCount: 2 })
     player.on(Hls.Events.ERROR, (_event, detail) => {
       if (detail.fatal) error.value = '영상 연결에 실패했습니다. 방송 상태 또는 영상 서버의 CORS 설정을 확인하세요.'
     })
