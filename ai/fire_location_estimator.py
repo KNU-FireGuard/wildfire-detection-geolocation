@@ -1,182 +1,237 @@
+from __future__ import annotations
+
 import math
 
+try:
+    from ai.dem_skyline_calibrator import (
+        DEM,
+        K_REFRACTION,
+        R_EARTH,
+        SkylineCalibrator,
+        dest_point,
+    )
+except ImportError:
+    from dem_skyline_calibrator import (
+        DEM,
+        K_REFRACTION,
+        R_EARTH,
+        SkylineCalibrator,
+        dest_point,
+    )
+
+
 class FireLocationEstimator:
-    def __init__(self, roi_database=None):
-        """
-        roi_database: 프리셋 기반의 ROI 데이터를 담은 딕셔너리
-        주어지지 않을 경우, 예시 규격의 기본값을 사용합니다.
-        """
-        if roi_database is None:
-            self.roi_database = {
-                "preset_1": {
-                    "Sector_1": {"bbox": [0, 0, 960, 1080], "address": "A구역"},
-                    "Sector_2": {"bbox": [960, 0, 1920, 1080], "address": "B구역"}
-                }
-            }
-        else:
-            self.roi_database = roi_database
+    """
+    Single-Track Precision Wildfire Geolocation Engine:
+      Stage 1: DEM Skyline-based PTZ Self-Calibration (corrects mechanical dPan, dTilt, Roll)
+      Stage 2: 3D Ray Marching + 10-step Binary Search on AWS Terrarium DEM with Earth Curvature
+    """
 
-    def estimate_location(self, bbox, metadata):
-        """
-        메인 라우터: 메타데이터에 따라 Track 1과 Track 2로 동적 분기하여 위치를 추정합니다.
-        :param bbox: [x_min, y_min, x_max, y_max] 형태의 리스트
-        :param metadata: 카메라 메타데이터 (pan, tilt, preset_id 등 포함) 딕셔너리
-        :return: 추정된 주소 또는 에러 메시지 문자열
-        """
-        if "camera" in metadata and "ptz" in metadata:
-            return self._estimate_by_ray_dem(bbox, metadata)
-        elif "preset_id" in metadata:
-            return self._estimate_by_roi_point(bbox, metadata)
-        else:
-            return "추정 불가: 유효한 메타데이터(camera/ptz 또는 preset_id)가 없습니다."
+    def __init__(self, dem: DEM | None = None, zoom: int = 12, dem_radius_m: float = 12000.0):
+        self.dem = dem
+        self.zoom = zoom
+        self.dem_radius_m = dem_radius_m
+        self._calibrator: SkylineCalibrator | None = (
+            SkylineCalibrator(dem) if dem is not None else None
+        )
 
-    def _get_mock_dem_altitude(self, x, y):
-        """
-        임시 DEM 고도 함수: 실제 지형 데이터 연동 전까지 평면(고도 0m)으로 가정합니다.
-        (x, y): 카메라로부터의 상대 거리 (미터 단위)
-        """
-        return 0.0
+    def _ensure_dem(self, cam_lat: float, cam_lon: float) -> DEM:
+        if self.dem is None:
+            self.dem = DEM(center=(cam_lat, cam_lon), radius_m=self.dem_radius_m, zoom=self.zoom)
+            self._calibrator = SkylineCalibrator(self.dem)
+        return self.dem
 
-    def _estimate_by_ray_dem(self, bbox, metadata):
+    @staticmethod
+    def extract_fire_root_pixel(
+        bbox: list[float] | tuple[float, float, float, float],
+        bottom_inset_ratio: float = 0.05,
+    ) -> tuple[float, float]:
         """
-        Track 1: PTZ 및 물리적 카메라 정보가 존재할 때 Ray Marching + Binary Search 로직
+        Extract the lower-center ignition root pixel of a smoke/fire bounding box.
+        Uses a small bottom inset (default 5% of box height above y_max) to target the smoke base.
         """
         x_min, y_min, x_max, y_max = bbox
-        
-        # 발화점 추정: 최하단 중앙 픽셀 계산
         fire_x = (x_min + x_max) / 2.0
-        fire_y = float(y_max)
-        
+        height = max(0.0, y_max - y_min)
+        fire_y = float(y_max) - height * bottom_inset_ratio
+        return fire_x, fire_y
+
+    def estimate_location(
+        self,
+        bbox: list[float] | tuple[float, float, float, float],
+        metadata: dict,
+        use_skyline_calibration: bool = True,
+        bottom_inset_ratio: float = 0.05,
+    ) -> dict:
+        """
+        Estimate the 3D terrain intersection coordinates (lat, lon, altitude, distance)
+        given a YOLO bounding box and PTZ camera metadata.
+        """
+        if "camera" not in metadata or "ptz" not in metadata:
+            raise ValueError("유효한 메타데이터('camera' 및 'ptz')가 필요합니다.")
+
         cam = metadata["camera"]
         ptz = metadata["ptz"]
-        
-        # 1. 2D 픽셀 좌표를 이미지 중심 기준 오프셋 비율(-0.5 ~ 0.5)로 변환
-        offset_x = (fire_x - (cam["resolution_w"] / 2.0)) / cam["resolution_w"]
-        offset_y = ((cam["resolution_h"] / 2.0) - fire_y) / cam["resolution_h"] # y는 아래로 커지므로 반전
-        
-        # 중심 픽셀 기준 광선의 오프셋 각도 계산
-        delta_pan = offset_x * cam["fov_h"]
-        delta_tilt = offset_y * cam["fov_v"]
-        
-        # 실제 카메라 각도와 합산 후 라디안(Radian) 변환
-        final_pan = math.radians(ptz["pan"] + delta_pan)
-        final_tilt = math.radians(ptz["tilt"] + delta_tilt)
-        
-        # 3D 방향 벡터(Ray) 도출 (X: 동, Y: 북, Z: 상)
-        dx = math.sin(final_pan) * math.cos(final_tilt)
-        dy = math.cos(final_pan) * math.cos(final_tilt)
-        dz = math.sin(final_tilt)
-        
-        # 방어 로직: Ray가 위로 향하거나 수평이면 지면에 닿지 않음
-        if dz >= 0:
-            return "추정 불가: 발화점의 광선(Ray)이 하늘이나 수평을 향하고 있습니다."
-        
-        # 2. Ray Marching 초기 설정
-        ray_x, ray_y = 0.0, 0.0  # 카메라 위치를 상대 원점(0,0)으로 설정
-        ray_z = float(cam["altitude"])
-        step_size = 50.0  # 50m 간격 전진
-        
-        prev_x, prev_y, prev_z = ray_x, ray_y, ray_z
+
+        cam_lat = float(cam["lat"])
+        cam_lon = float(cam["lon"])
+        width = int(cam.get("resolution_w", 1920))
+        height = int(cam.get("resolution_h", 1080))
+        fov_h = float(cam.get("fov_h", 60.0))
+
+        dem = self._ensure_dem(cam_lat, cam_lon)
+        ground_alt = float(dem.sample(cam_lat, cam_lon))
+        tower_h = float(cam.get("tower_height", 15.0))
+        eye_alt = float(cam["altitude"]) if "altitude" in cam and cam.get("use_abs_alt") else (ground_alt + tower_h)
+
+        init_pan = float(ptz["pan"])
+        init_tilt = float(ptz["tilt"])
+        init_roll = float(ptz.get("roll", 0.0))
+
+        # Stage 1: Skyline-based PTZ Self-Calibration (when ridge points are provided & enabled)
+        cal_info = {
+            "pan": init_pan,
+            "tilt": init_tilt,
+            "roll": init_roll,
+            "d_pan": 0.0,
+            "d_tilt": 0.0,
+            "rms_deg": 0.0,
+            "calibrated": False,
+        }
+        ridge_pts = metadata.get("ridge_pts")
+        if use_skyline_calibration and ridge_pts is not None and len(ridge_pts) >= 3:
+            assert self._calibrator is not None
+            cal_res = self._calibrator.calibrate_ptz(
+                cam_lat=cam_lat,
+                cam_lon=cam_lon,
+                eye_alt=eye_alt,
+                init_pan=init_pan,
+                init_tilt=init_tilt,
+                ridge_pts=ridge_pts,
+                width=width,
+                height=height,
+                fov_h=fov_h,
+            )
+            cal_info.update(cal_res)
+            cal_info["calibrated"] = True
+
+        cal_pan = cal_info["pan"]
+        cal_tilt = cal_info["tilt"]
+        cal_roll = cal_info["roll"]
+
+        # Stage 2: Convert 2D Fire Root Pixel -> 3D Ray Bearing & Elevation Angle
+        fire_x, fire_y = self.extract_fire_root_pixel(bbox, bottom_inset_ratio=bottom_inset_ratio)
+        f = SkylineCalibrator.focal_px(width, fov_h)
+        cx, cy = width / 2.0, height / 2.0
+
+        # Inverse roll correction around principal point (cx, cy)
+        y_unrolled = fire_y - math.tan(math.radians(cal_roll)) * (fire_x - cx)
+        delta_pan = math.degrees(math.atan((fire_x - cx) / f))
+        delta_tilt = math.degrees(math.atan((cy - y_unrolled) / f))
+
+        ray_bearing = (cal_pan + delta_pan) % 360.0
+        ray_el_deg = cal_tilt + delta_tilt
+        tan_el = math.tan(math.radians(ray_el_deg))
+
+        # Note: Even when ray_el_deg >= 0 (dz >= 0, upward/horizontal ray), the ray can still
+        # intersect high mountain slopes rising above the camera's altitude. Only reject extreme sky angles.
+        if ray_el_deg > 45.0:
+            raise ValueError(f"추정 불가: 광선 고도각({ray_el_deg:.2f}°)이 하늘 방향 임계값을 초과했습니다.")
+
+        # Stage 3: Ray Marching along spherical surface + Earth curvature drop
+        step_size = 20.0
+        max_range = float(cam.get("max_range_m", 10000.0))
+        near_dist = float(cam.get("near_m", 30.0))
+
+        prev_d = near_dist
         hit = False
-        
-        # 3. Ray Marching (성큼성큼 전진)
-        max_steps = 1000 # 최대 50km 제한 (무한 루프 방지)
-        for _ in range(max_steps):
-            ray_x += dx * step_size
-            ray_y += dy * step_size
-            ray_z += dz * step_size
-            
-            dem_z = self._get_mock_dem_altitude(ray_x, ray_y)
-            
-            # 광선이 지형보다 낮아지면 충돌(교차) 판단
-            if ray_z <= dem_z:
+        curr_d = near_dist
+
+        n_steps = int((max_range - near_dist) / step_size)
+        for _ in range(n_steps):
+            curr_d += step_size
+            lat_c, lon_c = dest_point(cam_lat, cam_lon, ray_bearing, curr_d)
+            dem_h = float(dem.sample(lat_c, lon_c))
+            drop = (curr_d ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
+            apparent_dem_z = dem_h - drop
+            ray_z = eye_alt + curr_d * tan_el
+
+            if ray_z <= apparent_dem_z:
                 hit = True
                 break
-                
-            prev_x, prev_y, prev_z = ray_x, ray_y, ray_z
-            
-        if not hit:
-            return "추정 불가: 최대 탐색 범위(50km) 내에서 지형과 교차하지 않았습니다."
-            
-        # 4. Binary Search (정밀 탐색)
-        # 충돌 구간(prev ~ ray)을 좁혀가며 정확한 (X, Y) 지점을 탐색
-        low_x, low_y, low_z = prev_x, prev_y, prev_z
-        high_x, high_y, high_z = ray_x, ray_y, ray_z
-        
-        # 10회 이분할 시 오차 범위 매우 정밀하게 축소 (50m -> 약 0.05m 오차)
-        for _ in range(10):
-            mid_x = (low_x + high_x) / 2.0
-            mid_y = (low_y + high_y) / 2.0
-            mid_z = (low_z + high_z) / 2.0
-            
-            mid_dem_z = self._get_mock_dem_altitude(mid_x, mid_y)
-            
-            if mid_z <= mid_dem_z:
-                # 중간 지점이 이미 땅 아래임 -> 충돌점은 더 앞(low ~ mid)에 있음
-                high_x, high_y, high_z = mid_x, mid_y, mid_z
-            else:
-                # 중간 지점은 땅 위임 -> 충돌점은 더 뒤(mid ~ high)에 있음
-                low_x, low_y, low_z = mid_x, mid_y, mid_z
-                
-        # 최종 교차점 (카메라로부터의 상대 거리 미터)
-        final_x = (low_x + high_x) / 2.0
-        final_y = (low_y + high_y) / 2.0
-        
-        # 5. 상대 직교 좌표를 실제 위경도로 변환 (Flat Earth 가정)
-        # 위도 1도는 약 111,000m, 경도 1도는 111,000m * cos(위도)
-        lat_offset = final_y / 111000.0
-        lon_offset = final_x / (111000.0 * math.cos(math.radians(cam["lat"])))
-        
-        est_lat = cam["lat"] + lat_offset
-        est_lon = cam["lon"] + lon_offset
-        
-        return f"정밀 추론 좌표: 위도 {est_lat:.6f}, 경도 {est_lon:.6f} (카메라 기준 상대거리: 동쪽 {final_x:.1f}m, 북쪽 {final_y:.1f}m)"
+            prev_d = curr_d
 
-    def _estimate_by_roi_point(self, bbox, metadata):
-        """
-        Track 2: PTZ 부재 시 프리셋 ID를 기반으로 단순 최하단 중앙 픽셀 위치 추정
-        """
-        preset_id = metadata.get("preset_id")
-        if preset_id not in self.roi_database:
-            return f"추정 불가: 프리셋 '{preset_id}'에 대한 ROI 데이터가 없습니다."
-            
-        preset_sectors = self.roi_database[preset_id]
-        
-        x_min, y_min, x_max, y_max = bbox
-        fire_x = (x_min + x_max) / 2.0
-        fire_y = float(y_max)
-        
-        for sector_name, sector_data in preset_sectors.items():
-            s_x_min, s_y_min, s_x_max, s_y_max = sector_data["bbox"]
-            if s_x_min <= fire_x <= s_x_max and s_y_min <= fire_y <= s_y_max:
-                return sector_data["address"]
-                
-        return "알 수 없는 구역 (ROI 범위 외)"
+        if not hit:
+            raise RuntimeError(
+                f"추정 불가: 최대 탐색 거리({max_range:.0f}m) 내에서 지형(DEM)과 교차하지 않았습니다. "
+                f"(방위각 {ray_bearing:.2f}°, 고도각 {ray_el_deg:.2f}°)"
+            )
+
+        # Stage 4: 10-step Binary Search for sub-decimeter intersection precision
+        low_d, high_d = prev_d, curr_d
+        for _ in range(10):
+            mid_d = (low_d + high_d) / 2.0
+            lat_m, lon_m = dest_point(cam_lat, cam_lon, ray_bearing, mid_d)
+            dem_h = float(dem.sample(lat_m, lon_m))
+            drop = (mid_d ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
+            apparent_dem_z = dem_h - drop
+            ray_z = eye_alt + mid_d * tan_el
+
+            if ray_z <= apparent_dem_z:
+                high_d = mid_d
+            else:
+                low_d = mid_d
+
+        final_d = (low_d + high_d) / 2.0
+        est_lat, est_lon = dest_point(cam_lat, cam_lon, ray_bearing, final_d)
+        est_alt = float(dem.sample(est_lat, est_lon))
+
+        return {
+            "lat": est_lat,
+            "lon": est_lon,
+            "altitude_m": est_alt,
+            "distance_m": final_d,
+            "bearing_deg": ray_bearing,
+            "elevation_angle_deg": ray_el_deg,
+            "calibration": cal_info,
+        }
+
 
 if __name__ == "__main__":
-    estimator = FireLocationEstimator()
-    
-    print("=" * 50)
-    print("--- 테스트 1: Track 1 실행 (Ray Casting + DEM 탐색) ---")
-    bbox_1 = [860, 700, 1060, 900]
-    meta_1 = {
+    # Quick sanity check at Gachang O-ri CCTV coordinate (35.791037, 128.591184)
+    cam_lat, cam_lon = 35.791037, 128.591184
+    estimator = FireLocationEstimator(zoom=12, dem_radius_m=10000.0)
+    dem = estimator._ensure_dem(cam_lat, cam_lon)
+    eye_alt = float(dem.sample(cam_lat, cam_lon)) + 15.0
+
+    # Generate synthetic skyline for True Pose: Pan=339.0°, Tilt=+3.0°, Roll=0.8°
+    calibrator = SkylineCalibrator(dem)
+    ridge_pts = calibrator.synthesize_skyline_pixels(
+        cam_lat, cam_lon, eye_alt, true_pan=339.0, true_tilt=3.0, true_roll=0.8
+    )
+
+    # Inject +1.0° Pan and -1.0° Tilt error into reported PTZ metadata
+    meta = {
         "camera": {
-            "lat": 35.8562, "lon": 128.6143, "altitude": 150.0,
-            "fov_h": 60.0, "fov_v": 33.75, "resolution_w": 1920, "resolution_h": 1080
+            "lat": cam_lat,
+            "lon": cam_lon,
+            "tower_height": 15.0,
+            "fov_h": 60.0,
+            "resolution_w": 1920,
+            "resolution_h": 1080,
         },
-        "ptz": {"pan": 45.0, "tilt": -10.0} # 카메라를 우상단 북동쪽(45도)으로 바라보고 아래로(-10도) 숙임
+        "ptz": {"pan": 340.0, "tilt": 2.0},
+        "ridge_pts": ridge_pts,
     }
-    result_1 = estimator.estimate_location(bbox_1, meta_1)
-    print(f"입력 바운딩 박스: {bbox_1}")
-    print(f"입력 메타데이터: {meta_1}")
-    print(f"추정 결과: {result_1}")
-    
-    print("\n" + "=" * 50)
-    print("--- 테스트 2: Track 2 실행 (PTZ 부재, 프리셋 ID) ---")
-    bbox_2 = [400, 500, 500, 1000]
-    meta_2 = {"preset_id": "preset_1"}
-    result_2 = estimator.estimate_location(bbox_2, meta_2)
-    print(f"입력 바운딩 박스: {bbox_2}")
-    print(f"입력 메타데이터: {meta_2}")
-    print(f"추정 결과: {result_2} (기대값: A구역)")
-    print("=" * 50)
+    bbox = [900, 480, 1020, 640]
+
+    res_uncal = estimator.estimate_location(bbox, meta, use_skyline_calibration=False)
+    res_cal = estimator.estimate_location(bbox, meta, use_skyline_calibration=True)
+    print("=" * 65)
+    print("[Sanity Check] 대구 달성군 가창면 오리 CCTV (35.791037, 128.591184)")
+    print(f"보정 전 (Un-calibrated): 위도 {res_uncal['lat']:.6f}, 경도 {res_uncal['lon']:.6f}, 거리 {res_uncal['distance_m']:.1f}m")
+    print(
+        f"보정 후 (Calibrated)   : 위도 {res_cal['lat']:.6f}, 경도 {res_cal['lon']:.6f}, 거리 {res_cal['distance_m']:.1f}m "
+        f"(복원된 Pan={res_cal['calibration']['pan']:.2f}°, Tilt={res_cal['calibration']['tilt']:.2f}°, Roll={res_cal['calibration']['roll']:.2f}°)"
+    )
+    print("=" * 65)
