@@ -44,9 +44,9 @@ def run_paper_experiment() -> None:
             "true_pan": 339.0,
             "true_tilt": 3.0,
             "true_roll": 0.6,
-            "near_m": 250.0,
-            # Normalized YOLO bbox [x_min, y_min, x_max, y_max]: plume rising vertically
-            "bbox_norm": [0.4650, 0.3400, 0.5250, 0.4820],
+            "near_m": 30.0,
+            # Normalized YOLO bbox [x_min, y_min, x_max, y_max]: plume rising from mountainside slope
+            "bbox_norm": [0.4650, 0.0550, 0.5250, 0.1480],
         },
         {
             "case_id": "사례 2 (P023/T03)",
@@ -56,9 +56,9 @@ def run_paper_experiment() -> None:
             "true_pan": 23.0,
             "true_tilt": 3.0,
             "true_roll": -0.5,
-            "near_m": 250.0,
+            "near_m": 30.0,
             # Normalized YOLO bbox [x_min, y_min, x_max, y_max]: plume rising from NNE slope
-            "bbox_norm": [0.4720, 0.3550, 0.5320, 0.4900],
+            "bbox_norm": [0.4720, 0.1650, 0.5320, 0.2750],
         },
     ]
 
