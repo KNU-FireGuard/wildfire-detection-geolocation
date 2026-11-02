@@ -258,7 +258,7 @@
   "camera_name": "카메라 1",
   "event_id": 9,
   "phone_number": "01012345678",
-  "message": "[FireGuard] 카메라 1에서 화재가 탐지되었습니다. (신뢰도 94%)",
+  "message": "[FireGuard] 화재 탐지: 카메라 1",
   "status": "sent",
   "provider": "solapi",
   "error": null,

@@ -1,8 +1,23 @@
 const defaultPool = require('../config/db');
 const { createNotifier } = require('./notifier');
 
-function buildMessage(cameraName, confidence) {
-  return `[FireGuard] ${cameraName}에서 화재가 탐지되었습니다. (신뢰도 ${Math.round(confidence * 100)}%)`;
+const SMS_MAX_BYTES = 90;
+const PREFIX = '[FireGuard] 화재 탐지: ';
+
+// 한글 2바이트·그 외 1바이트로 계산, 90바이트를 넘으면 LMS로 전환되어 비용이 늘어남
+function byteLength(text) {
+  return [...text].reduce((sum, char) => sum + (char.charCodeAt(0) > 127 ? 2 : 1), 0);
+}
+
+function buildMessage(cameraName) {
+  let name = '';
+  let used = byteLength(PREFIX);
+  for (const char of cameraName) {
+    used += byteLength(char);
+    if (used > SMS_MAX_BYTES) break;
+    name += char;
+  }
+  return PREFIX + name;
 }
 
 // 화재 탐지 시 카메라에 설정된 번호로 문자를 보내고 결과를 sms_logs에 기록합니다.
@@ -20,7 +35,7 @@ function createFireAlert({ pool = defaultPool, notifier = createNotifier() } = {
       const { rows } = await pool.query('SELECT name, alert_phone FROM cameras WHERE id = $1', [cameraId]);
       if (rows.length === 0) return;
       const { name, alert_phone: phone } = rows[0];
-      const message = buildMessage(name, confidence);
+      const message = buildMessage(name);
       if (!phone) {
         await writeLog(cameraId, eventId, null, message, 'skipped', null);
         return;

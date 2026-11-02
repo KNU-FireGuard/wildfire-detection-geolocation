@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const dbPath = require.resolve('../src/config/db');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { query: async () => ({ rows: [] }) } };
-const { createFireAlert } = require('../src/services/fire-alert');
+const { createFireAlert, buildMessage } = require('../src/services/fire-alert');
 
 function setup({ camera, sendError, queryError } = {}) {
   const queries = [];
@@ -34,7 +34,7 @@ test('번호가 있는 카메라의 화재 탐지는 문자를 보내고 sent로
   assert.equal(sent.length, 1);
   assert.equal(sent[0].phone, '01012345678');
   assert.match(sent[0].message, /북악산 CCTV/);
-  assert.match(sent[0].message, /94%/);
+  assert.match(sent[0].message, /화재/);
   assert.deepEqual(logInsert(queries).params, [3, 15, '01012345678', sent[0].message, 'sent', 'console', null]);
 });
 
@@ -73,4 +73,16 @@ test('DB 오류가 나도 호출자에게 예외를 던지지 않는다', async 
   } finally {
     console.error = originalError;
   }
+});
+
+// SMS는 90바이트(한글 2바이트)까지, 넘으면 LMS로 전환되어 비용이 늘어남
+function smsBytes(text) {
+  return [...text].reduce((sum, char) => sum + (char.charCodeAt(0) > 127 ? 2 : 1), 0);
+}
+
+test('문구는 카메라 이름이 길어도 SMS 90바이트를 넘지 않는다', () => {
+  assert.match(buildMessage('북악산 CCTV'), /북악산 CCTV/);
+  const long = buildMessage('[경부선] 서울에서 부산 방향 아주 긴 이름의 도로 CCTV 카메라 이름 입니다 열두번째');
+  assert.ok(smsBytes(long) <= 90, `${smsBytes(long)}바이트`);
+  assert.match(long, /화재/);
 });
