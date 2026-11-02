@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS cameras (
     provider_key TEXT UNIQUE,
     latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
     longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
+    -- 화재 탐지 문자를 받을 번호, 카메라당 1개이며 NULL이면 발송하지 않습니다.
+    alert_phone TEXT CHECK (alert_phone ~ '^010[0-9]{8}$'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((latitude IS NULL) = (longitude IS NULL))
 );
@@ -18,6 +20,8 @@ CREATE TABLE IF NOT EXISTS cameras (
 ALTER TABLE cameras ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'test'
     CHECK (source_type IN ('test', 'live'));
 ALTER TABLE cameras ADD COLUMN IF NOT EXISTS provider_key TEXT;
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS alert_phone TEXT
+    CHECK (alert_phone ~ '^010[0-9]{8}$');
 CREATE UNIQUE INDEX IF NOT EXISTS cameras_provider_key_idx ON cameras(provider_key);
 
 CREATE TABLE IF NOT EXISTS videos (
@@ -72,17 +76,26 @@ CREATE TABLE IF NOT EXISTS admins (
 ALTER TABLE admins DROP COLUMN IF EXISTS created_at;
 ALTER TABLE admins DROP COLUMN IF EXISTS updated_at;
 
-CREATE TABLE IF NOT EXISTS sms_recipients (
+-- 공용 sms_recipients는 카메라별 번호(cameras.alert_phone)로 대체되어 더 이상 생성하지 않습니다.
+-- 기존 DB의 sms_recipients는 삭제하지 않고 그대로 둡니다.
+
+-- 화재 탐지 문자 발송 기록, 번호는 발송 당시 값을 보관합니다.
+CREATE TABLE IF NOT EXISTS sms_logs (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name TEXT NOT NULL CHECK (btrim(name) <> ''),
-    phone_number TEXT NOT NULL UNIQUE CHECK (btrim(phone_number) <> ''),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    camera_id INTEGER REFERENCES cameras(id),
+    event_id INTEGER REFERENCES detection_events(id),
+    -- skipped(번호 미설정)는 NULL
+    phone_number TEXT,
+    message TEXT NOT NULL CHECK (btrim(message) <> ''),
+    status TEXT NOT NULL CHECK (status IN ('sent', 'failed', 'skipped')),
+    provider TEXT NOT NULL CHECK (btrim(provider) <> ''),
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS videos_camera_id_idx ON videos(camera_id);
 CREATE INDEX IF NOT EXISTS detection_events_video_id_idx ON detection_events(video_id);
 CREATE INDEX IF NOT EXISTS detection_events_camera_id_idx ON detection_events(camera_id);
+CREATE INDEX IF NOT EXISTS sms_logs_created_at_idx ON sms_logs(created_at DESC, id DESC);
 
 COMMIT;

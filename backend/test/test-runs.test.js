@@ -35,6 +35,8 @@ require.cache[poolPath] = {
       }
       if (/INSERT INTO detection_events/.test(sql)) return { rows: [{ id: 91 }] };
       if (/UPDATE detection_events/.test(sql)) return { rows: [{ id: params[0] }] };
+      // 화재 알림 조회는 카메라가 없는 것으로 처리해 발송과 기록을 건너뜀
+      if (/FROM cameras WHERE id/.test(sql)) return { rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
   },

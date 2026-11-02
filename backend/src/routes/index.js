@@ -8,6 +8,7 @@ const router = express.Router();
 router.use('/auth', authRoutes);
 router.use(testRunsRoutes);
 router.use('/detections', detectionsRoutes);
+router.use('/admin', require('./admin.routes'));
 router.use(require('./live-cctv.routes'));
 router.use(require('./catalog.routes'));
 
