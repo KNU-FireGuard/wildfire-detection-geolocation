@@ -198,7 +198,7 @@ onBeforeUnmount(() => {
           <article class="summary-card"><span class="summary-icon green"><DashboardIcon name="clock" :size="29" /></span><div><p>확인 대기 이벤트</p><strong>{{ pendingCount }}<small>건</small></strong></div></article>
         </section>
       </template>
-      <footer class="dashboard-footer"><span>FireGuard AI · 산불 탐지 및 위치 추정</span><span>{{ dataSource === 'mock' ? '화면의 좌표와 탐지 결과는 개발용 예시입니다.' : 'Backend 조회 데이터 기준' }}</span></footer>
+      <footer class="dashboard-footer"><span>{{ dataSource === 'mock' ? '화면의 좌표와 탐지 결과는 개발용 예시입니다.' : 'Backend 조회 데이터 기준' }}</span></footer>
     </div>
 </template>
 
@@ -235,7 +235,7 @@ h1 { margin: 0; font-size: clamp(23px, 2vw, 30px); letter-spacing: -1px; font-we
 .cctv-refresh-form label { display: grid; gap: 5px; font-size: 12px; color: var(--text-2); }
 .cctv-refresh-form .primary-button { padding: 10px 16px; }
 .cctv-refresh-result { margin: 0 0 12px; padding: 10px 14px; border: 1px solid rgba(54, 214, 163, 0.3); border-radius: var(--radius-sm); background: var(--ok-soft); color: var(--ok); font-size: 12px; }
-.dashboard-footer { display: flex; justify-content: space-between; gap: 12px; color: var(--text-3); font-size: 11px; margin-top: 22px; }
+.dashboard-footer { display: flex; justify-content: flex-end; gap: 12px; color: var(--text-3); font-size: 11px; margin-top: 22px; }
 @media (min-width: 1600px) { .dashboard-content { padding: 32px 38px; } }
 @media (max-width: 1200px) { .dashboard-content { padding: 22px 18px; }.header-tools { gap: 10px; }.live-clock { display: none; } }
 @media (max-width: 800px) { .dashboard-grid.with-detail:not(.map-hidden) { grid-template-columns: minmax(0, 1fr); }.detail-panel { grid-column: 1; } }

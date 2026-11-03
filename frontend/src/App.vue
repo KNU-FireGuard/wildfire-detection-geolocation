@@ -5,7 +5,7 @@ const links = [
   { to: '/cameras', label: '카메라 목록', icon: 'camera' },
   { to: '/videos', label: '영상 목록', icon: 'monitor' },
   { to: '/events', label: '탐지 이벤트', icon: 'bell' },
-  { to: '/admin', label: '관리자', icon: 'settings' },
+  { to: '/admin', label: '문자 알림 관리', icon: 'settings' },
 ]
 </script>
 <template>

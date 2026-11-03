@@ -103,7 +103,7 @@ watch(isLoggedIn, loggedIn => {
 <template>
   <div class="catalog-page admin-page">
     <header class="page-heading">
-      <h1>관리자</h1>
+      <h1>문자 알림 관리</h1>
       <button v-if="isLoggedIn" type="button" class="secondary-button" @click="logout">로그아웃</button>
     </header>
 
