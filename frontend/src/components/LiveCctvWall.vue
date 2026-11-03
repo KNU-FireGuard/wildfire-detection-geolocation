@@ -15,7 +15,7 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
 <template>
   <section class="dashboard-panel live-wall" aria-label="실시간 CCTV 영상">
     <div class="wall-heading">
-      <div><h2>실시간 CCTV</h2><p>영상은 관제 화면이 열려 있는 동안 계속 재생됩니다</p></div>
+      <h2>실시간 CCTV</h2>
       <span>{{ cameras.length }}대</span>
     </div>
     <div class="live-grid">
@@ -42,8 +42,8 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
 <style scoped>
 .live-wall { grid-column: 1 / -1; min-width: 0; }
 .wall-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
-.wall-heading h2 { margin: 0 0 4px; font-size: 15px; }
-.wall-heading p, .wall-heading > span { margin: 0; color: var(--text-3); font-size: 12px; }
+.wall-heading h2 { margin: 0; font-size: 15px; }
+.wall-heading > span { margin: 0; color: var(--text-3); font-size: 12px; }
 .live-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .live-tile { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #05080c; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
 .live-tile:hover { border-color: var(--line-strong); }

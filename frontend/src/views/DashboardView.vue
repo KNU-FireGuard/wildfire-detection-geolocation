@@ -10,6 +10,7 @@ import { ensureAdminToken, useAdminSession } from '../composables/useAdminSessio
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
+import { summarizeOperatingCameras } from '../utils/cameraSummary'
 
 // 데이터 공급 모드를 명시적으로 선택합니다. API 실패 시 mock으로 자동 대체하지 않습니다.
 const dataSource = import.meta.env.VITE_DATA_SOURCE ?? 'api'
@@ -39,8 +40,7 @@ const selectedEvent = computed(() => events.value.find(event => event.id === sel
 const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedCameraId.value)
   ?? cameras.value.find(camera => camera.id === selectedEvent.value?.cameraId) ?? null)
 const liveCameras = computed(() => cameras.value.filter(camera => camera.sourceType === 'live'))
-const onlineCount = computed(() => cameras.value.some(camera => camera.status != null)
-  ? cameras.value.filter(camera => camera.status === 'ONLINE').length : '—')
+const operating = computed(() => summarizeOperatingCameras(cameras.value))
 const locatedCount = computed(() => events.value.filter(event => event.estimatedLocation != null).length)
 const pendingCount = computed(() => events.value.some(event => event.status != null)
   ? events.value.filter(event => event.status === 'UNCONFIRMED').length : '—')
@@ -193,7 +193,7 @@ onBeforeUnmount(() => {
         </section>
         <section class="summary-grid" aria-label="관제 요약">
           <article class="summary-card"><span class="summary-icon red"><DashboardIcon name="fire" :size="29" /></span><div><p>탐지 이벤트</p><strong>{{ events.length }}<small>건</small></strong></div></article>
-          <article class="summary-card"><span class="summary-icon blue"><DashboardIcon name="camera" :size="29" /></span><div><p>운영 중인 CCTV</p><strong>{{ onlineCount }}<small>대 <span class="metric-total">/ {{ cameras.length }}</span></small></strong></div></article>
+          <article class="summary-card"><span class="summary-icon blue"><DashboardIcon name="camera" :size="29" /></span><div><p>운영 중인 CCTV</p><strong>{{ operating.online }}<small>대 <span class="metric-total">/ {{ operating.total }}</span></small></strong></div></article>
           <article class="summary-card"><span class="summary-icon amber"><DashboardIcon name="target" :size="29" /></span><div><p>위치 추정 완료</p><strong>{{ locatedCount }}<small>건</small></strong></div></article>
           <article class="summary-card"><span class="summary-icon green"><DashboardIcon name="clock" :size="29" /></span><div><p>확인 대기 이벤트</p><strong>{{ pendingCount }}<small>건</small></strong></div></article>
         </section>

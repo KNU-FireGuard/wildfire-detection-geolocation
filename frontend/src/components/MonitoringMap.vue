@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
         <p v-if="validFire" class="coordinates">위도 {{ selectedEvent.estimatedLocation.latitude.toFixed(6) }} · 경도 {{ selectedEvent.estimatedLocation.longitude.toFixed(6) }}</p>
         <p v-else class="empty-message">유효한 추정 위치 정보가 없습니다.</p>
       </template>
-      <p v-else class="empty-message">{{ cameras.length ? '이벤트를 선택하면 추정 위치를 확인할 수 있습니다.' : '등록된 카메라가 없습니다.' }}</p>
+      <p v-else-if="!cameras.length" class="empty-message">등록된 카메라가 없습니다.</p>
     </div>
   </section>
 </template>
