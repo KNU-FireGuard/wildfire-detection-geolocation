@@ -33,17 +33,18 @@ function cameraName(cameraId) {
 </template>
 
 <style scoped>
-.event-count { color: #8493a7; font-size: 12px; }
+.event-count { color: var(--text-3); font-size: 12px; }
 .table-scroll { overflow-x: auto; }
 .event-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; white-space: nowrap; }
-th { background: #f5f7fb; color: #627188; font-weight: 500; padding: 12px 10px; font-size: 11px; }
-td { padding: 12px 10px; border-bottom: 1px solid #edf1f6; height: 53px; }
-tbody tr { cursor: pointer; transition: background .15s; }
-tbody tr:hover { background: #f7faff; }
-tbody tr.selected { background: #eef5ff; box-shadow: inset 3px 0 #3c88df; }
-.event-button { padding: 0; background: transparent; border: 0; color: #465871; text-align: left; font-size: 11px; }
-.event-number { color: #8794a6; }.camera-cell { font-weight: 600; }.confidence-cell { font-variant-numeric: tabular-nums; }
-.type-label { display: inline-flex; align-items: center; gap: 5px; color: #64748b; }.type-label i { width: 5px; height: 5px; border-radius: 50%; background: #94a3b8; }.type-label.fire i { background: #f66a59; }
+th { background: var(--surface-2); color: var(--text-3); font-weight: 600; padding: 12px 12px; font-size: 11px; letter-spacing: 0.3px; }
+th:first-child { border-radius: 8px 0 0 8px; }th:last-child { border-radius: 0 8px 8px 0; }
+td { padding: 12px 12px; border-bottom: 1px solid var(--line); height: 53px; color: var(--text); }
+tbody tr { cursor: pointer; transition: background 0.15s; }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr.selected { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+.event-button { padding: 0; background: transparent; border: 0; color: var(--text); text-align: left; font-size: 11px; }
+.event-number { color: var(--text-3); }.camera-cell { font-weight: 650; }.confidence-cell { font-variant-numeric: tabular-nums; }
+.type-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }.type-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }.type-label.fire { color: var(--text); }.type-label.fire i { background: var(--fire); box-shadow: 0 0 8px var(--fire); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 600px) { th, td { padding: 10px 8px; } }
 </style>

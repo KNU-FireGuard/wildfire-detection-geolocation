@@ -1,21 +1,103 @@
+/* FireGuard AI 다크 관제실 테마: 색은 토큰으로만 정의하고 각 화면이 var(--이름)으로 사용합니다. */
+:root {
+  color-scheme: dark;
+  /* 배경과 면: 아래에서 위로 한 단계씩 밝아짐 */
+  --bg: #060a0f;
+  --bg-2: #0a1018;
+  --surface: #0e151e;
+  --surface-2: #131c27;
+  --surface-3: #1a2535;
+  /* 글자 */
+  --text: #e8eef6;
+  --text-2: #a9b8ca;
+  --text-3: #8497ae;
+  --on-accent: #ffffff;
+  /* 강조: 파랑은 조작과 선택, 빨강은 화재, 초록은 정상, 노랑은 주의 */
+  --accent: #55a9ff;
+  --accent-strong: #1f6fd1;
+  --fire: #ff6a57;
+  --ok: #36d6a3;
+  --warn: #f6bd4a;
+  /* 반투명 면과 선 */
+  --line: rgba(143, 173, 204, 0.14);
+  --line-strong: rgba(143, 173, 204, 0.28);
+  --accent-soft: rgba(85, 169, 255, 0.14);
+  --fire-soft: rgba(255, 106, 87, 0.15);
+  --ok-soft: rgba(54, 214, 163, 0.14);
+  --warn-soft: rgba(246, 189, 74, 0.14);
+  --glass: rgba(10, 16, 24, 0.78);
+  --highlight: rgba(255, 255, 255, 0.045);
+  --shadow: 0 1px 0 var(--highlight) inset, 0 14px 34px rgba(0, 0, 0, 0.38);
+  --radius: 14px;
+  --radius-sm: 9px;
+  font-family: 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  font-feature-settings: 'tnum' 1;
+}
 
 *, *::before, *::after { box-sizing: border-box; }
-:root { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #233044; background: #f3f6fb; font-synthesis: none; }
-body { margin: 0; -webkit-font-smoothing: antialiased; }
+html { scrollbar-color: #2a3a4f transparent; scrollbar-width: thin; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(1100px 560px at 8% -12%, rgba(85, 169, 255, 0.11), transparent 62%),
+    radial-gradient(900px 480px at 100% -6%, rgba(255, 106, 87, 0.07), transparent 58%),
+    var(--bg);
+  background-attachment: fixed;
+}
+::selection { background: rgba(85, 169, 255, 0.35); color: var(--text); }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #42a4ff; outline-offset: 4px; }
+button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 a { color: inherit; }
+/* 본문 링크는 강조색과 은은한 밑줄로 통일(메뉴·로고·버튼 링크는 제외) */
+a:not(.brand):not(.nav-item):not(.primary-button):not(.skip-link) { color: var(--accent); text-decoration-color: rgba(85, 169, 255, 0.35); text-underline-offset: 3px; }
+a:not(.brand):not(.nav-item):not(.primary-button):not(.skip-link):hover { text-decoration-color: var(--accent); }
 svg { flex-shrink: 0; vertical-align: middle; }
-.dashboard-panel { background: white; border: 1px solid #e9eef5; border-radius: 8px; padding: 20px; box-shadow: 0 3px 14px #20334d04; }
-.dashboard-panel h2 { margin: 0; font-size: 18px; letter-spacing: -.5px; }
+input, select {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+}
+input::placeholder { color: var(--text-3); }
+input:focus { border-color: var(--accent); }
+
+.dashboard-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 90px), var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+.dashboard-panel h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.2px; color: var(--text); }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-.empty-message { color: #8390a3; font-size: 13px; line-height: 1.7; }
-.primary-button { display: flex; align-items: center; justify-content: center; gap: 10px; border: 0; background: #337fd4; color: white; border-radius: 6px; padding: 14px 16px; font-size: 13px; font-weight: 500; text-decoration: none; }
-.primary-button:hover { background: #286bbb; }
-.status-badge { display: inline-flex; align-items: center; justify-content: center; padding: 5px 8px; font-size: 11px; font-weight: 500; border-radius: 4px; white-space: nowrap; background: #f0f3f7; color: #65748a; }
-.status-badge.pending { background: #fff0ee; color: #ec5a51; }.status-badge.confirmed { background: #eaf6ee; color: #279361; }
-.skip-link { position: fixed; top: -60px; left: 20px; z-index: 100; padding: 12px; background: white; }.skip-link:focus { top: 12px; }
+.empty-message { color: var(--text-3); font-size: 13px; line-height: 1.7; }
+.primary-button {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, #2f86ec, var(--accent-strong));
+  color: var(--on-accent);
+  border-radius: 10px;
+  padding: 13px 16px;
+  font-size: 13px; font-weight: 600; text-decoration: none;
+  box-shadow: 0 6px 18px rgba(31, 111, 209, 0.32), 0 1px 0 rgba(255, 255, 255, 0.18) inset;
+  transition: filter 0.15s, transform 0.15s;
+}
+.primary-button:hover:not(:disabled) { filter: brightness(1.12); }
+.primary-button:active:not(:disabled) { transform: translateY(1px); }
+.primary-button:disabled { opacity: 0.55; box-shadow: none; }
+.status-badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 9px; font-size: 11px; font-weight: 600; border-radius: 999px; white-space: nowrap; background: var(--surface-3); color: var(--text-2); border: 1px solid var(--line); }
+.status-badge.pending { background: var(--fire-soft); color: var(--fire); border-color: rgba(255, 106, 87, 0.3); }
+.status-badge.confirmed { background: var(--ok-soft); color: var(--ok); border-color: rgba(54, 214, 163, 0.3); }
+.skip-link { position: fixed; top: -60px; left: 20px; z-index: 100; padding: 12px; background: var(--surface-3); color: var(--text); border-radius: var(--radius-sm); }
+.skip-link:focus { top: 12px; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.8); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
-@media (max-width: 600px) { .dashboard-panel { padding: 15px; }.dashboard-panel h2 { font-size: 16px; } }
+@media (max-width: 600px) { .dashboard-panel { padding: 15px; }.dashboard-panel h2 { font-size: 14px; } }

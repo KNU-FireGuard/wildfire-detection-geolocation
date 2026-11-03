@@ -37,7 +37,7 @@ watch(() => props.resource, () => { selectedVideoId.value = null })
   </div>
 </template>
 <style scoped>
-.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }h1 { font-size: 26px; margin: 0; }
-.table-scroll { overflow-x: auto; }table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; white-space: nowrap; }th { background: #f5f7fb; }th, td { padding: 14px; border-bottom: 1px solid #edf1f6; }a { color: #337fd4; }.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.play-button { border: 0; border-radius: 6px; padding: 7px 12px; color: white; background: #337fd4; cursor: pointer; }.video-player { margin-top: 24px; }.video-player h2 { overflow-wrap: anywhere; font-size: 18px; }.video-player video { display: block; width: 100%; max-height: 70vh; background: #111; }
+.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.8px; margin: 0; }
+.table-scroll { overflow-x: auto; }table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; white-space: nowrap; }th { background: var(--surface-2); color: var(--text-3); font-weight: 600; font-size: 12px; letter-spacing: 0.3px; }th, td { padding: 14px; border-bottom: 1px solid var(--line); }td { color: var(--text); }tbody tr:hover { background: var(--surface-2); }a { color: var(--accent); }.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.play-button { border: 0; border-radius: 8px; padding: 7px 14px; font-weight: 600; color: var(--on-accent); background: var(--accent-strong); cursor: pointer; transition: filter 0.15s; }.play-button:hover { filter: brightness(1.15); }.video-player { margin-top: 24px; }.video-player h2 { overflow-wrap: anywhere; font-size: 16px; }.video-player video { display: block; width: 100%; max-height: 70vh; background: #05080c; border: 1px solid var(--line); border-radius: 12px; }
 </style>

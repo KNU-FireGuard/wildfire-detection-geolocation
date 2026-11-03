@@ -41,17 +41,21 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
 
 <style scoped>
 .live-wall { grid-column: 1 / -1; min-width: 0; }
-.wall-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
-.wall-heading h2 { margin: 0 0 4px; font-size: 17px; }
-.wall-heading p, .wall-heading > span { margin: 0; color: #66768b; font-size: 12px; }
-.live-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.live-tile { min-width: 0; overflow: hidden; border: 2px solid transparent; border-radius: 6px; background: #111; cursor: pointer; }
-.live-tile.selected { border-color: #337fc8; }
+.wall-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.wall-heading h2 { margin: 0 0 4px; font-size: 15px; }
+.wall-heading p, .wall-heading > span { margin: 0; color: var(--text-3); font-size: 12px; }
+.live-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.live-tile { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #05080c; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+.live-tile:hover { border-color: var(--line-strong); }
+.live-tile.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 28px rgba(85, 169, 255, 0.28); }
 .live-tile :deep(video) { width: 100%; height: 160px; max-height: none; object-fit: contain; }
-.tile-empty { display: grid; align-content: center; justify-items: center; gap: 4px; height: 160px; color: #e8f1fc; background: #111; font-size: 12px; text-align: center; }
-.tile-select { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 0; background: #253444; color: #fff; text-align: left; cursor: pointer; }
-.tile-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.tile-select:focus-visible { outline: 3px solid #7fc4ff; outline-offset: -3px; }
+.tile-empty { display: grid; align-content: center; justify-items: center; gap: 4px; height: 160px; color: var(--text-2); background: #05080c; font-size: 12px; text-align: center; }
+.tile-select { display: flex; width: 100%; align-items: center; gap: 9px; padding: 10px 12px; border: 0; border-top: 1px solid var(--line); background: linear-gradient(180deg, #131c27, #0d141d); color: var(--text); text-align: left; transition: background 0.15s; }
+.tile-select::before { content: ''; flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.live-tile.selected .tile-select::before { background: var(--accent); box-shadow: 0 0 9px var(--accent); }
+.tile-select:hover { background: var(--surface-3); }
+.tile-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.tile-select:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 @media (max-width: 800px) { .live-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .live-grid { grid-template-columns: minmax(0, 1fr); } }
 </style>

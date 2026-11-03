@@ -33,5 +33,5 @@ const { data, loading, error, reload } = useQuery(() => props.id, async signal =
   </div>
 </template>
 <style scoped>
-.metadata { margin-top: 16px; }h2 { font-size: 16px; }dl { display: grid; grid-template-columns: 100px 1fr; gap: 12px; font-size: 13px; }dd { margin: 0; }
+.metadata { margin-top: 16px; }h2 { font-size: 15px; }dl { display: grid; grid-template-columns: 100px 1fr; gap: 12px; font-size: 13px; }dt { color: var(--text-3); }dd { margin: 0; color: var(--text); }
 </style>
