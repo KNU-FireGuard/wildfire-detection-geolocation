@@ -370,6 +370,12 @@ class FireLocationEstimator:
         else:
             # Blind Pose Estimation (360° Coarse-to-Fine Skyline Matching with 3-way Fail-Safe)
             if ridge_pts is None or len(ridge_pts) < 15:
+                # Frame given but no usable skyline detected vs. too few ridge points supplied
+                no_ridge_reason = (
+                    "RIDGE_NOT_DETECTED"
+                    if ridge_extraction_info is not None and not ridge_extraction_info["is_valid"]
+                    else "INSUFFICIENT_RIDGE"
+                )
                 cal_info = {
                     "pan": None,
                     "tilt": None,
@@ -379,6 +385,7 @@ class FireLocationEstimator:
                     "rms_deg": 999.0,
                     "calibrated": False,
                     "status": "CALIBRATION_FAILED",
+                    "reason": no_ridge_reason,
                     "mode": "blind_360",
                 }
                 if ridge_extraction_info is not None:
@@ -386,6 +393,7 @@ class FireLocationEstimator:
                 return {
                     "intersected": False,
                     "status": "CALIBRATION_FAILED",
+                    "reason": no_ridge_reason,
                     "lat": None,
                     "lon": None,
                     "altitude_m": None,
@@ -412,6 +420,7 @@ class FireLocationEstimator:
                 return {
                     "intersected": False,
                     "status": "CALIBRATION_FAILED",
+                    "reason": blind_res.get("reason"),
                     "lat": None,
                     "lon": None,
                     "altitude_m": None,

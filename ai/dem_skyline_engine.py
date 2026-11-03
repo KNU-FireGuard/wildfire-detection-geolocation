@@ -713,6 +713,7 @@ class DEMProvider:
             return {
                 "calibrated": False,
                 "status": "CALIBRATION_FAILED",
+                "reason": "INSUFFICIENT_RIDGE",
                 "pan": None,
                 "tilt": None,
                 "roll": None,
@@ -741,6 +742,7 @@ class DEMProvider:
             return {
                 "calibrated": False,
                 "status": "CALIBRATION_FAILED",
+                "reason": "LOW_RELIEF",
                 "pan": None,
                 "tilt": None,
                 "roll": None,
@@ -847,18 +849,22 @@ class DEMProvider:
             np.mean((el_obs - el_obs.mean()) * (el_sky - el_sky.mean())) / max(best_hstd * best_ostd, 1e-6)
         )
 
-        is_valid_pose = (
-            best_ostd >= min_relief_std_deg
-            and best_hstd >= min_relief_std_deg
-            and best_ncc >= min_ncc
-            and best_rms <= max_rms_deg
-            and (min_tilt_deg <= best_tilt <= max_tilt_deg)
-        )
+        reason: str | None = None
+        if best_ostd < min_relief_std_deg or best_hstd < min_relief_std_deg:
+            reason = "LOW_RELIEF"
+        elif best_ncc < min_ncc:
+            reason = "LOW_CORRELATION"
+        elif best_rms > max_rms_deg:
+            reason = "HIGH_RESIDUAL"
+        elif not (min_tilt_deg <= best_tilt <= max_tilt_deg):
+            reason = "TILT_OUT_OF_RANGE"
+        is_valid_pose = reason is None
 
         if not is_valid_pose:
             return {
                 "calibrated": False,
                 "status": "CALIBRATION_FAILED",
+                "reason": reason,
                 "pan": None,
                 "tilt": None,
                 "roll": None,
@@ -872,6 +878,7 @@ class DEMProvider:
         return {
             "calibrated": True,
             "status": "OK",
+            "reason": None,
             "pan": best_pan,
             "tilt": best_tilt,
             "roll": best_roll,
