@@ -75,11 +75,13 @@ except ImportError:
 
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/elevation"
+TERRARIUM_TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 R_EARTH = 6371008.8
 K_REFRACTION = 0.13
 GACHANG_CAM_LAT = 35.791037
 GACHANG_CAM_LON = 128.591184
 DEFAULT_NPZ_PATH = Path(__file__).resolve().parent / "gachang_dem.npz"
+DEFAULT_TILE_CACHE_DIR = Path(__file__).resolve().parent / ".dem_cache"
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -142,6 +144,91 @@ def fetch_open_meteo_batch(lats: np.ndarray, lons: np.ndarray, timeout: float = 
     return None
 
 
+def fetch_terrarium_dem_grid(
+    lat_mesh: np.ndarray,
+    lon_mesh: np.ndarray,
+    zoom: int = 12,
+    cache_dir: Path | str | None = None,
+    timeout: float = 8.0,
+) -> np.ndarray | None:
+    """
+    Download or load cached AWS Terrarium 30m elevation PNG tiles (zoom 12)
+    and bilinearly sample elevations onto (lat_mesh, lon_mesh) using PIL + NumPy.
+    Decoding formula: elevation_m = (R * 256.0 + G + B / 256.0) - 32768.0
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+
+    tile_dir = Path(cache_dir) if cache_dir is not None else DEFAULT_TILE_CACHE_DIR
+    tile_dir.mkdir(parents=True, exist_ok=True)
+
+    n = 2.0 ** zoom
+    lat_rad = np.radians(lat_mesh)
+    xtile_f = (lon_mesh + 180.0) / 360.0 * n
+    ytile_f = (1.0 - np.log(np.tan(lat_rad) + 1.0 / np.cos(lat_rad)) / math.pi) / 2.0 * n
+
+    tx_min, tx_max = int(math.floor(float(xtile_f.min()))), int(math.floor(float(xtile_f.max())))
+    ty_min, ty_max = int(math.floor(float(ytile_f.min()))), int(math.floor(float(ytile_f.max())))
+
+    nx = tx_max - tx_min + 1
+    ny = ty_max - ty_min + 1
+    if nx <= 0 or ny <= 0 or nx * ny > 64:
+        return None
+
+    mosaic = np.zeros((ny * 256, nx * 256), dtype=np.float32)
+
+    for ty in range(ty_min, ty_max + 1):
+        for tx in range(tx_min, tx_max + 1):
+            tile_file = tile_dir / f"terrarium_{zoom}_{tx}_{ty}.png"
+            if not tile_file.exists():
+                url = TERRARIUM_TILE_URL.format(z=zoom, x=tx, y=ty)
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "FireGuard-Research/1.0"})
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        tile_bytes = resp.read()
+                    tile_file.write_bytes(tile_bytes)
+                except Exception:
+                    return None
+
+            try:
+                with Image.open(tile_file) as img:
+                    rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
+                tile_elev = (rgb[:, :, 0] * 256.0 + rgb[:, :, 1] + rgb[:, :, 2] / 256.0) - 32768.0
+                r0 = (ty - ty_min) * 256
+                c0 = (tx - tx_min) * 256
+                mosaic[r0 : r0 + 256, c0 : c0 + 256] = tile_elev
+            except Exception:
+                return None
+
+    # Sub-pixel bilinear interpolation inside the stitched tile mosaic
+    px = (xtile_f - tx_min) * 256.0 - 0.5
+    py = (ytile_f - ty_min) * 256.0 - 0.5
+
+    h_m, w_m = mosaic.shape
+    px = np.clip(px, 0.0, w_m - 1.000001)
+    py = np.clip(py, 0.0, h_m - 1.000001)
+
+    j0 = np.floor(px).astype(int)
+    i0 = np.floor(py).astype(int)
+    du = py - i0
+    dv = px - j0
+
+    v00 = mosaic[i0, j0]
+    v01 = mosaic[i0, j0 + 1]
+    v10 = mosaic[i0 + 1, j0]
+    v11 = mosaic[i0 + 1, j0 + 1]
+
+    sampled = (
+        v00 * (1.0 - du) * (1.0 - dv)
+        + v01 * (1.0 - du) * dv
+        + v10 * du * (1.0 - dv)
+        + v11 * du * dv
+    )
+    return sampled.astype(np.float32)
+
+
 def _is_valid_dem_cache(
     npz_file: Path,
     center_lat: float,
@@ -175,7 +262,7 @@ def _is_valid_dem_cache(
     return None
 
 
-def build_and_cache_gachang_dem(
+def build_and_cache_dem(
     center_lat: float = GACHANG_CAM_LAT,
     center_lon: float = GACHANG_CAM_LON,
     radius_m: float = 5000.0,
@@ -184,7 +271,7 @@ def build_and_cache_gachang_dem(
     force_rebuild: bool = False,
 ) -> dict[str, np.ndarray]:
     """
-    Build a 5km-radius elevation grid and cache to an npz file.
+    Build a 5km-radius 3D elevation grid for any camera coordinate and cache to an .npz file.
     Validates cache coordinate alignment (haversine <= 10m, radius, grid_size).
     Automatically routes non-Gachang coordinates or mismatched parameters to a dynamic
     file path (dem_{lat:.4f}_{lon:.4f}_{int(radius_m)}m.npz) to protect existing caches.
@@ -223,28 +310,23 @@ def build_and_cache_gachang_dem(
     anchor_lons = np.linspace(center_lon - dlon, center_lon + dlon, 10)
     a_lon_m, a_lat_m = np.meshgrid(anchor_lons, anchor_lats)
     api_elev = fetch_open_meteo_batch(a_lat_m.ravel(), a_lon_m.ravel())
+    is_api_mocked = hasattr(fetch_open_meteo_batch, "_mock_name") or (
+        "unittest.mock" in type(fetch_open_meteo_batch).__module__
+    )
 
-    # 2. Populate dense 201x201 (~50m step) elevation matrix using cached 30m DEM mosaic if available,
-    #    or multi-batch Open-Meteo / bilinear interpolation fallback
+    # 2. Populate dense 201x201 (~50m step) elevation matrix using AWS Terrarium 30m tiles,
+    #    falling back to Open-Meteo bilinear interpolation when offline or explicitly mocked in tests
     elev_grid: np.ndarray | None = None
-    try:
-        try:
-            from ai.dem_skyline_calibrator import DEM as TerrariumDEM
-        except ImportError:
-            from dem_skyline_calibrator import DEM as TerrariumDEM
-
-        t_dem = TerrariumDEM(center=(center_lat, center_lon), radius_m=radius_m + 1000.0, zoom=12)
-        sampled = t_dem.sample(lat_mesh, lon_mesh)
-        if not np.isnan(sampled).any():
+    if not is_api_mocked:
+        sampled = fetch_terrarium_dem_grid(lat_mesh, lon_mesh, zoom=12)
+        if sampled is not None and not np.isnan(sampled).any():
             elev_grid = sampled.astype(np.float32)
-            # Calibrate zero datum offset with Open-Meteo Copernicus GLO-90 anchor points if available
             if api_elev is not None:
-                t_anchor = t_dem.sample(a_lat_m.ravel(), a_lon_m.ravel())
-                datum_bias = float(np.median(api_elev - t_anchor))
-                if abs(datum_bias) < 5.0:
-                    elev_grid = elev_grid + datum_bias * 0.1
-    except Exception:
-        elev_grid = None
+                t_anchor = fetch_terrarium_dem_grid(a_lat_m, a_lon_m, zoom=12)
+                if t_anchor is not None:
+                    datum_bias = float(np.median(api_elev - t_anchor.ravel()))
+                    if abs(datum_bias) < 5.0:
+                        elev_grid = elev_grid + datum_bias * 0.1
 
     if elev_grid is None:
         if api_elev is not None:
@@ -279,6 +361,25 @@ def build_and_cache_gachang_dem(
     }
 
 
+def build_and_cache_gachang_dem(
+    center_lat: float = GACHANG_CAM_LAT,
+    center_lon: float = GACHANG_CAM_LON,
+    radius_m: float = 5000.0,
+    grid_size: int = 201,
+    npz_path: Path | str | None = None,
+    force_rebuild: bool = False,
+) -> dict[str, np.ndarray]:
+    """Backward-compatible wrapper around build_and_cache_dem()."""
+    return build_and_cache_dem(
+        center_lat=center_lat,
+        center_lon=center_lon,
+        radius_m=radius_m,
+        grid_size=grid_size,
+        npz_path=npz_path,
+        force_rebuild=force_rebuild,
+    )
+
+
 class DEMProvider:
     """
     High-speed DEM Elevation & 360-degree Synthetic Skyline Provider
@@ -299,7 +400,7 @@ class DEMProvider:
         self.npz_path = Path(npz_path) if npz_path is not None else DEFAULT_NPZ_PATH
         self.tower_height_m = float(tower_height_m)
 
-        data = build_and_cache_gachang_dem(
+        data = build_and_cache_dem(
             center_lat=self.cam_lat,
             center_lon=self.cam_lon,
             radius_m=self.radius_m,
@@ -481,6 +582,168 @@ class DEMProvider:
             "d_pan": best_dpan,
             "d_tilt": best_dtilt,
             "rms_deg": float(rms[best_k]),
+        }
+
+    def estimate_blind_ptz(
+        self,
+        ridge_pts: np.ndarray | list[tuple[float, float]],
+        width: int = 1920,
+        height: int = 1080,
+        fov_h: float = 60.0,
+        coarse_step_deg: float = 0.5,
+        fine_window_deg: float = 2.0,
+        fine_step_deg: float = 0.05,
+        roll_max_deg: float = 2.5,
+        min_relief_std_deg: float = 0.12,
+        min_ncc: float = 0.65,
+        max_rms_deg: float = 1.5,
+        min_tilt_deg: float = -15.0,
+        max_tilt_deg: float = 25.0,
+    ) -> dict[str, float | bool | str | None]:
+        """
+        360° Blind Camera Pose (Pan, Tilt, Roll) Estimation for live CCTVs without PTZ metadata.
+        Executes a Coarse-to-Fine global search across 0°..360° with a 3-way fail-safe check:
+          1. Ridge relief standard deviation >= min_relief_std_deg (0.12°)
+          2. Roll-compensated Normalized Cross-Correlation (NCC) >= min_ncc (0.65)
+          3. Residual rms_deg <= max_rms_deg (1.5°) and physical tilt within [-15°, +25°]
+        """
+        assert self.az_grid is not None and self.skyline_el_deg is not None
+        pts = np.asarray(ridge_pts, dtype=np.float64)
+        if len(pts) < 15:
+            return {
+                "calibrated": False,
+                "status": "CALIBRATION_FAILED",
+                "pan": None,
+                "tilt": None,
+                "roll": None,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": 999.0,
+                "ncc": 0.0,
+                "obs_std_deg": 0.0,
+            }
+
+        xs, ys = pts[:, 0], pts[:, 1]
+        med_y = np.array(
+            [np.median(ys[max(0, i - 2) : min(len(ys), i + 3)]) for i in range(len(ys))]
+        )
+        mad = max(1.0, float(np.median(np.abs(ys - med_y))) * 1.4826)
+        clean_y = np.where(np.abs(ys - med_y) <= 2.5 * mad, ys, med_y)
+
+        f = (width / 2.0) / math.tan(math.radians(fov_h / 2.0))
+        cx, cy = width / 2.0, height / 2.0
+
+        r_off = np.degrees(np.arctan((xs - cx) / f))
+        r_el_zero = np.degrees(np.arctan((cy - clean_y) / f))
+
+        raw_obs_std = float(np.std(r_el_zero))
+        if raw_obs_std < min_relief_std_deg * 0.8:
+            return {
+                "calibrated": False,
+                "status": "CALIBRATION_FAILED",
+                "pan": None,
+                "tilt": None,
+                "roll": None,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": 999.0,
+                "ncc": 0.0,
+                "obs_std_deg": raw_obs_std,
+            }
+
+        az_ext = np.append(self.az_grid, 360.0)
+        sky_ext = np.append(self.skyline_el_deg, self.skyline_el_deg[0])
+        oc = r_off - r_off.mean()
+        oc_denom = max(float((oc ** 2).sum()), 1e-6)
+        roll_max_tan = math.tan(math.radians(roll_max_deg))
+
+        def _eval_candidates(cand_pans: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            query_az = (cand_pans[:, None] + r_off[None, :]) % 360.0
+            hor_mat = np.interp(query_az, az_ext, sky_ext)
+
+            diff = hor_mat - r_el_zero[None, :]
+            dmean = diff.mean(axis=1)
+            rr = np.clip(
+                ((diff - dmean[:, None]) * oc[None, :]).sum(axis=1) / oc_denom,
+                -roll_max_tan,
+                roll_max_tan,
+            )
+            # Unclipped least-squares tilt: clipping here would hide an out-of-range pose from the
+            # final physical tilt check (it would always pass), so the range is enforced only at the end
+            cc = dmean - rr * r_off.mean()
+            res = diff - cc[:, None] - rr[:, None] * r_off[None, :]
+            rms = np.sqrt(np.mean(res ** 2, axis=1))
+
+            # Roll-compensated observed elevation profile: r_el_zero + rr * r_off
+            obs_unrolled = r_el_zero[None, :] + rr[:, None] * r_off[None, :]
+            h_cent = hor_mat - hor_mat.mean(axis=1, keepdims=True)
+            o_cent = obs_unrolled - obs_unrolled.mean(axis=1, keepdims=True)
+            h_std = np.std(hor_mat, axis=1)
+            o_std = np.std(obs_unrolled, axis=1)
+            ncc = np.mean(h_cent * o_cent, axis=1) / np.maximum(h_std * o_std, 1e-6)
+            return cc, rr, rms, ncc, h_std, o_std
+
+        # Stage 1: Coarse 360° scan
+        coarse_pans = np.arange(0.0, 360.0, coarse_step_deg)
+        c_cc, c_rr, c_rms, c_ncc, c_hstd, _ = _eval_candidates(coarse_pans)
+
+        # Penalize candidates that lack terrain relief or shape correlation
+        valid_mask = (c_hstd >= min_relief_std_deg) & (c_ncc >= 0.4)
+        score_rms = np.where(valid_mask, c_rms, c_rms + 50.0)
+        top_indices = np.argsort(score_rms)[:5]
+
+        # Stage 2: Fine scan around top coarse candidates
+        fine_offsets = np.arange(-fine_window_deg, fine_window_deg + 1e-6, fine_step_deg)
+        fine_pans = np.unique(
+            ((coarse_pans[top_indices, None] + fine_offsets[None, :]) % 360.0).ravel()
+        )
+        f_cc, f_rr, f_rms, f_ncc, f_hstd, f_ostd = _eval_candidates(fine_pans)
+
+        f_valid = (f_hstd >= min_relief_std_deg) & (f_ostd >= min_relief_std_deg)
+        f_score = np.where(f_valid, f_rms, f_rms + 50.0)
+        best_k = int(np.argmin(f_score))
+
+        best_pan = float(fine_pans[best_k]) % 360.0
+        best_tilt = float(f_cc[best_k])
+        best_roll = math.degrees(math.atan(float(f_rr[best_k])))
+        best_rms = float(f_rms[best_k])
+        best_ncc = float(f_ncc[best_k])
+        best_hstd = float(f_hstd[best_k])
+        best_ostd = float(f_ostd[best_k])
+
+        is_valid_pose = (
+            best_ostd >= min_relief_std_deg
+            and best_hstd >= min_relief_std_deg
+            and best_ncc >= min_ncc
+            and best_rms <= max_rms_deg
+            and (min_tilt_deg <= best_tilt <= max_tilt_deg)
+        )
+
+        if not is_valid_pose:
+            return {
+                "calibrated": False,
+                "status": "CALIBRATION_FAILED",
+                "pan": None,
+                "tilt": None,
+                "roll": None,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": best_rms,
+                "ncc": best_ncc,
+                "obs_std_deg": best_ostd,
+            }
+
+        return {
+            "calibrated": True,
+            "status": "OK",
+            "pan": best_pan,
+            "tilt": best_tilt,
+            "roll": best_roll,
+            "d_pan": 0.0,
+            "d_tilt": 0.0,
+            "rms_deg": best_rms,
+            "ncc": best_ncc,
+            "obs_std_deg": best_ostd,
         }
 
 

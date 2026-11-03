@@ -16,6 +16,42 @@ from ai.dem_skyline_engine import (
     haversine_distance,
 )
 from ai.fire_location_estimator import FireLocationEstimator
+from ai.ridge_detector import render_synthetic_cctv_frame
+
+
+def format_blind_row(
+    case_id: str,
+    true_pose: tuple[float, float, float],
+    res: dict,
+    ref_coord: tuple[float, float],
+) -> str:
+    """실험 3 표의 한 줄: 역산 실패(lat None)도 크래시 없이 실제 상태대로 출력"""
+    t_pan, t_tilt, t_roll = true_pose
+    cal = res.get("calibration") or {}
+    ncc = cal.get("ncc")
+    ncc_txt = f"`{ncc:.4f}`" if ncc is not None else "`-`"
+    head = f"| **{case_id} (Blind)** | `({t_pan:.1f}°, {t_tilt:.1f}°, {t_roll:+.1f}°)` | "
+    if res.get("status") == "OK" and res.get("lat") is not None and cal.get("pan") is not None:
+        err = haversine_distance(ref_coord[0], ref_coord[1], res["lat"], res["lon"])
+        return (
+            head
+            + f"**`({cal['pan']:.2f}°, {cal['tilt']:.2f}°, {cal['roll']:+.2f}°)`** | {ncc_txt} | "
+            + f"`({res['lat']:.4f}, {res['lon']:.4f})`<br>(**`{err:.1f} m`**) | ✅ `{res['status']}` |"
+        )
+    return head + f"`복원 실패` | {ncc_txt} | `None` | ❌ `{res.get('status')}` |"
+
+
+def format_failsafe_row(res: dict) -> str:
+    """안개/야간 프레임 표의 한 줄: 위치를 내지 않았으면 차단, 냈으면 오경보로 실제 결과를 출력"""
+    if res.get("lat") is None:
+        return (
+            "| **안개/야간 불능 프레임 (Fail-Safe)** | `미제공 (ptz=None)` | `추정 차단 (None)` | "
+            f"`-` | `None` | 🛡️ `{res.get('status')}` |"
+        )
+    return (
+        "| **안개/야간 불능 프레임 (Fail-Safe)** | `미제공 (ptz=None)` | `위치 출력됨` | "
+        f"`-` | `({res['lat']:.4f}, {res['lon']:.4f})` | ⚠️ 오경보 `{res.get('status')}` |"
+    )
 
 
 def run_paper_experiment() -> None:
@@ -39,8 +75,8 @@ def run_paper_experiment() -> None:
     )
     print(f"- **DEM 캐시 파일**: `{provider.npz_path.name}` (`{provider.elevation.shape}` 격자, 초기 로드 `{init_ms:.1f}ms`)")
     print(
-        "- **검증 범위 안내**: 본 스크립트는 통제된 수치 시뮬레이션(Exp 1) 및 복합 노이즈(PTZ 오차 + BBox 흔들림) 하의 "
-        "독립 필지 기준점 안착 강건성(Exp 2)을 평가합니다. (실제 영상 프레임 기반 OpenCV 능선 추출 연동은 Issue #51에서 수행)\n"
+        "- **검증 범위 안내**: 본 스크립트는 통제된 수치 시뮬레이션(Exp 1), 복합 노이즈 하의 독립 필지 기준점 안착 강건성(Exp 2), "
+        "및 영상 프레임 능선 자동 추출(`SkylineExtractor`)과 PTZ 미제공(`ptz=None`) 360° Blind 역산(Exp 3, Issue #51)을 종합 평가합니다.\n"
     )
 
     # =========================================================================
@@ -339,6 +375,64 @@ def run_paper_experiment() -> None:
             f"| **{pc['case_id']}** | `{pc['target_address']}`<br>`({ref_lat:.4f}, {ref_lon:.4f})` | "
             f"{str_a} | {str_b} | {str_c} | {rate_str} |"
         )
+
+    # =========================================================================
+    # Part 3. [Experiment 3: Real-Frame Skyline Extraction & PTZ-less Blind Pose Estimation]
+    # Issue #51: 영상 프레임 자동 능선 검출(SkylineExtractor) 및 PTZ 미제공(ptz=None) 360° 역산 검증
+    # =========================================================================
+    print("\n## 3. [Experiment 3: Frame-Based Skyline Extraction & PTZ-less (`ptz=None`) 360° Blind Estimation]")
+    print(
+        "> **설명**: PTZ 메타데이터가 전혀 제공되지 않는 실시간 CCTV 환경(`ptz=None`)을 모사하여, "
+        "역광 하늘·상단 좌측 OSD·하단 건물 노이즈·연기 기둥이 포함된 `1920x1080` 영상 프레임만 입력했을 때 "
+        "`SkylineExtractor` + `estimate_blind_ptz()`가 방위각(Pan)·상하각(Tilt)·기울기(Roll) 및 발화지 필지 좌표를 복원하는지 검증합니다.\n"
+    )
+    print(
+        "| 실험 시나리오 | 실제 카메라 자세 `(Pan, Tilt, Roll)` | 복원된 자세 `(Pan, Tilt, Roll)` | "
+        "형상 상관계수 (`NCC`) | 추정 좌표 / 필지 기준점 오차 | 상태 (`status`) |"
+    )
+    print("| :--- | :---: | :---: | :---: | :---: | :---: |")
+
+    for pc in parcel_cases:
+        ref_lat, ref_lon = pc["parcel_ref_coord"]
+        t_pan, t_tilt, t_roll = pc["pan"], pc["tilt"], pc["roll"]
+        bbox_px = pc["base_bbox_px"]
+
+        frame_img, _ = render_synthetic_cctv_frame(
+            provider=provider,
+            true_pan=t_pan,
+            true_tilt=t_tilt,
+            true_roll=t_roll,
+            width=width,
+            height=height,
+            fov_h=fov_h,
+            backlit_sky=True,
+            add_osd=True,
+            add_foreground_buildings=True,
+            smoke_bbox_px=bbox_px,
+        )
+        blind_meta = {
+            "camera": {
+                "lat": GACHANG_CAM_LAT,
+                "lon": GACHANG_CAM_LON,
+                "tower_height": 15.0,
+                "fov_h": fov_h,
+                "resolution_w": width,
+                "resolution_h": height,
+                "near_m": 30.0,
+                "max_range_m": 5000.0,
+            },
+            "frame": frame_img,
+        }
+        res_blind = estimator.estimate_location(bbox_px, blind_meta, use_skyline_calibration=True)
+        print(format_blind_row(pc["case_id"], (t_pan, t_tilt, t_roll), res_blind, (ref_lat, ref_lon)))
+
+    # 안개/야간 불능 프레임 안전 차단(Fail-Safe) 검증
+    fog_frame = np.full((height, width, 3), 125, dtype=np.uint8)
+    fog_res = estimator.estimate_location(
+        [890, 58, 1010, 162],
+        {"camera": {"lat": GACHANG_CAM_LAT, "lon": GACHANG_CAM_LON, "tower_height": 15.0}, "frame": fog_frame},
+    )
+    print(format_failsafe_row(fog_res))
 
 
 if __name__ == "__main__":
