@@ -57,7 +57,7 @@ test('실시간 카메라를 선택하면 우측 상세 패널에 영상을 표�
   const detail = read('components/EventDetail.vue')
   assert.doesNotMatch(dashboard.template.content, /show-video/)
   assert.doesNotMatch(detail.scriptSetup.content, /showVideo/)
-  assert.match(detail.template.content, /<LiveVideo v-if="camera\?\.sourceType === 'live' && camera\.streamUrl"/)
+  assert.match(detail.template.content, /<template v-if="camera\?\.sourceType === 'live' && camera\.streamUrl">/)
   assert.doesNotMatch(wall.styles[0].content, /\.live-tile\.selected[^{]*\{[^}]*(grid-column|order\s*:)/)
 })
 

@@ -24,7 +24,7 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
         class="live-tile" :class="{ selected: camera.id === selectedId }"
         @click="toggle(camera.id)"
       >
-        <LiveVideo v-if="camera.streamUrl" :url="camera.streamUrl" />
+        <LiveVideo v-if="camera.streamUrl" :url="camera.streamUrl" :camera-id="camera.id" />
         <div v-else class="tile-empty" role="status"><strong>영상 주소가 없습니다.</strong><span>CCTV 주소 갱신 후 다시 확인하세요.</span></div>
         <button
           type="button" class="tile-select"

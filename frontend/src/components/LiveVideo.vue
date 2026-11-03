@@ -1,8 +1,13 @@
 <script setup>
 import { onBeforeUnmount, ref, watch } from 'vue'
 import Hls from 'hls.js'
+import { registerLiveVideo, unregisterLiveVideo } from '../composables/liveVideoRegistry'
 
-const props = defineProps({ url: { type: String, required: true } })
+// cameraId를 주면 영상 월에서 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
+const props = defineProps({
+  url: { type: String, required: true },
+  cameraId: { type: [Number, String], default: null },
+})
 const video = ref(null)
 const error = ref('')
 const playing = ref(false)
@@ -23,8 +28,8 @@ watch(() => [props.url, video.value], ([url, element]) => {
   dispose()
   error.value = ''
   if (!url || !element) return
-  if (element.canPlayType('application/vnd.apple.mpegurl')) element.src = url
-  else if (Hls.isSupported()) {
+  // hls.js(MSE)를 우선 사용: 브라우저 기본 HLS로 받은 교차 출처 영상은 captureStream으로 공유할 수 없음
+  if (Hls.isSupported()) {
     player = new Hls({ enableWorker: true, liveSyncDurationCount: 2 })
     player.on(Hls.Events.ERROR, (_event, detail) => {
       if (detail.fatal) {
@@ -34,10 +39,19 @@ watch(() => [props.url, video.value], ([url, element]) => {
     })
     player.loadSource(url)
     player.attachMedia(element)
-  } else error.value = '이 브라우저는 HLS 영상을 재생할 수 없습니다.'
+  } else if (element.canPlayType('application/vnd.apple.mpegurl')) element.src = url
+  else error.value = '이 브라우저는 HLS 영상을 재생할 수 없습니다.'
 }, { immediate: true, flush: 'post' })
 
-onBeforeUnmount(dispose)
+watch([() => props.cameraId, video], ([id, element], [previousId, previousElement] = []) => {
+  if (previousId != null && previousElement) unregisterLiveVideo(previousId, previousElement)
+  if (id != null && element) registerLiveVideo(id, element)
+}, { immediate: true, flush: 'post' })
+
+onBeforeUnmount(() => {
+  if (props.cameraId != null && video.value) unregisterLiveVideo(props.cameraId, video.value)
+  dispose()
+})
 </script>
 
 <template>

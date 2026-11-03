@@ -3,11 +3,14 @@ import { computed, defineAsyncComponent, ref } from 'vue'
 import DashboardIcon from './DashboardIcon.vue'
 import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
 const LiveVideo = defineAsyncComponent(() => import('./LiveVideo.vue'))
+const LiveMirror = defineAsyncComponent(() => import('./LiveMirror.vue'))
 const TestRunPanel = defineAsyncComponent(() => import('./TestRunPanel.vue'))
 const props = defineProps({
   event: { type: Object, default: null },
   camera: { type: Object, default: null },
   videos: { type: Array, default: () => [] },
+  // true이면 영상 월에서 재생 중인 같은 영상을 공유하고 영상 서버에 다시 접속하지 않음
+  mirror: { type: Boolean, default: false },
 })
 const showDetails = ref(false)
 const selectedVideo = computed(() => props.videos.find(video => video.id === props.event?.videoId)
@@ -30,7 +33,10 @@ const cameraStatusLabel = computed(() => {
       <span class="camera-status" :class="{ online: camera?.monitorState === 'running' || camera?.status === 'ONLINE' }"><i />{{ cameraStatusLabel }}</span>
     </div>
     <div class="video-placeholder" aria-label="CCTV 영상">
-      <LiveVideo v-if="camera?.sourceType === 'live' && camera.streamUrl" :key="camera.id" :url="camera.streamUrl" />
+      <template v-if="camera?.sourceType === 'live' && camera.streamUrl">
+        <LiveMirror v-if="mirror" :key="camera.id" :camera-id="camera.id" :url="camera.streamUrl" />
+        <LiveVideo v-else :key="camera.id" :url="camera.streamUrl" />
+      </template>
       <div v-else-if="camera?.sourceType === 'live'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>실시간 영상 주소가 없습니다.</strong><p>CCTV 목록을 갱신한 뒤 다시 확인하세요.</p></div>
       <video v-else-if="selectedVideo" :key="selectedVideo.id" controls preload="metadata" :src="`/api/videos/${selectedVideo.id}/stream`">
         이 브라우저는 영상 재생을 지원하지 않습니다.
