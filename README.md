@@ -99,16 +99,16 @@ npm run dev
 - Test 카메라를 선택한 뒤 `Test 분석 시작`에서 관리자 계정으로 등록 영상 분석 실행
 - AI 실시간 작업자가 준비되면 `.env`의 `AI_LIVE_RUNNER_PATH`에 저장소 루트 기준 Python 파일 경로 입력 후 Backend 재시작
 - 화재 문자: 기존 DB는 `sql/init.sql` 재실행, 사이드 메뉴 `관리자`에서 로그인 후 카메라별 번호 설정과 발송 내역 확인
-- `.env`의 `SMS_PROVIDER=console`이면 실제 발송 없이 Backend 로그와 발송 내역만 기록
-- 실제 발송은 [솔라피](https://solapi.com) 가입 후 API 키 발급, `.env`에 `SMS_PROVIDER=solapi`, `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`, `SOLAPI_SENDER`(발신번호) 설정 후 Backend 재시작
-- 가입 본인인증 휴대전화 번호는 발신번호로 자동 등록, 가입 시 300P 무료 지급, 포인트가 소진되면 충전 필요
+- `SMS_PROVIDER=console`(기본)은 실제 발송 없이 Backend 로그와 발송 내역만 기록
+- 실제 발송은 [솔라피](https://solapi.com) 가입 후 `.env`에 `SMS_PROVIDER=solapi`, `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`, `SOLAPI_SENDER` 설정, Backend 재시작
+- 가입 본인인증 번호는 발신번호로 자동 등록, 가입 시 300P 무료(SMS 건당 18P), 소진되면 충전 필요
 
 ## 4 Frontend
 
 - 다른 터미널에서 프로젝트 루트 기준으로 환경 파일 준비
 - 지도 사용 시 `frontend/.env.local`에 `VITE_NAVER_MAP_CLIENT_ID` 설정
-- 네이버 클라우드 Maps의 Web 서비스 URL에는 포트 없이 `http://127.0.0.1` 등록
-- 브라우저에서 `localhost:5173`으로 접속한다면 `http://localhost`도 등록
+- 네이버 클라우드 Maps의 Web 서비스 URL에 접속 주소를 포트 없이 등록(`http://localhost`, `http://127.0.0.1`)
+- 등록하지 않은 주소로 접속하면 지도 인증이 실패하므로 등록한 주소로 접속
 
 ### Bash
 

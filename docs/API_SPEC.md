@@ -273,6 +273,6 @@
 
 - Backend 환경변수 `SMS_PROVIDER`: `console` 기본, 로그만 출력 | `solapi` 실제 발송
 - `solapi`: `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`, `SOLAPI_SENDER`(등록된 발신번호) 필수, `SOLAPI_API_URL` 선택
-- 솔라피 호출: `POST /messages/v4/send-many/detail`, `Authorization: HMAC-SHA256 apiKey, date, salt, signature`
+- 솔라피 호출: `POST /messages/v4/send-many/detail`(HMAC-SHA256 서명)
 - 솔라피는 HTTP 오류, 응답의 `errorCode`, 비어 있지 않은 `failedMessageList` 중 하나라도 있으면 `failed`로 기록
 - 키는 Backend 환경변수에만 저장, Frontend 노출 금지
