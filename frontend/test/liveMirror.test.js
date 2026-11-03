@@ -63,7 +63,8 @@ test('영상 월의 같은 영상을 captureStream으로 받아 보여 주고 �
 test('영상 월의 재생이 아직 준비되지 않았으면 안내하고 준비되면 자동으로 연결한다', async () => {
   const { root, app } = mount({ cameraId: 11, url: 'https://example.test/11.m3u8' })
   await settle()
-  assert.match(allText(root), /영상 월/)
+  assert.match(allText(root), /CCTV 영상 연결 중/)
+  assert.doesNotMatch(allText(root), /영상 월/)
   assert.equal(findAll(root, 'video')[0].srcObject, null)
   const stream = { name: 'late' }
   const tile = { captureStream: () => stream }
@@ -92,5 +93,16 @@ test('captureStream이 보안 오류로 거절되면 직접 연결로 대체한�
   assert.equal(findAll(root, 'section').length, 1)
   app.unmount()
   unregisterLiveVideo(13, tile)
+})
+
+test('영상을 받아 오는 동안에도 사용자에게 내부 용어 대신 같은 안내 문구를 보여 준다', async () => {
+  const tile = { captureStream: () => ({ name: 'pending' }) }
+  registerLiveVideo(14, tile)
+  const { root, app } = mount({ cameraId: 14, url: 'https://example.test/14.m3u8' })
+  await settle()
+  assert.match(allText(root), /CCTV 영상 연결 중/)
+  assert.doesNotMatch(allText(root), /영상 월/)
+  app.unmount()
+  unregisterLiveVideo(14, tile)
 })
 

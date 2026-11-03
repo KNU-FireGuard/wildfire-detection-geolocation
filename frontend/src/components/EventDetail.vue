@@ -9,7 +9,7 @@ const props = defineProps({
   event: { type: Object, default: null },
   camera: { type: Object, default: null },
   videos: { type: Array, default: () => [] },
-  // true이면 영상 월에서 재생 중인 같은 영상을 공유하고 영상 서버에 다시 접속하지 않음
+  // true이면 지도 아래 CCTV 영상 목록에서 재생 중인 같은 영상을 공유하고 영상 서버에 다시 접속하지 않음
   mirror: { type: Boolean, default: false },
 })
 const showDetails = ref(false)

@@ -30,7 +30,7 @@ watch([target, source], ([element, from]) => {
     try { element.srcObject = from.captureStream() } catch { captureFailed.value = true }
   }
   capture()
-  // 영상 월의 영상이 새로 로드되면(주소 갱신 등) 다시 받습니다.
+  // 지도 아래 CCTV 영상이 새로 로드되면(주소 갱신 등) 다시 받습니다.
   const recapture = capture
   from.addEventListener?.('loadedmetadata', recapture)
   detach = () => from.removeEventListener?.('loadedmetadata', recapture)
@@ -49,7 +49,7 @@ onBeforeUnmount(() => {
   <LiveVideo v-if="(source && !canCapture) || captureFailed" :url="url" />
   <div v-else class="mirror">
     <video ref="target" autoplay muted playsinline @playing="playing = true" @waiting="playing = false" />
-    <p v-if="!playing" class="stream-status" role="status">{{ source ? '영상 월의 영상을 불러오는 중…' : '영상 월의 재생을 기다리는 중…' }}</p>
+    <p v-if="!playing" class="stream-status" role="status">CCTV 영상 연결 중…</p>
   </div>
 </template>
 
