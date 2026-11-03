@@ -690,30 +690,34 @@ class DEMProvider:
         width: int = 1920,
         height: int = 1080,
         fov_h: float = 60.0,
-        coarse_step_deg: float = 0.5,
-        fine_window_deg: float = 2.0,
-        fine_step_deg: float = 0.05,
+        coarse_step_deg: float = 1.0,
+        fine_window_deg: float = 1.0,
+        fine_step_deg: float = 0.1,
         roll_max_deg: float = 2.5,
         min_relief_std_deg: float = 0.12,
         min_ncc: float = 0.65,
         max_rms_deg: float = 1.5,
         min_tilt_deg: float = -15.0,
         max_tilt_deg: float = 25.0,
+        min_uniqueness_ratio: float = 1.3,
+        uniqueness_sep_deg: float = 5.0,
     ) -> dict[str, float | bool | str | None]:
         """
-        360° Blind Camera Pose (Pan, Tilt, Roll) Estimation for live CCTVs without PTZ metadata.
-        Executes a Coarse-to-Fine global search across 0°..360° with a 3-way fail-safe check:
-          1. Ridge relief standard deviation >= min_relief_std_deg (0.12°)
-          2. Roll-compensated Normalized Cross-Correlation (NCC) >= min_ncc (0.65)
-          3. Residual rms_deg <= max_rms_deg (1.5°) and physical tilt within [-15°, +25°]
+        360° Blind Camera Pose (Pan, Tilt, Roll) Estimation for live CCTVs without PTZ metadata,
+        using the exact pinhole rotation model (criteria: docs/RayCasting_DEM_Architecture.md 2.2).
+          1. Exact 360° scan (coarse_step_deg pan x 3 rolls), tilt solved per candidate
+          2. Uniqueness: best residual vs. best candidate >= uniqueness_sep_deg away in pan
+          3. Refinement around the best pan, quality metrics in angle space
+        Fails with status CALIBRATION_FAILED and a reason code instead of returning a doubtful pose.
         """
         assert self.az_grid is not None and self.skyline_el_deg is not None
         pts = np.asarray(ridge_pts, dtype=np.float64)
-        if len(pts) < 15:
-            return {
+
+        def _fail(reason: str, **extra: float | None) -> dict[str, float | bool | str | None]:
+            out: dict[str, float | bool | str | None] = {
                 "calibrated": False,
                 "status": "CALIBRATION_FAILED",
-                "reason": "INSUFFICIENT_RIDGE",
+                "reason": reason,
                 "pan": None,
                 "tilt": None,
                 "roll": None,
@@ -722,127 +726,69 @@ class DEMProvider:
                 "rms_deg": 999.0,
                 "ncc": 0.0,
                 "obs_std_deg": 0.0,
+                "uniqueness_ratio": None,
             }
+            out.update(extra)
+            return out
 
-        xs, ys = pts[:, 0], pts[:, 1]
-        med_y = np.array(
-            [np.median(ys[max(0, i - 2) : min(len(ys), i + 3)]) for i in range(len(ys))]
-        )
-        mad = max(1.0, float(np.median(np.abs(ys - med_y))) * 1.4826)
-        clean_y = np.where(np.abs(ys - med_y) <= 2.5 * mad, ys, med_y)
-
-        f = (width / 2.0) / math.tan(math.radians(fov_h / 2.0))
-        cx, cy = width / 2.0, height / 2.0
-
-        r_off = np.degrees(np.arctan((xs - cx) / f))
-        r_el_zero = np.degrees(np.arctan((cy - clean_y) / f))
-
-        raw_obs_std = float(np.std(r_el_zero))
-        if raw_obs_std < min_relief_std_deg * 0.8:
-            return {
-                "calibrated": False,
-                "status": "CALIBRATION_FAILED",
-                "reason": "LOW_RELIEF",
-                "pan": None,
-                "tilt": None,
-                "roll": None,
-                "d_pan": 0.0,
-                "d_tilt": 0.0,
-                "rms_deg": 999.0,
-                "ncc": 0.0,
-                "obs_std_deg": raw_obs_std,
-            }
-
-        az_ext = np.append(self.az_grid, 360.0)
-        sky_ext = np.append(self.skyline_el_deg, self.skyline_el_deg[0])
-        oc = r_off - r_off.mean()
-        oc_denom = max(float((oc ** 2).sum()), 1e-6)
-        roll_max_tan = math.tan(math.radians(roll_max_deg))
-
-        def _eval_candidates(cand_pans: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-            query_az = (cand_pans[:, None] + r_off[None, :]) % 360.0
-            hor_mat = np.interp(query_az, az_ext, sky_ext)
-
-            diff = hor_mat - r_el_zero[None, :]
-            dmean = diff.mean(axis=1)
-            rr = np.clip(
-                ((diff - dmean[:, None]) * oc[None, :]).sum(axis=1) / oc_denom,
-                -roll_max_tan,
-                roll_max_tan,
-            )
-            # Unclipped least-squares tilt: clipping here would hide an out-of-range pose from the
-            # final physical tilt check (it would always pass), so the range is enforced only at the end
-            cc = dmean - rr * r_off.mean()
-            res = diff - cc[:, None] - rr[:, None] * r_off[None, :]
-            rms = np.sqrt(np.mean(res ** 2, axis=1))
-
-            # Roll-compensated observed elevation profile: r_el_zero + rr * r_off
-            obs_unrolled = r_el_zero[None, :] + rr[:, None] * r_off[None, :]
-            h_cent = hor_mat - hor_mat.mean(axis=1, keepdims=True)
-            o_cent = obs_unrolled - obs_unrolled.mean(axis=1, keepdims=True)
-            h_std = np.std(hor_mat, axis=1)
-            o_std = np.std(obs_unrolled, axis=1)
-            ncc = np.mean(h_cent * o_cent, axis=1) / np.maximum(h_std * o_std, 1e-6)
-            return cc, rr, rms, ncc, h_std, o_std
-
-        # Stage 1: Coarse 360° scan
-        coarse_pans = np.arange(0.0, 360.0, coarse_step_deg)
-        c_cc, c_rr, c_rms, c_ncc, c_hstd, _ = _eval_candidates(coarse_pans)
-
-        # Penalize candidates that lack terrain relief or shape correlation
-        valid_mask = (c_hstd >= min_relief_std_deg) & (c_ncc >= 0.4)
-        score_rms = np.where(valid_mask, c_rms, c_rms + 50.0)
-        top_indices = np.argsort(score_rms)[:5]
-
-        # Stage 2: Fine scan around top coarse candidates
-        fine_offsets = np.arange(-fine_window_deg, fine_window_deg + 1e-6, fine_step_deg)
-        fine_pans = np.unique(
-            ((coarse_pans[top_indices, None] + fine_offsets[None, :]) % 360.0).ravel()
-        )
-        f_cc, f_rr, f_rms, f_ncc, f_hstd, f_ostd = _eval_candidates(fine_pans)
-
-        f_valid = (f_hstd >= min_relief_std_deg) & (f_ostd >= min_relief_std_deg)
-        f_score = np.where(f_valid, f_rms, f_rms + 50.0)
-
-        # Stage 3: exact pinhole-rotation refinement. The small-angle stages above only propose seeds;
-        # up to 3 distinct seeds (>= 2° apart) are refined so a ranking change between models is not missed.
-        seeds: list[tuple[float, float]] = []
-        for k in np.argsort(f_score):
-            pan_k = float(fine_pans[k]) % 360.0
-            if all(abs(((pan_k - s + 180.0) % 360.0) - 180.0) >= 2.0 for s, _ in seeds):
-                seeds.append((pan_k, float(f_cc[k])))
-            if len(seeds) == 3:
-                break
+        if len(pts) < 15:
+            return _fail("INSUFFICIENT_RIDGE")
 
         xs = pts[:, 0]
-        rolls_coarse = np.arange(-roll_max_deg, roll_max_deg + 1e-6, 0.5)
-        best: tuple[float, float, float, float] | None = None  # (rms_px, pan, tilt, roll)
-        for seed_pan, seed_tilt in seeds:
-            P, T, R, rms = self._fit_pose_exact(
-                xs, clean_y, seed_pan + np.arange(-1.0, 1.0 + 1e-6, 0.1), rolls_coarse, seed_tilt, width, height, fov_h
-            )
-            k = int(np.argmin(rms))
-            if best is None or rms[k] < best[0]:
-                best = (float(rms[k]), float(P[k]), float(T[k]), float(R[k]))
-        assert best is not None
-        _, bp, bt, br = best
-        P, T, R, rms = self._fit_pose_exact(
+        clean_y = self._clean_ridge_y(pts[:, 1])
+        f = focal_length_px(width, fov_h)
+        raw_obs_std = float(np.std(np.degrees(np.arctan((height / 2.0 - clean_y) / f))))
+        if raw_obs_std < min_relief_std_deg * 0.8:
+            return _fail("LOW_RELIEF", obs_std_deg=raw_obs_std)
+
+        # Stage 1: exact 360° scan; residual per pan = best over the roll samples
+        scan_pans = np.arange(0.0, 360.0, coarse_step_deg)
+        scan_rolls = np.array([-0.8 * roll_max_deg, 0.0, 0.8 * roll_max_deg])
+        P, T, R, rms = self._fit_pose_exact(xs, clean_y, scan_pans, scan_rolls, 0.0, width, height, fov_h, tilt_iters=5)
+        rms_grid = rms.reshape(len(scan_pans), len(scan_rolls))
+        roll_idx = np.argmin(rms_grid, axis=1)
+        rms_pan = rms_grid[np.arange(len(scan_pans)), roll_idx]
+        i_best = int(np.argmin(rms_pan))
+        if not np.isfinite(rms_pan[i_best]):
+            return _fail("HIGH_RESIDUAL", obs_std_deg=raw_obs_std)
+
+        # Uniqueness: best pan vs. the best candidate at least uniqueness_sep_deg away
+        sep = np.abs(((scan_pans - scan_pans[i_best]) + 180.0) % 360.0 - 180.0)
+        competitor = float(np.min(np.where(sep >= uniqueness_sep_deg, rms_pan, np.inf)))
+        uniqueness_ratio = competitor / max(float(rms_pan[i_best]), 1e-6)
+
+        # Stage 2 / 3: refinement around the best scan candidate
+        k0 = i_best * len(scan_rolls) + int(roll_idx[i_best])
+        P2, T2, R2, rms2 = self._fit_pose_exact(
             xs,
             clean_y,
-            bp + np.arange(-0.15, 0.15 + 1e-6, 0.025),
-            np.clip(br + np.arange(-0.5, 0.5 + 1e-6, 0.1), -roll_max_deg, roll_max_deg),
-            bt,
+            scan_pans[i_best] + np.arange(-fine_window_deg, fine_window_deg + 1e-6, fine_step_deg),
+            np.arange(-roll_max_deg, roll_max_deg + 1e-6, 0.5),
+            float(T[k0]),
             width,
             height,
             fov_h,
         )
-        k = int(np.argmin(rms))
-        best_pan, best_tilt, best_roll = float(P[k]) % 360.0, float(T[k]), float(R[k])
+        k = int(np.argmin(rms2))
+        P3, T3, R3, rms3 = self._fit_pose_exact(
+            xs,
+            clean_y,
+            P2[k] + np.arange(-0.15, 0.15 + 1e-6, 0.025),
+            np.clip(R2[k] + np.arange(-0.5, 0.5 + 1e-6, 0.1), -roll_max_deg, roll_max_deg),
+            float(T2[k]),
+            width,
+            height,
+            fov_h,
+        )
+        k = int(np.argmin(rms3))
+        best_pan, best_tilt, best_roll = float(P3[k]) % 360.0, float(T3[k]), float(R3[k])
 
         # Quality metrics in angle space at the exact pose
+        az_ext = np.append(self.az_grid, 360.0)
+        sky_ext = np.append(self.skyline_el_deg, self.skyline_el_deg[0])
         az_obs, el_obs = pixel_to_direction(xs, clean_y, best_pan, best_tilt, best_roll, width, height, fov_h)
         el_sky = np.interp(az_obs % 360.0, az_ext, sky_ext)
-        best_rms = float(np.sqrt(np.mean((el_obs - el_sky) ** 2))) if np.isfinite(rms[k]) else 999.0
+        best_rms = float(np.sqrt(np.mean((el_obs - el_sky) ** 2))) if np.isfinite(rms3[k]) else 999.0
         best_hstd = float(np.std(el_sky))
         best_ostd = float(np.std(el_obs))
         best_ncc = float(
@@ -858,22 +804,17 @@ class DEMProvider:
             reason = "HIGH_RESIDUAL"
         elif not (min_tilt_deg <= best_tilt <= max_tilt_deg):
             reason = "TILT_OUT_OF_RANGE"
-        is_valid_pose = reason is None
+        elif uniqueness_ratio < min_uniqueness_ratio:
+            reason = "AMBIGUOUS_POSE"
 
-        if not is_valid_pose:
-            return {
-                "calibrated": False,
-                "status": "CALIBRATION_FAILED",
-                "reason": reason,
-                "pan": None,
-                "tilt": None,
-                "roll": None,
-                "d_pan": 0.0,
-                "d_tilt": 0.0,
-                "rms_deg": best_rms,
-                "ncc": best_ncc,
-                "obs_std_deg": best_ostd,
-            }
+        metrics = {
+            "rms_deg": best_rms,
+            "ncc": best_ncc,
+            "obs_std_deg": best_ostd,
+            "uniqueness_ratio": uniqueness_ratio,
+        }
+        if reason is not None:
+            return _fail(reason, **metrics)
 
         return {
             "calibrated": True,
@@ -884,11 +825,8 @@ class DEMProvider:
             "roll": best_roll,
             "d_pan": 0.0,
             "d_tilt": 0.0,
-            "rms_deg": best_rms,
-            "ncc": best_ncc,
-            "obs_std_deg": best_ostd,
+            **metrics,
         }
-
 
 if __name__ == "__main__":
     t0 = time.perf_counter() if "time" in globals() else 0.0
