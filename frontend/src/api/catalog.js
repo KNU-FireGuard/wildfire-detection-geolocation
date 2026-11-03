@@ -110,12 +110,19 @@ export async function fetchLiveCctvs({ signal } = {}) {
   }
 }
 
-export async function refreshLiveCctvs(username, password) {
-  const token = await loginAdmin(username, password)
+// 토큰이 만료되었거나 잘못된 경우 화면이 다시 로그인하도록 code로 구분합니다.
+function unauthorizedError() {
+  const error = new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.')
+  error.code = 'unauthorized'
+  return error
+}
+
+export async function refreshLiveCctvs(token) {
   const response = await fetch('/api/live-cctvs/refresh', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   })
+  if (response.status === 401) throw unauthorizedError()
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || `CCTV 목록 갱신에 실패했습니다. (HTTP ${response.status})`)
@@ -145,6 +152,7 @@ export async function startTestRun(cameraId, token) {
   const response = await fetch(`/api/cameras/${cameraId}/test-runs`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}` },
   })
+  if (response.status === 401) throw unauthorizedError()
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || `Test 실행에 실패했습니다. (HTTP ${response.status})`)
