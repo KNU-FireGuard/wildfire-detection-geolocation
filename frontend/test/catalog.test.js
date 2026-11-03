@@ -151,21 +151,26 @@ test('ITS 카메라는 DB 카메라 ID와 실제 영상 주소를 유지한다',
   assert.equal(result.cameras[0].streamUrl, 'http://video.example.test/live.m3u8')
 })
 
-test('관리자 인증으로만 CCTV 목록을 수동 갱신하고 서버 오류를 전달한다', async () => {
+test('관리자 토큰으로 CCTV 목록을 수동 갱신하고 서버 오류와 만료를 구분해 전달한다', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
-    if (url === '/api/auth/login') return Response.json({ access_token: 'short-lived-token' })
     return Response.json({ source: 'live', refreshedAt: '2026-10-29T08:00:00Z', items: [] })
   }
-  const result = await refreshLiveCctvs('admin', 'password')
+  const result = await refreshLiveCctvs('short-lived-token')
   assert.equal(result.refreshedAt, '2026-10-29T08:00:00Z')
-  assert.equal(calls.length, 2)
-  assert.deepEqual(JSON.parse(calls[0].options.body), { username: 'admin', password: 'password' })
-  assert.equal(calls[1].url, '/api/live-cctvs/refresh')
-  assert.equal(calls[1].options.headers.Authorization, 'Bearer short-lived-token')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/api/live-cctvs/refresh')
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer short-lived-token')
   globalThis.fetch = async () => Response.json({ error: '다시 시도하세요.' }, { status: 409 })
-  await assert.rejects(refreshLiveCctvs('admin', 'bad'), /다시 시도하세요/)
+  await assert.rejects(refreshLiveCctvs('token'), /다시 시도하세요/)
+  globalThis.fetch = async () => Response.json({ error: '토큰 만료' }, { status: 401 })
+  await assert.rejects(refreshLiveCctvs('old'), error => error.code === 'unauthorized')
+})
+
+test('Test 실행 요청이 401이면 로그인 만료 오류로 구분한다', async () => {
+  globalThis.fetch = async () => Response.json({ error: '토큰 만료' }, { status: 401 })
+  await assert.rejects(startTestRun(3, 'old'), error => error.code === 'unauthorized')
 })
 
 test('Test 실행과 상태 조회는 관리자 토큰과 카메라·실행 ID를 사용한다', async () => {

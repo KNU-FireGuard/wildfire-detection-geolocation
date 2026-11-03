@@ -1,9 +1,11 @@
 <script setup>
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { fetchTestRunStatus, loginAdmin, openTestRunStream, startTestRun } from '../api/catalog'
+import { ensureAdminToken, useAdminSession } from '../composables/useAdminSession'
 import { createMjpegParser } from '../utils/mjpeg'
 
 const props = defineProps({ cameraId: { type: Number, required: true } })
+const { isLoggedIn, signOut } = useAdminSession()
 const showLogin = ref(false)
 const username = ref('')
 const password = ref('')
@@ -62,7 +64,7 @@ async function beginTest() {
   busy.value = true
   const cameraId = props.cameraId
   try {
-    const token = await loginAdmin(username.value, password.value)
+    const token = await ensureAdminToken(loginAdmin, username.value, password.value)
     if (current !== generation || cameraId !== props.cameraId) return
     const run = await startTestRun(cameraId, token)
     if (current !== generation) return
@@ -88,7 +90,13 @@ async function beginTest() {
       }
     }, 2000)
   } catch (cause) {
-    if (current === generation) error.value = cause.message
+    if (current === generation) {
+      error.value = cause.message
+      if (cause.code === 'unauthorized') {
+        signOut()
+        showLogin.value = true
+      }
+    }
   } finally {
     password.value = ''
     if (current === generation) busy.value = false
@@ -98,8 +106,8 @@ async function beginTest() {
 
 <template>
   <section class="test-run" aria-label="카메라 Test 분석">
-    <button type="button" class="primary-button" :disabled="busy || status === 'ready' || status === 'running'" :aria-expanded="showLogin" @click="showLogin = !showLogin">Test 분석 시작</button>
-    <form v-if="showLogin" class="test-login" @submit.prevent="beginTest">
+    <button type="button" class="primary-button" :disabled="busy || status === 'ready' || status === 'running'" :aria-expanded="showLogin && !isLoggedIn" @click="isLoggedIn ? beginTest() : (showLogin = !showLogin)">Test 분석 시작</button>
+    <form v-if="showLogin && !isLoggedIn" class="test-login" @submit.prevent="beginTest">
       <p>이 카메라에 연결된 영상 하나를 AI 분석에 전달합니다.</p>
       <label>관리자 ID <input v-model="username" autocomplete="username" required></label>
       <label>비밀번호 <input v-model="password" type="password" autocomplete="current-password" required></label>
