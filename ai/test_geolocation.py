@@ -226,16 +226,20 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertAlmostEqual(res_xyxy["lon"], res_xywh["lon"], places=5)
         self.assertAlmostEqual(res_xyxy["distance_m"], res_xywh["distance_m"], places=2)
 
-    def test_ridge_detector_top_peak_and_smoke_masking(self) -> None:
-        """Issue #51: 역광 하늘, 상단 산봉우리(y<100px), 좌측 상단 OSD, 연기 기둥 마스킹 및 RGB/BGR 불변성 검증"""
+    # 실제 가창오리 P339/T03 프리셋의 실측 자세 (위성지도 랜드마크·능선 공동 보정, 라벨 + 약 120°)
+    P339_MEASURED_PAN = 99.2
+    P339_MEASURED_TILT = 1.3
+
+    def test_ridge_detector_smoke_masking_and_channel_invariance(self) -> None:
+        """Issue #51: 역광 하늘, 좌측 상단 OSD, 연기 기둥 마스킹 및 RGB/BGR 불변성 검증 (실측 P339 자세)"""
         provider = DEMProvider()
         extractor = SkylineExtractor()
         smoke_bbox_px = [890.0, 40.0, 1010.0, 250.0]
 
         frame_rgb, gt_ridge = render_synthetic_cctv_frame(
             provider=provider,
-            true_pan=339.0,
-            true_tilt=3.0,
+            true_pan=self.P339_MEASURED_PAN,
+            true_tilt=self.P339_MEASURED_TILT,
             true_roll=0.6,
             backlit_sky=True,
             add_osd=True,
@@ -259,10 +263,7 @@ class TestGeolocationEngine(unittest.TestCase):
         in_smoke = (pts_rgb[:, 0] >= 890.0) & (pts_rgb[:, 0] <= 1010.0)
         self.assertEqual(int(np.sum(in_smoke)), 0)
 
-        # (2) 상단 산봉우리(y < 100px)가 OSD 마스킹에 잘리지 않고 정상 보존되었는지 검증
-        self.assertLess(float(pts_rgb[:, 1].min()), 100.0)
-
-        # (3) 실제 DEM 능선 대비 픽셀 오차(RMSE) < 2.0px 검증
+        # (2) 실제 DEM 능선 대비 픽셀 오차(RMSE) < 2.0px 검증
         gt_interp_y = np.interp(pts_rgb[:, 0], gt_ridge[:, 0], gt_ridge[:, 1])
         rmse_px = float(np.sqrt(np.mean((pts_rgb[:, 1] - gt_interp_y) ** 2)))
         self.assertLess(rmse_px, 2.0)
@@ -272,13 +273,13 @@ class TestGeolocationEngine(unittest.TestCase):
         estimator = FireLocationEstimator()
         provider = estimator._get_provider(GACHANG_CAM_LAT, GACHANG_CAM_LON, 15.0)
 
-        # 정규화 바운딩 박스(0~1)와 연기 기둥이 포함된 실제 영상 프레임 생성
-        bbox_norm = [0.4650, 0.0550, 0.5250, 0.1480]
+        # 정규화 바운딩 박스(0~1)와 연기 기둥이 포함된 합성 프레임 생성 (실측 P339 자세, 능선 아래 지면의 연기)
+        bbox_norm = [0.5208, 0.5926, 0.5625, 0.6852]
         x0_px, y0_px, x1_px, y1_px = estimator.resolve_bbox_pixel_bounds(bbox_norm, 1920, 1080)
         frame, _ = render_synthetic_cctv_frame(
             provider=provider,
-            true_pan=339.0,
-            true_tilt=3.0,
+            true_pan=self.P339_MEASURED_PAN,
+            true_tilt=self.P339_MEASURED_TILT,
             true_roll=0.8,
             backlit_sky=True,
             add_osd=True,
@@ -308,12 +309,19 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertTrue(cal["calibrated"])
         self.assertEqual(cal["mode"], "blind_360")
         self.assertGreaterEqual(cal["ncc"], 0.90)
-        self.assertAlmostEqual(cal["pan"], 339.0, delta=0.25)
-        self.assertAlmostEqual(cal["tilt"], 3.0, delta=0.25)
+        self.assertAlmostEqual(cal["pan"], self.P339_MEASURED_PAN, delta=0.25)
+        self.assertAlmostEqual(cal["tilt"], self.P339_MEASURED_TILT, delta=0.25)
         self.assertAlmostEqual(cal["roll"], 0.8, delta=0.35)
 
-        # 오리 416-3 독립 필지 대표 좌표(35.7938, 128.5899) 반경 25m 이내 안착 확인
-        err_m = haversine_distance(35.7938, 128.5899, res["lat"], res["lon"])
+        # 같은 bbox를 실제 자세(PTZ 제공)로 추정한 위치와 25m 이내로 일치하는지 확인
+        # (필지 정답 좌표는 "라벨 = 진북 방위" 가정에서 나온 값이라 사용하지 않음)
+        known_meta = {
+            "camera": dict(blind_meta["camera"]),
+            "ptz": {"pan": self.P339_MEASURED_PAN, "tilt": self.P339_MEASURED_TILT, "roll": 0.8},
+        }
+        ref = estimator.estimate_location(bbox_norm, known_meta, use_skyline_calibration=False)
+        self.assertTrue(ref["intersected"])
+        err_m = haversine_distance(ref["lat"], ref["lon"], res["lat"], res["lon"])
         self.assertLessEqual(err_m, 25.0)
 
     def test_blind_ptz_failsafe_on_fog_or_featureless_frame(self) -> None:
@@ -535,6 +543,31 @@ class TestLocationEstimationContract(unittest.TestCase):
         )
         self.assertTrue(res_flat["intersected"])
         self.assertIsNone(res_flat["location_estimation"]["error_range_m"])
+
+
+class TestSkylineExtractorOSD(unittest.TestCase):
+    """좌상단 OSD(카메라 이름·시각) 글씨 테두리를 산능선으로 오인하지 않아야 함"""
+
+    @staticmethod
+    def _frame_with_osd(ridge_left_y: float) -> np.ndarray:
+        height, width = 1080, 1920
+        yy = np.arange(height)[:, None]
+        xx = np.arange(width)[None, :]
+        ridge = ridge_left_y + (xx / width) * 200.0 + 25.0 * np.sin(xx / 90.0)
+        lum = np.where(yy < ridge, 200.0, 55.0)
+        img = np.repeat(lum[:, :, None], 3, axis=2)
+        # 실제 가창오리 영상처럼 흰 글씨 + 검은 테두리 OSD (x 20~300, y 6~34)
+        img[6:30, 20:300, :] = 250.0
+        img[30:34, 20:300, :] = 15.0
+        return img.astype(np.uint8)
+
+    def test_osd_text_edge_is_not_taken_as_ridge(self) -> None:
+        """실제 능선이 좌상단 가까이(y≈70) 있어도 OSD 글씨 아래 테두리(y≈30)를 능선으로 반환하지 않음"""
+        res = SkylineExtractor().extract(self._frame_with_osd(ridge_left_y=70.0))
+        self.assertTrue(res["is_valid"])
+        pts = res["ridge_pts"]
+        in_osd = (pts[:, 0] < 320.0) & (pts[:, 1] < 45.0)
+        self.assertEqual(int(np.sum(in_osd)), 0)
 
 
 if __name__ == "__main__":

@@ -134,7 +134,8 @@ class SkylineExtractor:
         # Cumulative mean from the top of the frame down to row y:
         # True sky-to-mountain boundary has unobstructed bright sky above it, whereas foreground
         # buildings in the lower valley have hundreds of pixels of dark mountain above them.
-        osd_tl_x = min(int(width * 0.04), self.margin_x_px)
+        # Top-left camera name / timestamp OSD box (x < 17% W, y < 4.2% H -> 326x45 at 1920x1080)
+        osd_tl_x = int(width * 0.17)
         osd_tl_y = int(height * 0.042)
         lum_for_top = lum.copy()
         if osd_tl_x > 0 and osd_tl_y > 0:
@@ -202,16 +203,6 @@ class SkylineExtractor:
         n_cols = len(xs)
 
         col_scores = strength[y_min:y_max, xs].copy()
-        # If the mountain ridge in the top-left corner was occluded by the OSD box (so its remaining
-        # column max below osd_tl_y is weak compared to the main view), neutralize those OSD columns in DP
-        tl_cols = xs < osd_tl_x
-        main_cols = (xs >= osd_tl_x) & (~smoke_mask_cols)
-        if np.any(tl_cols) and np.any(main_cols):
-            main_peak_med = float(np.median(col_scores[:, main_cols].max(axis=0)))
-            tl_col_max = col_scores[:, tl_cols].max(axis=0)
-            weak_tl = tl_col_max < (0.5 * main_peak_med)
-            tl_indices = np.where(tl_cols)[0]
-            col_scores[:, tl_indices[weak_tl]] = 0.0
 
         # If any column has no sky at the very top (mountain peak rises above y=0 top border of the frame),
         # neutralize its transition score so DP bridges across the clipped mountain top
@@ -399,8 +390,10 @@ def render_synthetic_cctv_frame(
         img[by0:by1, bx0:bx1, :] = 225.0
 
     if add_osd:
-        # Top-left corner status badge (x < 75, y < 38) & Bottom-left camera label OSD
-        img[10:36, 12:74, :] = 250.0
+        # Top-left camera name OSD (white text with dark outline, x 12~300, y 6~34 like the Gachang O-ri feed)
+        # & Bottom-left PTZ preset label OSD
+        img[6:30, 12:300, :] = 250.0
+        img[30:34, 12:300, :] = 15.0
         img[960:1015, 25:380, :] = 245.0
 
     if channel_order.upper() == "BGR":
