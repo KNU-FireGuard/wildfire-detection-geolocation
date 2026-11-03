@@ -668,7 +668,9 @@ class DEMProvider:
                 -roll_max_tan,
                 roll_max_tan,
             )
-            cc = np.clip(dmean - rr * r_off.mean(), min_tilt_deg, max_tilt_deg)
+            # Unclipped least-squares tilt: clipping here would hide an out-of-range pose from the
+            # final physical tilt check (it would always pass), so the range is enforced only at the end
+            cc = dmean - rr * r_off.mean()
             res = diff - cc[:, None] - rr[:, None] * r_off[None, :]
             rms = np.sqrt(np.mean(res ** 2, axis=1))
 

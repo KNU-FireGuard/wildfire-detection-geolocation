@@ -545,6 +545,26 @@ class TestLocationEstimationContract(unittest.TestCase):
         self.assertIsNone(res_flat["location_estimation"]["error_range_m"])
 
 
+class TestBlindPtzTiltRange(unittest.TestCase):
+    """360° 역산의 물리적 Tilt 허용 범위 검사가 실제로 동작해야 함"""
+
+    def test_tilt_outside_allowed_range_fails_instead_of_clipping(self) -> None:
+        """실제 Tilt(1.3°)가 허용 최대값(0.5°)보다 크면 0.5°로 잘라 OK를 내지 않고 CALIBRATION_FAILED 반환"""
+        provider = DEMProvider()
+        ridge = provider.synthesize_observed_skyline(true_pan=99.2, true_tilt=1.3, true_roll=0.0, noise_std_px=0.0)
+        res = provider.estimate_blind_ptz(ridge, max_tilt_deg=0.5)
+        self.assertEqual(res["status"], "CALIBRATION_FAILED")
+        self.assertFalse(res["calibrated"])
+
+    def test_tilt_inside_allowed_range_is_recovered(self) -> None:
+        """허용 범위 안의 Tilt는 그대로 복원 (범위 검사 수정이 정상 경우를 막지 않는지 확인)"""
+        provider = DEMProvider()
+        ridge = provider.synthesize_observed_skyline(true_pan=99.2, true_tilt=1.3, true_roll=0.0, noise_std_px=0.0)
+        res = provider.estimate_blind_ptz(ridge)
+        self.assertEqual(res["status"], "OK")
+        self.assertAlmostEqual(res["tilt"], 1.3, delta=0.25)
+
+
 class TestSkylineExtractorOSD(unittest.TestCase):
     """좌상단 OSD(카메라 이름·시각) 글씨 테두리를 산능선으로 오인하지 않아야 함"""
 
