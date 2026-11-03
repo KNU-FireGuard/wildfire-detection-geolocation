@@ -83,6 +83,11 @@ GACHANG_CAM_LON = 128.591184
 DEFAULT_NPZ_PATH = Path(__file__).resolve().parent / "gachang_dem.npz"
 DEFAULT_TILE_CACHE_DIR = Path(__file__).resolve().parent / ".dem_cache"
 
+# DEM grid provenance recorded in .npz caches
+DEM_SOURCE_TERRARIUM = "terrarium"  # AWS Terrarium 30m tiles (high resolution)
+DEM_SOURCE_ANCHOR_INTERP = "open_meteo_anchor_interp"  # 10x10 Open-Meteo anchors (~1km), ridges/valleys smoothed
+DEM_SOURCE_UNKNOWN = "unknown"  # caches written before provenance recording
+
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the great-circle distance (m) between two WGS84 coordinates."""
@@ -150,11 +155,13 @@ def fetch_terrarium_dem_grid(
     zoom: int = 12,
     cache_dir: Path | str | None = None,
     timeout: float = 8.0,
+    allow_download: bool = True,
 ) -> np.ndarray | None:
     """
     Download or load cached AWS Terrarium 30m elevation PNG tiles (zoom 12)
     and bilinearly sample elevations onto (lat_mesh, lon_mesh) using PIL + NumPy.
     Decoding formula: elevation_m = (R * 256.0 + G + B / 256.0) - 32768.0
+    allow_download=False uses only cached tiles (offline / tests) and returns None if any tile is missing.
     """
     try:
         from PIL import Image
@@ -162,7 +169,6 @@ def fetch_terrarium_dem_grid(
         return None
 
     tile_dir = Path(cache_dir) if cache_dir is not None else DEFAULT_TILE_CACHE_DIR
-    tile_dir.mkdir(parents=True, exist_ok=True)
 
     n = 2.0 ** zoom
     lat_rad = np.radians(lat_mesh)
@@ -183,6 +189,9 @@ def fetch_terrarium_dem_grid(
         for tx in range(tx_min, tx_max + 1):
             tile_file = tile_dir / f"terrarium_{zoom}_{tx}_{ty}.png"
             if not tile_file.exists():
+                if not allow_download:
+                    return None
+                tile_dir.mkdir(parents=True, exist_ok=True)
                 url = TERRARIUM_TILE_URL.format(z=zoom, x=tx, y=ty)
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "FireGuard-Research/1.0"})
@@ -256,6 +265,8 @@ def _is_valid_dem_cache(
             ):
                 out = {k: data[k] for k in data.files}
                 out["npz_path"] = npz_file  # type: ignore[assignment]
+                # Caches written before source recording are reported as "unknown" and reused as-is
+                out["source"] = str(out["source"]) if "source" in out else DEM_SOURCE_UNKNOWN  # type: ignore[assignment]
                 return out
     except Exception:
         return None
@@ -269,13 +280,22 @@ def build_and_cache_dem(
     grid_size: int = 201,
     npz_path: Path | str | None = None,
     force_rebuild: bool = False,
+    anchor_source=None,
+    grid_source=None,
 ) -> dict[str, np.ndarray]:
     """
     Build a 5km-radius 3D elevation grid for any camera coordinate and cache to an .npz file.
     Validates cache coordinate alignment (haversine <= 10m, radius, grid_size).
     Automatically routes non-Gachang coordinates or mismatched parameters to a dynamic
     file path (dem_{lat:.4f}_{lon:.4f}_{int(radius_m)}m.npz) to protect existing caches.
+    Elevation sources can be injected (tests, offline use):
+      - anchor_source(lats, lons) -> 1D elevations or None  (default: Open-Meteo batch API)
+      - grid_source(lat_mesh, lon_mesh, zoom=12) -> elevation grid or None  (default: AWS Terrarium tiles)
     """
+    if anchor_source is None:
+        anchor_source = fetch_open_meteo_batch
+    if grid_source is None:
+        grid_source = fetch_terrarium_dem_grid
     target_path = Path(npz_path) if npz_path is not None else DEFAULT_NPZ_PATH
     dynamic_name = f"dem_{center_lat:.4f}_{center_lon:.4f}_{int(radius_m)}m.npz"
 
@@ -287,16 +307,18 @@ def build_and_cache_dem(
         target_path = target_path.parent / dynamic_name
 
     # 2. 기존 캐시 파일 검증 (좌표 일치도 <= 10m, 반경, 격자 크기 확인)
+    #    거친 앵커 보간 캐시는 바로 쓰지 않고, 아래에서 고해상도 소스가 가능하면 다시 만듦
+    coarse_fallback: dict[str, np.ndarray] | None = None
     if target_path.exists() and not force_rebuild:
         cached = _is_valid_dem_cache(target_path, center_lat, center_lon, radius_m, grid_size)
+        if cached is None:
+            # 요청 좌표/파라미터와 기존 파일이 불일치하면 기존 파일을 덮어쓰지 않도록 동적 파일명으로 우회
+            target_path = target_path.parent / dynamic_name
+            cached = _is_valid_dem_cache(target_path, center_lat, center_lon, radius_m, grid_size)
         if cached is not None:
-            return cached
-
-        # 요청 좌표/파라미터와 기존 파일이 불일치하면 기존 파일을 덮어쓰지 않도록 동적 파일명으로 우회
-        target_path = target_path.parent / dynamic_name
-        cached_dyn = _is_valid_dem_cache(target_path, center_lat, center_lon, radius_m, grid_size)
-        if cached_dyn is not None:
-            return cached_dyn
+            if str(cached["source"]) != DEM_SOURCE_ANCHOR_INTERP:
+                return cached
+            coarse_fallback = cached
 
     dlat = radius_m / 111320.0
     dlon = radius_m / (111320.0 * math.cos(math.radians(center_lat)))
@@ -309,24 +331,26 @@ def build_and_cache_dem(
     anchor_lats = np.linspace(center_lat - dlat, center_lat + dlat, 10)
     anchor_lons = np.linspace(center_lon - dlon, center_lon + dlon, 10)
     a_lon_m, a_lat_m = np.meshgrid(anchor_lons, anchor_lats)
-    api_elev = fetch_open_meteo_batch(a_lat_m.ravel(), a_lon_m.ravel())
-    is_api_mocked = hasattr(fetch_open_meteo_batch, "_mock_name") or (
-        "unittest.mock" in type(fetch_open_meteo_batch).__module__
-    )
 
-    # 2. Populate dense 201x201 (~50m step) elevation matrix using AWS Terrarium 30m tiles,
-    #    falling back to Open-Meteo bilinear interpolation when offline or explicitly mocked in tests
+    # 2. Populate dense 201x201 (~50m step) elevation matrix using the grid source (AWS Terrarium 30m tiles),
+    #    falling back to anchor bilinear interpolation when the grid source is unavailable (offline)
+    sampled = grid_source(lat_mesh, lon_mesh, zoom=12)
+    grid_ok = sampled is not None and not np.isnan(sampled).any()
+    if not grid_ok and coarse_fallback is not None:
+        # Still offline: keep the existing coarse cache instead of rebuilding the same coarse grid
+        return coarse_fallback
+
+    api_elev = anchor_source(a_lat_m.ravel(), a_lon_m.ravel())
     elev_grid: np.ndarray | None = None
-    if not is_api_mocked:
-        sampled = fetch_terrarium_dem_grid(lat_mesh, lon_mesh, zoom=12)
-        if sampled is not None and not np.isnan(sampled).any():
-            elev_grid = sampled.astype(np.float32)
-            if api_elev is not None:
-                t_anchor = fetch_terrarium_dem_grid(a_lat_m, a_lon_m, zoom=12)
-                if t_anchor is not None:
-                    datum_bias = float(np.median(api_elev - t_anchor.ravel()))
-                    if abs(datum_bias) < 5.0:
-                        elev_grid = elev_grid + datum_bias * 0.1
+    source = DEM_SOURCE_TERRARIUM
+    if grid_ok:
+        elev_grid = np.asarray(sampled, dtype=np.float32)
+        if api_elev is not None:
+            t_anchor = grid_source(a_lat_m, a_lon_m, zoom=12)
+            if t_anchor is not None:
+                datum_bias = float(np.median(api_elev - np.asarray(t_anchor).ravel()))
+                if abs(datum_bias) < 5.0:
+                    elev_grid = elev_grid + datum_bias * 0.1
 
     if elev_grid is None:
         if api_elev is not None:
@@ -339,6 +363,7 @@ def build_and_cache_dem(
             )
             pts = np.column_stack([lat_mesh.ravel(), lon_mesh.ravel()])
             elev_grid = anchor_interp(pts).reshape(grid_size, grid_size).astype(np.float32)
+            source = DEM_SOURCE_ANCHOR_INTERP
         else:
             raise RuntimeError("DEM 데이터를 다운로드할 수 없습니다. 네트워크 상태를 확인해주세요.")
 
@@ -350,6 +375,7 @@ def build_and_cache_dem(
         elevation=elev_grid,
         center=np.array([center_lat, center_lon], dtype=np.float64),
         radius_m=np.array(radius_m, dtype=np.float64),
+        source=np.array(source),
     )
     return {
         "lats": lats,
@@ -357,6 +383,7 @@ def build_and_cache_dem(
         "elevation": elev_grid,
         "center": np.array([center_lat, center_lon], dtype=np.float64),
         "radius_m": np.array(radius_m, dtype=np.float64),
+        "source": source,  # type: ignore[dict-item]
         "npz_path": target_path,  # type: ignore[dict-item]
     }
 
@@ -368,6 +395,8 @@ def build_and_cache_gachang_dem(
     grid_size: int = 201,
     npz_path: Path | str | None = None,
     force_rebuild: bool = False,
+    anchor_source=None,
+    grid_source=None,
 ) -> dict[str, np.ndarray]:
     """Backward-compatible wrapper around build_and_cache_dem()."""
     return build_and_cache_dem(
@@ -377,6 +406,8 @@ def build_and_cache_gachang_dem(
         grid_size=grid_size,
         npz_path=npz_path,
         force_rebuild=force_rebuild,
+        anchor_source=anchor_source,
+        grid_source=grid_source,
     )
 
 
@@ -410,6 +441,8 @@ class DEMProvider:
         self.lats = data["lats"]
         self.lons = data["lons"]
         self.elevation = data["elevation"]
+        # DEM provenance (terrarium / open_meteo_anchor_interp / unknown): coarse grids smooth ridges and valleys
+        self.dem_source = str(data.get("source", DEM_SOURCE_UNKNOWN))
 
         self.interpolator = RegularGridInterpolator(
             (self.lats, self.lons),

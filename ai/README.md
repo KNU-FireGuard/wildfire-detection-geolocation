@@ -45,8 +45,19 @@
 
 - Backend는 `inference/backend_connect.py`를 실행해 `run_id`, `camera_id`, 원본 영상 경로, 영상 업로드 URL, 탐지 결과 URL 전달
 - AI 콜백 인증은 Backend와 같은 `AI_CALLBACK_TOKEN` 환경변수 사용
-- Python 패키지: `ultralytics`, `opencv-python`, `requests`
+- Python 패키지: `ultralytics`, `opencv-python`, `requests`, 위치 추정용 `numpy`, `scipy`, `Pillow`
 - 설치 명령은 프로젝트 [README](../README.md) 참고
+
+## 위치 추정 테스트
+
+- 저장소 루트에서 실행
+
+```bash
+python3 -m unittest ai/test_geolocation.py
+```
+
+- DEM 타일 캐시 `ai/.dem_cache/`(Git 제외)가 없으면 Terrarium 로더 테스트 1개는 건너뜀, 나머지는 네트워크 없이 실행
+- 타일 캐시는 위치 추정을 처음 실행할 때 자동으로 내려받음
 - 영상·JSON 형식과 인증 헤더는 [API 명세](../docs/API_SPEC.md) 참고
 - 추론 프레임은 원본 영상 FPS에 맞춰 대기하지 않고 모델 처리 속도로 전송
 

@@ -27,8 +27,6 @@ class TestGeolocationEngine(unittest.TestCase):
 
     def test_cache_validation_and_dynamic_path(self) -> None:
         """P1: 캐시 좌표 불일치 시 기존 캐시 재사용 거부, 원본 보호 및 동적 파일명 분리 검증"""
-        from unittest.mock import patch
-
         temp_cache = Path(self.temp_dir) / "test_gachang.npz"
         grid_size = 21
         lats = np.linspace(GACHANG_CAM_LAT - 0.01, GACHANG_CAM_LAT + 0.01, grid_size)
@@ -64,16 +62,17 @@ class TestGeolocationEngine(unittest.TestCase):
         diff_lon = GACHANG_CAM_LON + 0.05
         expected_dyn_path = Path(self.temp_dir) / f"dem_{diff_lat:.4f}_{diff_lon:.4f}_1000m.npz"
 
-        mock_api_elev = np.full(100, 500.0, dtype=np.float32)
-        with patch("ai.dem_skyline_engine.fetch_open_meteo_batch", return_value=mock_api_elev):
-            data_diff = build_and_cache_gachang_dem(
-                center_lat=diff_lat,
-                center_lon=diff_lon,
-                radius_m=1000.0,
-                grid_size=grid_size,
-                npz_path=temp_cache,
-                force_rebuild=False,
-            )
+        # 네트워크 없이 재현되도록 고도 소스 주입: 앵커 500m, 고해상도 격자 소스는 오프라인(None)
+        data_diff = build_and_cache_gachang_dem(
+            center_lat=diff_lat,
+            center_lon=diff_lon,
+            radius_m=1000.0,
+            grid_size=grid_size,
+            npz_path=temp_cache,
+            force_rebuild=False,
+            anchor_source=lambda lats, lons: np.full(len(lats), 500.0, dtype=np.float32),
+            grid_source=lambda *args, **kwargs: None,
+        )
 
         # (a) 반환된 데이터가 가창면 캐시(200m)가 아니라 새로 빌드된 타 지역 고도(500m)여야 함
         self.assertAlmostEqual(float(data_diff["elevation"][10, 10]), 500.0, places=3)
@@ -85,6 +84,59 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertTrue(expected_dyn_path.exists())
         with np.load(temp_cache) as orig_check:
             self.assertEqual(float(orig_check["elevation"][0, 0]), 200.0)
+
+    def test_injected_elevation_sources_are_used_without_patching(self) -> None:
+        """고도 소스를 인자로 주입하면 네트워크·mock 감지 없이 그 값으로 격자를 생성"""
+        out = Path(self.temp_dir) / "injected.npz"
+        calls = {"grid": 0}
+
+        def fake_grid(lat_mesh, lon_mesh, **_kwargs):
+            calls["grid"] += 1
+            return np.full(np.shape(lat_mesh), 123.0, dtype=np.float32)
+
+        data = build_and_cache_dem(
+            center_lat=GACHANG_CAM_LAT + 0.07,
+            center_lon=GACHANG_CAM_LON + 0.07,
+            radius_m=1000.0,
+            grid_size=21,
+            npz_path=out,
+            anchor_source=lambda lats, lons: np.full(len(lats), 500.0, dtype=np.float32),
+            grid_source=fake_grid,
+        )
+        self.assertGreaterEqual(calls["grid"], 1)
+        np.testing.assert_allclose(data["elevation"], 123.0)
+
+    def test_dem_cache_records_source_and_upgrades_coarse_grid(self) -> None:
+        """오프라인 보간 격자는 출처를 기록하고, 고해상도 소스가 가능해지면 다시 만들며, 고해상도 캐시는 재사용"""
+        out = Path(self.temp_dir) / "source.npz"
+        kwargs = dict(
+            center_lat=GACHANG_CAM_LAT + 0.07,
+            center_lon=GACHANG_CAM_LON + 0.07,
+            radius_m=1000.0,
+            grid_size=21,
+            npz_path=out,
+            anchor_source=lambda lats, lons: np.full(len(lats), 500.0, dtype=np.float32),
+        )
+
+        # 1. 고해상도 소스 없음(오프라인) -> 앵커 보간 격자, 출처 기록
+        coarse = build_and_cache_dem(grid_source=lambda *a, **k: None, **kwargs)
+        self.assertEqual(str(coarse["source"]), "open_meteo_anchor_interp")
+        np.testing.assert_allclose(coarse["elevation"], 500.0)
+
+        # 2. 같은 요청인데 고해상도 소스가 가능해짐 -> 거친 캐시를 버리고 다시 만듦
+        fine = build_and_cache_dem(
+            grid_source=lambda lat_m, lon_m, **k: np.full(np.shape(lat_m), 123.0, dtype=np.float32), **kwargs
+        )
+        self.assertEqual(str(fine["source"]), "terrarium")
+        np.testing.assert_allclose(fine["elevation"], 123.0)
+
+        # 3. 고해상도 캐시는 재사용: 격자 소스를 다시 호출하지 않음
+        def must_not_call(*_a, **_k):
+            raise AssertionError("고해상도 캐시가 있는데 격자 소스를 다시 호출함")
+
+        reused = build_and_cache_dem(grid_source=must_not_call, **kwargs)
+        self.assertEqual(str(reused["source"]), "terrarium")
+        np.testing.assert_allclose(reused["elevation"], 123.0)
 
     def test_provider_updates_on_tower_height_change(self) -> None:
         """철탑 높이(tower_height) 변경 시 DEMProvider 갱신 검증"""
@@ -366,22 +418,37 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertIsNone(res_flat["lat"])
         self.assertIsNone(res_flat["location_estimation"])
 
-    def test_terrarium_loader_and_backend_api_contract(self) -> None:
-        """Issue #51: AWS Terrarium 30m 타일 로더, build_and_cache_dem 범용 함수 및 백엔드 API 입출력 포맷 검증"""
-        # 1. 로컬 캐시된 AWS Terrarium 30m 타일로부터 고해상도 표고 격자 추출 확인
+    @staticmethod
+    def _gachang_mesh() -> tuple[np.ndarray, np.ndarray]:
         lats = np.linspace(GACHANG_CAM_LAT - 0.005, GACHANG_CAM_LAT + 0.005, 11)
         lons = np.linspace(GACHANG_CAM_LON - 0.005, GACHANG_CAM_LON + 0.005, 11)
         lon_m, lat_m = np.meshgrid(lons, lats)
-        terr_grid = fetch_terrarium_dem_grid(lat_m, lon_m, zoom=12)
-        self.assertIsNotNone(terr_grid)
+        return lat_m, lon_m
+
+    def test_terrarium_cache_only_mode_does_not_download(self) -> None:
+        """allow_download=False이고 캐시가 비어 있으면 네트워크 없이 None 반환, 파일도 만들지 않음"""
+        lat_m, lon_m = self._gachang_mesh()
+        empty_cache = Path(self.temp_dir) / "empty_tiles"
+        grid = fetch_terrarium_dem_grid(lat_m, lon_m, zoom=12, cache_dir=empty_cache, allow_download=False)
+        self.assertIsNone(grid)
+        self.assertFalse(any(empty_cache.glob("*.png")) if empty_cache.exists() else False)
+
+    def test_terrarium_loader_from_local_cache(self) -> None:
+        """로컬 캐시된 AWS Terrarium 30m 타일로 고해상도 표고 격자 추출 (캐시가 없는 환경에서는 건너뜀)"""
+        lat_m, lon_m = self._gachang_mesh()
+        terr_grid = fetch_terrarium_dem_grid(lat_m, lon_m, zoom=12, allow_download=False)
+        if terr_grid is None:
+            self.skipTest("로컬 DEM 타일 캐시(ai/.dem_cache/) 없음, 네트워크 다운로드 테스트는 생략")
         self.assertEqual(terr_grid.shape, (11, 11))
         self.assertGreater(float(terr_grid.max() - terr_grid.min()), 20.0)
 
-        # 2. build_and_cache_dem 범용 함수 동작 확인
+    def test_dem_builder_and_backend_api_contract(self) -> None:
+        """Issue #51: build_and_cache_dem 범용 함수 및 백엔드 API 입출력 포맷 검증 (저장소의 가창 DEM 캐시 사용)"""
+        # 1. build_and_cache_dem 범용 함수 동작 확인
         dem_data = build_and_cache_dem(center_lat=GACHANG_CAM_LAT, center_lon=GACHANG_CAM_LON)
         self.assertEqual(dem_data["elevation"].shape, (201, 201))
 
-        # 3. 백엔드 POST /api/detections 규격 bbox 딕셔너리 입력 및 location_estimation 출력 확인
+        # 2. 백엔드 POST /api/detections 규격 bbox 딕셔너리 입력 및 location_estimation 출력 확인
         estimator = FireLocationEstimator()
         api_bbox = {"x1": 893, "y1": 59, "x2": 1008, "y2": 160}
         meta = {
