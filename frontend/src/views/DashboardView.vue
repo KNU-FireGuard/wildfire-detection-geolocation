@@ -1,9 +1,10 @@
 ﻿<script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
 import EventDetail from '../components/EventDetail.vue'
+import LiveCctvWall from '../components/LiveCctvWall.vue'
 import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs } from '../api/catalog'
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
@@ -35,6 +36,7 @@ const clock = computed(() => now.value.toLocaleString('ko-KR', { timeZone: 'Asia
 const selectedEvent = computed(() => events.value.find(event => event.id === selectedEventId.value) ?? null)
 const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedCameraId.value)
   ?? cameras.value.find(camera => camera.id === selectedEvent.value?.cameraId) ?? null)
+const liveCameras = computed(() => cameras.value.filter(camera => camera.sourceType === 'live'))
 const onlineCount = computed(() => cameras.value.some(camera => camera.status != null)
   ? cameras.value.filter(camera => camera.status === 'ONLINE').length : '—')
 const locatedCount = computed(() => events.value.filter(event => event.estimatedLocation != null).length)
@@ -43,12 +45,29 @@ const pendingCount = computed(() => events.value.some(event => event.status != n
 function selectEvent(id) {
   selectedCameraId.value = null
   selectedEventId.value = id
+  const event = events.value.find(item => item.id === id)
+  if (event && cameras.value.some(camera => camera.id === event.cameraId && camera.sourceType === 'live')) {
+    revealLiveWall()
+  }
 }
 function selectCamera(id) {
   selectedCameraId.value = id
   const latest = events.value.filter(event => event.cameraId === id)
     .reduce((current, event) => !current || Date.parse(event.detectedAt) > Date.parse(current.detectedAt) ? event : current, null)
   selectedEventId.value = latest?.id ?? null
+  if (cameras.value.some(camera => camera.id === id && camera.sourceType === 'live')) revealLiveWall()
+}
+function selectLiveTile(id) {
+  if (id === null) {
+    selectedCameraId.value = null
+    selectedEventId.value = null
+    return
+  }
+  selectCamera(id)
+}
+async function revealLiveWall() {
+  await nextTick()
+  document.getElementById('live-cctv-wall')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 function applyData(nextCameras, nextEvents, nextVideos = []) {
   const selection = retainSelection(selectedCameraId.value, selectedEventId.value, nextCameras, nextEvents)
@@ -171,7 +190,8 @@ onBeforeUnmount(() => {
         <p v-if="refreshError" class="refresh-error" role="alert">{{ refreshError }}</p>
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
           <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select-camera="selectCamera" />
-          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" />
+          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" :show-video="selectedCamera?.sourceType !== 'live'" />
+          <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
           <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" />
         </section>
         <section class="summary-grid" aria-label="관제 요약">
