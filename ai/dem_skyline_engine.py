@@ -9,6 +9,11 @@ from pathlib import Path
 import numpy as np
 
 try:
+    from ai.camera_model import camera_basis_batch, direction_to_pixel, direction_vectors, focal_length_px, pixel_to_direction
+except ImportError:
+    from camera_model import camera_basis_batch, direction_to_pixel, direction_vectors, focal_length_px, pixel_to_direction
+
+try:
     from scipy.interpolate import RegularGridInterpolator
     SCIPY_AVAILABLE = True
 except ImportError:
@@ -501,6 +506,40 @@ class DEMProvider:
         self.skyline_dist_m = dist[max_idx]
         return self.az_grid, self.skyline_el_deg
 
+    def project_skyline(
+        self,
+        pan: float,
+        tilt: float,
+        roll: float = 0.0,
+        width: int = 1920,
+        height: int = 1080,
+        fov_h: float = 60.0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Project the 360° synthetic skyline into the image with the exact pinhole rotation model.
+        Returns (x, y) sorted by x for the skyline directions in front of the camera (x within ±1 frame width).
+        """
+        assert self.az_grid is not None and self.skyline_el_deg is not None
+        x, y, front = direction_to_pixel(self.az_grid, self.skyline_el_deg, pan, tilt, roll, width, height, fov_h)
+        keep = front & (x > -width) & (x < 2.0 * width)
+        x, y = x[keep], y[keep]
+        order = np.argsort(x)
+        return x[order], y[order]
+
+    def skyline_y_at(
+        self,
+        xs: np.ndarray,
+        pan: float,
+        tilt: float,
+        roll: float = 0.0,
+        width: int = 1920,
+        height: int = 1080,
+        fov_h: float = 60.0,
+    ) -> np.ndarray:
+        """Image row of the projected synthetic skyline at columns xs (exact pinhole rotation model)."""
+        px, py = self.project_skyline(pan, tilt, roll, width, height, fov_h)
+        return np.interp(np.asarray(xs, dtype=np.float64), px, py)
+
     def synthesize_observed_skyline(
         self,
         true_pan: float,
@@ -514,22 +553,8 @@ class DEMProvider:
         seed: int = 42,
     ) -> np.ndarray:
         """Project the 3D DEM skyline onto 2D CCTV image pixels for a given true camera pose."""
-        assert self.az_grid is not None and self.skyline_el_deg is not None
-        f = (width / 2.0) / math.tan(math.radians(fov_h / 2.0))
-        cx, cy = width / 2.0, height / 2.0
-
         xs = np.arange(80, width - 80, step_px, dtype=np.float64)
-        r_off_deg = np.degrees(np.arctan((xs - cx) / f))
-        query_az = (true_pan + r_off_deg) % 360.0
-
-        # Circular interpolation on 0..360 degree Geo-LUT
-        az_ext = np.append(self.az_grid, 360.0)
-        sky_ext = np.append(self.skyline_el_deg, self.skyline_el_deg[0])
-        hor_deg = np.interp(query_az, az_ext, sky_ext)
-
-        rel_el_rad = np.radians(hor_deg - true_tilt)
-        roll_rad = math.radians(true_roll)
-        ys = cy - f * np.tan(rel_el_rad) + math.tan(roll_rad) * (xs - cx)
+        ys = self.skyline_y_at(xs, true_pan, true_tilt, true_roll, width, height, fov_h)
 
         if noise_std_px > 0.0:
             rng = np.random.default_rng(seed)
@@ -537,6 +562,66 @@ class DEMProvider:
 
         valid = (ys >= 0.0) & (ys < height)
         return np.column_stack([xs[valid], ys[valid]])
+
+    @staticmethod
+    def _clean_ridge_y(ys: np.ndarray) -> np.ndarray:
+        """Moving median (5 samples) + MAD outlier replacement to reject tree branches / utility poles."""
+        med_y = np.array([np.median(ys[max(0, i - 2) : min(len(ys), i + 3)]) for i in range(len(ys))])
+        mad = max(1.0, float(np.median(np.abs(ys - med_y))) * 1.4826)
+        return np.where(np.abs(ys - med_y) <= 2.5 * mad, ys, med_y)
+
+    def _fit_pose_exact(
+        self,
+        xs: np.ndarray,
+        ys: np.ndarray,
+        pan_cands: np.ndarray,
+        roll_cands: np.ndarray,
+        tilt_init: float | np.ndarray,
+        width: int,
+        height: int,
+        fov_h: float,
+        tilt_iters: int = 4,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Exact pinhole-rotation fit of observed ridge pixels (xs, ys) to the synthetic skyline.
+        Evaluates every (pan, roll) candidate pair; tilt is solved per candidate by fixed-point
+        iteration on the mean vertical residual (image rows shift by about f * d_tilt).
+        Returns flattened arrays (pan, tilt, roll, rms_px); rms_px is inf when the projected
+        skyline does not cover all observed columns.
+        """
+        assert self.az_grid is not None and self.skyline_el_deg is not None
+        f = focal_length_px(width, fov_h)
+        P, R = np.meshgrid(np.asarray(pan_cands, float) % 360.0, np.asarray(roll_cands, float), indexing="ij")
+        P, R = P.ravel(), R.ravel()
+        T = np.broadcast_to(np.asarray(tilt_init, float), P.shape).astype(float).copy()
+
+        # Only skyline directions near the candidate pans can reach the image
+        half = fov_h / 2.0 + 10.0
+        dist = np.abs(((self.az_grid[:, None] - P[None, :]) + 180.0) % 360.0 - 180.0).min(axis=1)
+        sel = dist <= half
+        D = direction_vectors(self.az_grid[sel], self.skyline_el_deg[sel])  # (N, 3)
+
+        rms = np.full(P.shape, np.inf)
+        for it in range(tilt_iters + 1):
+            fwd, right, up = camera_basis_batch(P, T, R)
+            z = D @ fwd.T
+            X = width / 2.0 + f * (D @ right.T) / np.where(z > 0.2, z, np.nan)
+            Y = height / 2.0 - f * (D @ up.T) / np.where(z > 0.2, z, np.nan)
+            mean_res = np.zeros(P.shape)
+            for k in range(P.size):
+                ok = np.isfinite(X[:, k])
+                xk, yk = X[ok, k], Y[ok, k]
+                if xk.size < 2 or xs.min() < xk.min() or xs.max() > xk.max():
+                    rms[k] = np.inf
+                    continue
+                o = np.argsort(xk)
+                res = ys - np.interp(xs, xk[o], yk[o])
+                mean_res[k] = float(res.mean())
+                rms[k] = float(np.sqrt(np.mean((res - (res.mean() if it < tilt_iters else 0.0)) ** 2)))
+            if it < tilt_iters:
+                # observed rows lower than predicted (positive residual) -> camera points higher
+                T = T + np.degrees(np.arctan(mean_res / f))
+        return P, T, R, rms
 
     def calibrate_ptz_zero_point(
         self,
@@ -734,15 +819,51 @@ class DEMProvider:
 
         f_valid = (f_hstd >= min_relief_std_deg) & (f_ostd >= min_relief_std_deg)
         f_score = np.where(f_valid, f_rms, f_rms + 50.0)
-        best_k = int(np.argmin(f_score))
 
-        best_pan = float(fine_pans[best_k]) % 360.0
-        best_tilt = float(f_cc[best_k])
-        best_roll = math.degrees(math.atan(float(f_rr[best_k])))
-        best_rms = float(f_rms[best_k])
-        best_ncc = float(f_ncc[best_k])
-        best_hstd = float(f_hstd[best_k])
-        best_ostd = float(f_ostd[best_k])
+        # Stage 3: exact pinhole-rotation refinement. The small-angle stages above only propose seeds;
+        # up to 3 distinct seeds (>= 2° apart) are refined so a ranking change between models is not missed.
+        seeds: list[tuple[float, float]] = []
+        for k in np.argsort(f_score):
+            pan_k = float(fine_pans[k]) % 360.0
+            if all(abs(((pan_k - s + 180.0) % 360.0) - 180.0) >= 2.0 for s, _ in seeds):
+                seeds.append((pan_k, float(f_cc[k])))
+            if len(seeds) == 3:
+                break
+
+        xs = pts[:, 0]
+        rolls_coarse = np.arange(-roll_max_deg, roll_max_deg + 1e-6, 0.5)
+        best: tuple[float, float, float, float] | None = None  # (rms_px, pan, tilt, roll)
+        for seed_pan, seed_tilt in seeds:
+            P, T, R, rms = self._fit_pose_exact(
+                xs, clean_y, seed_pan + np.arange(-1.0, 1.0 + 1e-6, 0.1), rolls_coarse, seed_tilt, width, height, fov_h
+            )
+            k = int(np.argmin(rms))
+            if best is None or rms[k] < best[0]:
+                best = (float(rms[k]), float(P[k]), float(T[k]), float(R[k]))
+        assert best is not None
+        _, bp, bt, br = best
+        P, T, R, rms = self._fit_pose_exact(
+            xs,
+            clean_y,
+            bp + np.arange(-0.15, 0.15 + 1e-6, 0.025),
+            np.clip(br + np.arange(-0.5, 0.5 + 1e-6, 0.1), -roll_max_deg, roll_max_deg),
+            bt,
+            width,
+            height,
+            fov_h,
+        )
+        k = int(np.argmin(rms))
+        best_pan, best_tilt, best_roll = float(P[k]) % 360.0, float(T[k]), float(R[k])
+
+        # Quality metrics in angle space at the exact pose
+        az_obs, el_obs = pixel_to_direction(xs, clean_y, best_pan, best_tilt, best_roll, width, height, fov_h)
+        el_sky = np.interp(az_obs % 360.0, az_ext, sky_ext)
+        best_rms = float(np.sqrt(np.mean((el_obs - el_sky) ** 2))) if np.isfinite(rms[k]) else 999.0
+        best_hstd = float(np.std(el_sky))
+        best_ostd = float(np.std(el_obs))
+        best_ncc = float(
+            np.mean((el_obs - el_obs.mean()) * (el_sky - el_sky.mean())) / max(best_hstd * best_ostd, 1e-6)
+        )
 
         is_valid_pose = (
             best_ostd >= min_relief_std_deg

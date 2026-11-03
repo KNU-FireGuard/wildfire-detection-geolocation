@@ -344,21 +344,11 @@ def render_synthetic_cctv_frame(
       - Rising bright smoke plume crossing above the mountain ridge inside smoke_bbox_px
     Returns (frame_uint8, gt_ridge_pts_all_cols).
     """
-    import math
-
-    f = (width / 2.0) / math.tan(math.radians(fov_h / 2.0))
-    cx, cy = width / 2.0, height / 2.0
+    # Exact pinhole rotation model projection of the DEM skyline (same model as the estimator)
     xs_all = np.arange(width, dtype=np.float64)
-    r_off_deg = np.degrees(np.arctan((xs_all - cx) / f))
-    query_az = (true_pan + r_off_deg) % 360.0
-
-    az_ext = np.append(provider.az_grid, 360.0)  # type: ignore[attr-defined]
-    sky_ext = np.append(provider.skyline_el_deg, provider.skyline_el_deg[0])  # type: ignore[attr-defined]
-    hor_deg = np.interp(query_az, az_ext, sky_ext)
-
-    rel_el_rad = np.radians(hor_deg - true_tilt)
-    roll_rad = math.radians(true_roll)
-    ridge_y_full = cy - f * np.tan(rel_el_rad) + math.tan(roll_rad) * (xs_all - cx)
+    ridge_y_full = provider.skyline_y_at(  # type: ignore[attr-defined]
+        xs_all, true_pan, true_tilt, true_roll, width, height, fov_h
+    )
 
     yy = np.arange(height, dtype=np.float32)[:, None]
     xx = np.arange(width, dtype=np.float32)[None, :]

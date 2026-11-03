@@ -83,5 +83,38 @@ class TestEstimatorRayUsesRotationModel(unittest.TestCase):
             self.assertAlmostEqual(el, float(el_m), places=6)
 
 
+class TestSyntheticSkylineUsesRotationModel(unittest.TestCase):
+    """합성 능선 픽셀을 정식 모델로 되돌리면 DEM 가상 능선 위에 놓여야 함"""
+
+    POSE = (99.2, 2.0, 2.0)
+
+    @staticmethod
+    def _skyline_el_at(provider, az):
+        az_ext = np.append(provider.az_grid, 360.0)
+        sky_ext = np.append(provider.skyline_el_deg, provider.skyline_el_deg[0])
+        return np.interp(np.asarray(az) % 360.0, az_ext, sky_ext)
+
+    def _assert_on_skyline(self, provider, pts) -> None:
+        az, el = pixel_to_direction(pts[:, 0], pts[:, 1], *self.POSE, W, H, FOV)
+        err = np.abs(el - self._skyline_el_at(provider, az))
+        self.assertLess(float(err.max()), 0.02, f"최대 각도 오차 {float(err.max()):.3f}°")
+
+    def test_synthesized_ridge_lies_on_dem_skyline(self) -> None:
+        from ai.dem_skyline_engine import DEMProvider
+
+        provider = DEMProvider()
+        pts = provider.synthesize_observed_skyline(*self.POSE, width=W, height=H, fov_h=FOV, noise_std_px=0.0)
+        self.assertGreater(len(pts), 50)
+        self._assert_on_skyline(provider, pts)
+
+    def test_rendered_frame_ground_truth_lies_on_dem_skyline(self) -> None:
+        from ai.dem_skyline_engine import DEMProvider
+        from ai.ridge_detector import render_synthetic_cctv_frame
+
+        provider = DEMProvider()
+        _, gt = render_synthetic_cctv_frame(provider, *self.POSE, width=W, height=H, fov_h=FOV)
+        self._assert_on_skyline(provider, gt)
+
+
 if __name__ == "__main__":
     unittest.main()

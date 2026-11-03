@@ -30,6 +30,20 @@ def camera_basis(pan_deg: float, tilt_deg: float, roll_deg: float) -> tuple[np.n
     return fwd, right, up
 
 
+def camera_basis_batch(pan_deg, tilt_deg, roll_deg) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized camera_basis for K candidate poses: returns (forward, right, up) arrays of shape (K, 3)."""
+    p = np.radians(np.asarray(pan_deg, dtype=np.float64))
+    t = np.radians(np.asarray(tilt_deg, dtype=np.float64))
+    r = np.radians(np.asarray(roll_deg, dtype=np.float64))
+    sp, cp, st, ct, sr, cr = np.sin(p), np.cos(p), np.sin(t), np.cos(t), np.sin(r), np.cos(r)
+    fwd = np.stack([sp * ct, cp * ct, st], axis=-1)
+    right0 = np.stack([cp, -sp, np.zeros_like(p)], axis=-1)
+    up0 = np.stack([-sp * st, -cp * st, ct], axis=-1)  # right0 x fwd
+    right = right0 * cr[..., None] + up0 * sr[..., None]
+    up = -right0 * sr[..., None] + up0 * cr[..., None]
+    return fwd, right, up
+
+
 def direction_vectors(az_deg, el_deg) -> np.ndarray:
     """Unit ENU vectors (..., 3) for azimuth / elevation in degrees."""
     a = np.radians(np.asarray(az_deg, dtype=np.float64))
