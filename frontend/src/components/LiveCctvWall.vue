@@ -29,11 +29,11 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
         <button
           type="button" class="tile-select"
           :aria-pressed="camera.id === selectedId"
-          :aria-label="`${camera.name} 영상 ${camera.id === selectedId ? '선택 해제' : '우측 패널에 표시'}`"
+          :aria-label="`${camera.name} 선택`"
           @click.stop="toggle(camera.id)"
         >
           <strong>{{ camera.name }}</strong>
-          <span>{{ camera.id === selectedId ? '선택 해제' : '우측에 표시' }}</span>
+          <span>선택</span>
         </button>
       </article>
     </div>
