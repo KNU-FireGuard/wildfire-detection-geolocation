@@ -634,27 +634,46 @@ class DEMProvider:
         search_window_deg: float = 5.0,
         step_deg: float = 0.05,
         roll_max_deg: float = 2.5,
-    ) -> dict[str, float]:
+        min_points: int = 15,
+        min_coverage_deg: float = 15.0,
+        min_relief_std_deg: float = 0.35,
+        max_rms_deg: float = 1.5,
+        boundary_margin_deg: float = 0.25,
+    ) -> dict[str, float | bool | str | None]:
         """
         Zero-point PTZ Self-Calibration: matches observed frame skyline pixels against the
         360° synthetic skyline with the exact pinhole rotation model (coarse-to-fine pan/roll search,
-        tilt solved per candidate). d_tilt stays bounded by ±search_window_deg as before.
+        tilt solved per candidate).
+        Quality gate (docs/RayCasting_DEM_Architecture.md 2.2): the correction is returned with
+        calibrated=True only if point count, coverage, relief, residual and search-boundary checks pass.
+        Otherwise calibrated=False, a reason code, and the given (init) pose with zero correction.
         """
         assert self.az_grid is not None and self.skyline_el_deg is not None
         pts = np.asarray(ridge_pts, dtype=np.float64)
-        if len(pts) < 3:
+
+        def _not_applied(reason: str, rms_deg: float = 999.0) -> dict[str, float | bool | str | None]:
             return {
+                "calibrated": False,
+                "reason": reason,
                 "pan": init_pan,
                 "tilt": init_tilt,
                 "roll": 0.0,
                 "d_pan": 0.0,
                 "d_tilt": 0.0,
-                "rms_deg": 0.0,
+                "rms_deg": rms_deg,
             }
+
+        if len(pts) < min_points:
+            return _not_applied("INSUFFICIENT_RIDGE")
 
         xs = pts[:, 0]
         clean_y = self._clean_ridge_y(pts[:, 1])
         f = focal_length_px(width, fov_h)
+        coverage_deg = float(
+            np.degrees(np.arctan((xs.max() - width / 2.0) / f) - np.arctan((xs.min() - width / 2.0) / f))
+        )
+        if coverage_deg < min_coverage_deg:
+            return _not_applied("INSUFFICIENT_COVERAGE")
 
         # Stage 1: coarse pan (0.25°) x roll (0.5°) grid inside the search window
         coarse_pans = init_pan + np.arange(-search_window_deg, search_window_deg + 1e-6, 0.25)
@@ -674,14 +693,35 @@ class DEMProvider:
         k = int(np.argmin(rms))
 
         best_dpan = float(((P[k] - init_pan + 180.0) % 360.0) - 180.0)
-        best_dtilt = float(np.clip(T[k] - init_tilt, -search_window_deg, search_window_deg))
+        raw_dtilt = float(T[k] - init_tilt)
+        if not np.isfinite(rms[k]):
+            return _not_applied("HIGH_RESIDUAL")
+
+        # A solution pinned to the search boundary may have its true optimum outside the window
+        edge = search_window_deg - boundary_margin_deg
+        if abs(best_dpan) >= edge or abs(raw_dtilt) >= edge:
+            return _not_applied("AT_SEARCH_BOUNDARY")
+
+        cal_pan, cal_tilt, cal_roll = (init_pan + best_dpan) % 360.0, init_tilt + raw_dtilt, float(R[k])
+        az_ext = np.append(self.az_grid, 360.0)
+        sky_ext = np.append(self.skyline_el_deg, self.skyline_el_deg[0])
+        az_obs, el_obs = pixel_to_direction(xs, clean_y, cal_pan, cal_tilt, cal_roll, width, height, fov_h)
+        el_sky = np.interp(az_obs % 360.0, az_ext, sky_ext)
+        rms_deg = float(np.sqrt(np.mean((el_obs - el_sky) ** 2)))
+        if float(np.std(el_obs)) < min_relief_std_deg or float(np.std(el_sky)) < min_relief_std_deg:
+            return _not_applied("LOW_RELIEF", rms_deg)
+        if rms_deg > max_rms_deg:
+            return _not_applied("HIGH_RESIDUAL", rms_deg)
+
         return {
-            "pan": (init_pan + best_dpan) % 360.0,
-            "tilt": init_tilt + best_dtilt,
-            "roll": float(R[k]),
+            "calibrated": True,
+            "reason": None,
+            "pan": cal_pan,
+            "tilt": cal_tilt,
+            "roll": cal_roll,
             "d_pan": best_dpan,
-            "d_tilt": best_dtilt,
-            "rms_deg": float(math.degrees(math.atan(float(rms[k]) / f))) if np.isfinite(rms[k]) else 999.0,
+            "d_tilt": raw_dtilt,
+            "rms_deg": rms_deg,
         }
 
     def estimate_blind_ptz(

@@ -95,6 +95,47 @@ class TestBlindPoseUniqueness(unittest.TestCase):
         self.assertGreaterEqual(res["uniqueness_ratio"], 1.3)
 
 
+class TestZeroPointCalibrationGate(unittest.TestCase):
+    """PTZ 제공 시 영점 보정은 품질 검사를 통과할 때만 적용"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.provider = DEMProvider()
+        cls.ridge = cls.provider.synthesize_observed_skyline(*TRUE, noise_std_px=0.5)
+
+    def test_good_ridge_is_calibrated(self) -> None:
+        res = self.provider.calibrate_ptz_zero_point(TRUE[0] - 1.0, TRUE[1] - 1.0, self.ridge, W, H, FOV)
+        self.assertTrue(res["calibrated"])
+        self.assertIsNone(res["reason"])
+
+    def test_solution_at_search_boundary_is_not_applied(self) -> None:
+        """실제 Pan이 탐색 범위(±5°) 밖이면 경계에 붙은 해를 적용하지 않음"""
+        res = self.provider.calibrate_ptz_zero_point(TRUE[0] - 7.0, TRUE[1], self.ridge, W, H, FOV)
+        self.assertFalse(res["calibrated"])
+        self.assertEqual(res["reason"], "AT_SEARCH_BOUNDARY")
+
+    def test_too_few_points_is_not_applied(self) -> None:
+        res = self.provider.calibrate_ptz_zero_point(TRUE[0], TRUE[1], self.ridge[:10], W, H, FOV)
+        self.assertFalse(res["calibrated"])
+        self.assertEqual(res["reason"], "INSUFFICIENT_RIDGE")
+
+    def test_estimator_keeps_given_ptz_when_calibration_fails(self) -> None:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        given = {"pan": TRUE[0] - 7.0, "tilt": TRUE[1], "roll": 0.0}
+        meta = {
+            "camera": {"lat": 35.791037, "lon": 128.591184, "tower_height": 15.0, "fov_h": FOV, "near_m": 30.0},
+            "ptz": given,
+            "ridge_pts": self.ridge,
+        }
+        res = FireLocationEstimator().estimate_location([0.52, 0.59, 0.56, 0.69], meta, bbox_normalized=True)
+        cal = res["calibration"]
+        self.assertFalse(cal["calibrated"])
+        self.assertEqual(cal["reason"], "AT_SEARCH_BOUNDARY")
+        self.assertAlmostEqual(cal["pan"], given["pan"], places=9)
+        self.assertAlmostEqual(cal["tilt"], given["tilt"], places=9)
+
+
 class TestEstimatorExposesReason(unittest.TestCase):
     def test_calibration_failure_reason_reaches_estimator_result(self) -> None:
         from ai.fire_location_estimator import FireLocationEstimator

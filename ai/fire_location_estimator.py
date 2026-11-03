@@ -179,6 +179,16 @@ class FireLocationEstimator:
         return fire_x, fire_y
 
     @staticmethod
+    def _apply_zero_point_result(cal_info: dict, cal_res: dict) -> None:
+        """Apply the zero-point correction only when it passed the quality gate; otherwise keep the given PTZ."""
+        if cal_res.get("calibrated"):
+            cal_info.update(cal_res)
+        else:
+            cal_info["calibrated"] = False
+            cal_info["reason"] = cal_res.get("reason")
+            cal_info["rms_deg"] = cal_res.get("rms_deg", 999.0)
+
+    @staticmethod
     def _frame_size(frame: object) -> tuple[int, int] | None:
         """Return (width, height) of a frame given as np.ndarray, PIL.Image or file path, else None."""
         if frame is None:
@@ -340,8 +350,7 @@ class FireLocationEstimator:
                     height=height,
                     fov_h=fov_h,
                 )
-                cal_info.update(cal_res)
-                cal_info["calibrated"] = True
+                self._apply_zero_point_result(cal_info, cal_res)
         elif has_default_ptz:
             init_pan = float(cam["default_pan"])
             init_tilt = float(cam["default_tilt"])
@@ -365,8 +374,7 @@ class FireLocationEstimator:
                     height=height,
                     fov_h=fov_h,
                 )
-                cal_info.update(cal_res)
-                cal_info["calibrated"] = True
+                self._apply_zero_point_result(cal_info, cal_res)
         else:
             # Blind Pose Estimation (360° Coarse-to-Fine Skyline Matching with 3-way Fail-Safe)
             if ridge_pts is None or len(ridge_pts) < 15:
