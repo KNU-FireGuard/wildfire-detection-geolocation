@@ -1,12 +1,11 @@
 ﻿<script setup>
 import { computed } from 'vue'
+import { cameraName as nameOf } from '../utils/cameraName'
 import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
 const props = defineProps({ events: { type: Array, default: () => [] }, cameras: { type: Array, default: () => [] }, selectedId: { type: [Number, String], default: null } })
 const emit = defineEmits(['select'])
+const cameraName = cameraId => nameOf(cameraId, props.cameras)
 const sortedEvents = computed(() => [...props.events].sort((a, b) => Date.parse(b.detectedAt) - Date.parse(a.detectedAt)))
-function cameraName(cameraId) {
-  return props.cameras.find(camera => camera.id === cameraId)?.name ?? (cameraId == null ? '카메라 정보 없음' : `카메라 ${cameraId}`)
-}
 </script>
 
 <template>

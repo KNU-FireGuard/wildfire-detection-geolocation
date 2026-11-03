@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
+import FireAlertBanner from '../components/FireAlertBanner.vue'
 import EventDetail from '../components/EventDetail.vue'
 import LiveCctvWall from '../components/LiveCctvWall.vue'
 import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, loginAdmin, refreshLiveCctvs } from '../api/catalog'
@@ -13,6 +14,8 @@ import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
 import { summarizeOperatingCameras } from '../utils/cameraSummary'
 import { findRequestedCameraId } from '../utils/cameraLink'
+import { activeFireCameraIds, findNewFireEvents } from '../utils/fireAlert'
+import { playAlertTone } from '../utils/alertSound'
 
 // 데이터 공급 모드를 명시적으로 선택합니다. API 실패 시 mock으로 자동 대체하지 않습니다.
 const dataSource = import.meta.env.VITE_DATA_SOURCE ?? 'api'
@@ -39,6 +42,15 @@ let clockInterval
 let refreshInterval
 let loading = false
 let linkApplied = false
+let knownEventIds = null
+const fireAlerts = ref([])
+// 진행 중인 화재 카메라가 바뀔 때만 지도를 다시 그리도록 문자열 키를 거쳐 집합을 만듦
+const fireKey = computed(() => [...activeFireCameraIds(events.value, now.value.getTime())].sort((a, b) => a - b).join(','))
+const fireCameraIds = computed(() => new Set(fireKey.value ? fireKey.value.split(',').map(Number) : []))
+function openFireAlert(id) {
+  selectEvent(id)
+  fireAlerts.value = []
+}
 const clock = computed(() => now.value.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }))
 const selectedEvent = computed(() => events.value.find(event => event.id === selectedEventId.value) ?? null)
 const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedCameraId.value)
@@ -73,6 +85,12 @@ function applyData(nextCameras, nextEvents, nextVideos = []) {
   videos.value = nextVideos
   selectedCameraId.value = selection.cameraId
   selectedEventId.value = selection.eventId
+  const fresh = findNewFireEvents(knownEventIds, nextEvents, Date.now())
+  knownEventIds = new Set(nextEvents.map(event => event.id))
+  if (fresh.length) {
+    fireAlerts.value = [...fresh, ...fireAlerts.value]
+    playAlertTone()
+  }
 }
 async function loadData({ silent = false } = {}) {
   if (loading) return
@@ -195,8 +213,9 @@ onBeforeUnmount(() => {
       <div v-else-if="loadError" class="load-status" role="alert"><p>{{ loadError }}</p><button class="primary-button" @click="loadData">다시 시도</button></div>
       <template v-else>
         <p v-if="refreshError" class="refresh-error" role="alert">{{ refreshError }}</p>
+        <FireAlertBanner :events="fireAlerts" :cameras="cameras" @open="openFireAlert" @dismiss="fireAlerts = []" />
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
-          <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select-camera="selectCamera" />
+          <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" :fire-camera-ids="fireCameraIds" @select-camera="selectCamera" />
           <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror />
           <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
           <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" />
