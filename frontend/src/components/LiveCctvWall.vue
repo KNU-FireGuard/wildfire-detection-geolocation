@@ -33,7 +33,6 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
           @click.stop="toggle(camera.id)"
         >
           <strong>{{ camera.name }}</strong>
-          <span>선택</span>
         </button>
       </article>
     </div>
@@ -52,7 +51,6 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
 .tile-empty { display: grid; align-content: center; justify-items: center; gap: 4px; height: 160px; color: #e8f1fc; background: #111; font-size: 12px; text-align: center; }
 .tile-select { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 0; background: #253444; color: #fff; text-align: left; cursor: pointer; }
 .tile-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.tile-select span { flex-shrink: 0; color: #bcd3ea; font-size: 11px; }
 .tile-select:focus-visible { outline: 3px solid #7fc4ff; outline-offset: -3px; }
 @media (max-width: 800px) { .live-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .live-grid { grid-template-columns: minmax(0, 1fr); } }

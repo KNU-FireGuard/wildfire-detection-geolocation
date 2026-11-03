@@ -19,3 +19,8 @@ test('실시간 영상 컴포넌트의 video도 영상 비율을 따르고 불�
     assert.match(css(name), /(^|\n)video\s*\{[^}]*(?<![-\w])height:\s*auto/, name)
   }
 })
+
+test('연결 오류 문구는 영상 위에 겹쳐 표시해 타일과 패널의 높이를 바꾸지 않는다', () => {
+  assert.match(css('LiveVideo.vue'), /\.stream-error\s*\{[^}]*position:\s*absolute/)
+})
+

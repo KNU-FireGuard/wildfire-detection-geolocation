@@ -117,7 +117,7 @@ test('선택된 타일을 다시 누르면 선택을 해제하고 다른 타일�
   app.unmount()
 })
 
-test('타일마다 선택 버튼 하나만 두고 선택 여부와 무관하게 같은 문구를 쓴다', async () => {
+test('타일마다 버튼 하나만 두고 화면에는 카메라 이름만 보이며 접근성 이름과 선택 상태는 유지한다', async () => {
   const cameras = [
     { id: 1, name: '첫 번째 CCTV', streamUrl: 'https://example.test/1.m3u8' },
     { id: 2, name: '두 번째 CCTV', streamUrl: 'https://example.test/2.m3u8' },
@@ -129,10 +129,9 @@ test('타일마다 선택 버튼 하나만 두고 선택 여부와 무관하게 
   await nextTick()
   const buttons = findAll(root, 'button')
   assert.equal(buttons.length, 2)
-  buttons.forEach(button => {
-    const label = allText(button)
-    assert.match(label, /선택/)
-    assert.doesNotMatch(label, /우측에 표시|선택 해제|크게 보기|작게 보기/)
+  buttons.forEach((button, index) => {
+    assert.equal(allText(button).trim(), cameras[index].name)
+    assert.match(button.props['aria-label'], /선택/)
   })
   assert.equal(buttons[1].props['aria-pressed'], true)
   assert.equal(buttons[0].props['aria-pressed'], false)
