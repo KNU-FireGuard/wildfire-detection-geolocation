@@ -378,3 +378,77 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
         "validation": _validation_report(provider, job, views, ridges, best_fov),
         "warnings": warnings,
     }
+
+
+# ---------------------------------------------------------------------------
+# 설정 후보 생성·적용 (ADR 0018)
+# ---------------------------------------------------------------------------
+def build_config_entry(job: dict, result: dict) -> dict:
+    """보정 결과를 ai/config/cameras.json 항목으로 변환, #57 로더 검증을 통과한 항목만 반환"""
+    from datetime import date
+
+    from ai.camera_config import CameraConfigError, _validate_camera
+
+    if result.get("status") != "OK" or not result.get("views"):
+        raise CalibrationJobError("보정이 실패해 설정 항목을 만들 수 없습니다")
+    cam = job["camera"]
+    entry: dict = {"key": cam["key"], "name": cam["name"], "camera_id": cam.get("camera_id"),
+                   "fov_h_deg": round(float(result["fov_h_deg"]), 2)}
+
+    def pose(v: dict) -> dict:
+        return {"pan": round(v["pan"], 2), "tilt": round(v["tilt"], 2), "roll": round(v["roll"], 2)}
+
+    presets = {v["preset"]: pose(v) for v in result["views"].values() if v.get("preset")}
+    fixed = [v for v in result["views"].values() if not v.get("preset")]
+    if presets:
+        entry["ptz"] = {"presets": presets}
+        if result.get("pan_offset"):
+            entry["ptz"]["pan_offset_deg"] = round(result["pan_offset"]["median"], 2)
+    elif fixed:
+        entry["fixed_pose"] = pose(fixed[0])
+
+    validation = result.get("validation") or []
+    entry["provenance"] = f"카메라 보정 도구(#58), 작업 파일 {Path(job['path']).name}, {date.today().isoformat()}"
+    entry["uncertainty"] = {
+        "fov_interval_deg": list(result["fov_interval"]),
+        "pan_offset_range_deg": [round(result["pan_offset"]["min"], 2), round(result["pan_offset"]["max"], 2)]
+        if result.get("pan_offset") else None,
+        "validation_max_error_deg": round(max(v["error_deg"] for v in validation), 3) if validation else None,
+        "warnings": list(result["warnings"]),
+    }
+    try:
+        _validate_camera(entry, 0)
+    except CameraConfigError as exc:
+        raise CalibrationJobError(f"생성한 설정 항목이 형식 검증을 통과하지 못했습니다: {exc}") from exc
+    return entry
+
+
+def write_config_candidate(entry: dict, path: Path | str) -> Path:
+    """설정 후보를 별도 파일로 저장 (ai/config/cameras.json에는 반영하지 않음)"""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"version": 1, "cameras": [entry]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return p
+
+
+def apply_config_entry(entry: dict, config_path: Path | str | None = None) -> Path:
+    """같은 key 항목을 교체(없으면 추가)해 설정 파일에 반영, 전체 검증 실패 시 원래 내용 복원"""
+    from ai.camera_config import DEFAULT_CONFIG_PATH, CameraConfigError, load_camera_configs
+
+    p = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
+    original = p.read_text(encoding="utf-8") if p.exists() else None
+    data = json.loads(original) if original else {"version": 1, "cameras": []}
+    cams = [c for c in data.get("cameras", []) if c.get("key") != entry["key"]]
+    cams.append(entry)
+    data["cameras"] = cams
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        load_camera_configs(p)
+    except CameraConfigError:
+        if original is None:
+            p.unlink()
+        else:
+            p.write_text(original, encoding="utf-8")
+        raise
+    return p

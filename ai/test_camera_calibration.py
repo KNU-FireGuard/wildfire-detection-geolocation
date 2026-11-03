@@ -224,6 +224,58 @@ class TestCalibrationWarnings(SyntheticCalibrationCase):
         self.assertGreaterEqual(interval[1] - interval[0], 6.0)
 
 
+class TestConfigCandidate(SyntheticCalibrationCase):
+    """보정 결과 → ai/config/cameras.json 항목 (ADR 0018)"""
+
+    def test_preset_camera_entry_passes_config_loader(self) -> None:
+        from ai.camera_calibration import build_config_entry, calibrate_camera, write_config_candidate
+        from ai.camera_config import find_camera_config, load_camera_configs
+
+        job = self._job()
+        res = calibrate_camera(job, provider=self.provider)
+        entry = build_config_entry(job, res)
+        out = self.dir / "candidate.json"
+        write_config_candidate(entry, out)
+        cam = find_camera_config(load_camera_configs(out), name="합성")
+        self.assertAlmostEqual(cam["fov_h_deg"], res["fov_h_deg"])
+        self.assertAlmostEqual(cam["ptz"]["presets"]["V1-preset"]["pan"], round(res["views"]["V1"]["pan"], 2))
+        self.assertAlmostEqual(cam["ptz"]["pan_offset_deg"], round(res["pan_offset"]["median"], 2))
+        self.assertIn("warnings", cam["uncertainty"])
+        self.assertIn("fov_interval_deg", cam["uncertainty"])
+
+    def test_fixed_camera_entry_uses_fixed_pose(self) -> None:
+        from ai.camera_calibration import build_config_entry, calibrate_camera
+
+        job = self._job(views=("V1",))
+        job["views"][0]["preset"] = None
+        job["views"][0].pop("label_pan", None)
+        res = calibrate_camera(job, provider=self.provider)
+        entry = build_config_entry(job, res)
+        self.assertNotIn("ptz", entry)
+        self.assertAlmostEqual(entry["fixed_pose"]["pan"], round(res["views"]["V1"]["pan"], 2))
+
+    def test_apply_replaces_same_key_and_keeps_other_cameras(self) -> None:
+        from ai.camera_calibration import apply_config_entry
+        from ai.camera_config import find_camera_config, load_camera_configs
+
+        cfg = self.dir / "cameras.json"
+        cfg.write_text(json.dumps({"version": 1, "cameras": [
+            {"key": "other", "name": "다른카메라", "fov_h_deg": 60.0},
+            {"key": "syn", "name": "합성", "fov_h_deg": 60.0},
+        ]}, ensure_ascii=False), encoding="utf-8")
+        apply_config_entry({"key": "syn", "name": "합성", "camera_id": None, "fov_h_deg": 49.0}, cfg)
+        cams = load_camera_configs(cfg)
+        self.assertEqual(len(cams), 2)
+        self.assertAlmostEqual(find_camera_config(cams, name="합성")["fov_h_deg"], 49.0)
+        self.assertAlmostEqual(find_camera_config(cams, name="다른카메라")["fov_h_deg"], 60.0)
+
+    def test_failed_calibration_cannot_become_entry(self) -> None:
+        from ai.camera_calibration import CalibrationJobError, build_config_entry
+
+        with self.assertRaises(CalibrationJobError):
+            build_config_entry(self._job(), {"status": "FAILED", "views": {}, "warnings": []})
+
+
 class TestFovAndPoseRecovery(SyntheticCalibrationCase):
     def test_recovers_fov_and_view_poses_from_ridges(self) -> None:
         from ai.camera_calibration import calibrate_camera
