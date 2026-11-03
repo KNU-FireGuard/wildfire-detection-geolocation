@@ -56,5 +56,32 @@ class TestPinholeRotationModel(unittest.TestCase):
         self.assertFalse(bool(front))
 
 
+class TestEstimatorRayUsesRotationModel(unittest.TestCase):
+    """위치 추정기의 광선 계산이 정식 회전 모델과 일치해야 함"""
+
+    def test_edge_pixel_ray_matches_closed_form(self) -> None:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        f = focal_length_px(W, FOV)
+        dy = f * math.tan(math.radians(10.0))
+        (dx_, dy_, dz_), bearing, el = FireLocationEstimator.compute_3d_ray_vector(
+            fire_x=W, fire_y=H / 2 - dy, pan_deg=0.0, tilt_deg=0.0, roll_deg=0.0, width=W, height=H, fov_h_deg=FOV
+        )
+        expected_el = math.degrees(math.atan(dy / math.hypot(f, W / 2)))
+        self.assertAlmostEqual(el, expected_el, places=6)
+        self.assertAlmostEqual(bearing, math.degrees(math.atan((W / 2) / f)), places=6)
+        self.assertAlmostEqual(math.sqrt(dx_ ** 2 + dy_ ** 2 + dz_ ** 2), 1.0, places=9)
+
+    def test_ray_agrees_with_model_for_tilted_rolled_camera(self) -> None:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        pose = (98.7, 2.5, 2.3)
+        for px, py in [(100.0, 900.0), (1800.0, 150.0), (960.0, 540.0)]:
+            _, bearing, el = FireLocationEstimator.compute_3d_ray_vector(px, py, *pose, width=W, height=H, fov_h_deg=FOV)
+            az_m, el_m = pixel_to_direction(px, py, *pose, W, H, FOV)
+            self.assertAlmostEqual(bearing, float(az_m), places=6)
+            self.assertAlmostEqual(el, float(el_m), places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

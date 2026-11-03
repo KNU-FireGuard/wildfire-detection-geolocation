@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 
 try:
+    from ai.camera_model import pixel_to_vector
     from ai.dem_skyline_engine import (
         DEMProvider,
         GACHANG_CAM_LAT,
@@ -15,6 +16,7 @@ try:
     )
     from ai.ridge_detector import SkylineExtractor
 except ImportError:
+    from camera_model import pixel_to_vector
     from dem_skyline_engine import (
         DEMProvider,
         GACHANG_CAM_LAT,
@@ -209,27 +211,14 @@ class FireLocationEstimator:
     ) -> tuple[tuple[float, float, float], float, float]:
         """
         Compute the 3D ENU unit direction vector (dx, dy, dz), azimuth bearing (deg),
-        and elevation angle (deg) from calibrated PTZ and focal length.
+        and elevation angle (deg) of the ray through pixel (fire_x, fire_y),
+        using the exact pinhole yaw-pitch-roll model (ai/camera_model.py).
         """
-        f = (width / 2.0) / math.tan(math.radians(fov_h_deg / 2.0))
-        cx, cy = width / 2.0, height / 2.0
-
-        # Inverse roll rotation around principal point
-        y_unrolled = fire_y - math.tan(math.radians(roll_deg)) * (fire_x - cx)
-        delta_pan = math.degrees(math.atan((fire_x - cx) / f))
-        delta_tilt = math.degrees(math.atan((cy - y_unrolled) / f))
-
-        final_pan_deg = (pan_deg + delta_pan) % 360.0
-        final_tilt_deg = tilt_deg + delta_tilt
-
-        pan_rad = math.radians(final_pan_deg)
-        tilt_rad = math.radians(final_tilt_deg)
-
-        # 3D unit vector in local ENU frame (X: East, Y: North, Z: Up)
-        dx = math.sin(pan_rad) * math.cos(tilt_rad)
-        dy = math.cos(pan_rad) * math.cos(tilt_rad)
-        dz = math.sin(tilt_rad)
-        return (dx, dy, dz), final_pan_deg, final_tilt_deg
+        d = pixel_to_vector(fire_x, fire_y, pan_deg, tilt_deg, roll_deg, width, height, fov_h_deg)
+        dx, dy, dz = (float(v) for v in d)
+        bearing = math.degrees(math.atan2(dx, dy)) % 360.0
+        elevation = math.degrees(math.asin(max(-1.0, min(1.0, dz))))
+        return (dx, dy, dz), bearing, elevation
 
     def estimate_location(
         self,
