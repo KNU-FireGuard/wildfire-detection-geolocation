@@ -5,7 +5,8 @@ import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
 import EventDetail from '../components/EventDetail.vue'
 import LiveCctvWall from '../components/LiveCctvWall.vue'
-import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs } from '../api/catalog'
+import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, loginAdmin, refreshLiveCctvs } from '../api/catalog'
+import { ensureAdminToken, useAdminSession } from '../composables/useAdminSession'
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
@@ -21,6 +22,7 @@ const mapVisible = ref(true)
 const isLoading = ref(true)
 const loadError = ref('')
 const refreshError = ref('')
+const { isLoggedIn, signOut } = useAdminSession()
 const showCctvRefreshForm = ref(false)
 const cctvRefreshBusy = ref(false)
 const cctvRefreshMessage = ref('')
@@ -141,12 +143,14 @@ async function refreshCctv() {
   cctvRefreshError.value = ''
   cctvRefreshMessage.value = ''
   try {
-    await refreshLiveCctvs(adminUsername.value, adminPassword.value)
+    const token = await ensureAdminToken(loginAdmin, adminUsername.value, adminPassword.value)
+    await refreshLiveCctvs(token)
     showCctvRefreshForm.value = false
     cctvRefreshMessage.value = 'CCTV 주소를 갱신했습니다.'
     await loadData({ silent: true })
   } catch (error) {
     cctvRefreshError.value = error.message
+    if (error.code === 'unauthorized') signOut()
   } finally {
     adminPassword.value = ''
     cctvRefreshBusy.value = false
@@ -178,8 +182,10 @@ onBeforeUnmount(() => {
       <div class="workspace-heading"><span>실시간 관제 현황</span><div class="workspace-actions"><button type="button" class="cctv-refresh-button" :aria-expanded="mapVisible" aria-controls="monitoring-map" @click="mapVisible = !mapVisible">{{ mapVisible ? '지도 닫기' : '지도 열기' }}</button><button v-if="dataSource === 'api'" type="button" class="cctv-refresh-button" :aria-expanded="showCctvRefreshForm" aria-controls="cctv-refresh-form" @click="showCctvRefreshForm = !showCctvRefreshForm">CCTV 주소 갱신</button><span class="mode-badge">{{ dataSource === 'mock' ? '데모 데이터' : 'Backend 데이터' }}</span></div></div>
       <form v-if="showCctvRefreshForm && dataSource === 'api'" id="cctv-refresh-form" class="cctv-refresh-form" @submit.prevent="refreshCctv">
         <p>영상이 나오지 않을 때 관리자 계정으로 ITS CCTV 주소를 다시 조회합니다.</p>
-        <label>관리자 ID <input v-model="adminUsername" name="username" autocomplete="username" required></label>
-        <label>비밀번호 <input v-model="adminPassword" name="password" type="password" autocomplete="current-password" required></label>
+        <template v-if="!isLoggedIn">
+          <label>관리자 ID <input v-model="adminUsername" name="username" autocomplete="username" required></label>
+          <label>비밀번호 <input v-model="adminPassword" name="password" type="password" autocomplete="current-password" required></label>
+        </template>
         <button type="submit" class="primary-button" :disabled="cctvRefreshBusy">{{ cctvRefreshBusy ? '갱신 중…' : '주소 다시 조회' }}</button>
       </form>
       <p v-if="cctvRefreshMessage" class="cctv-refresh-result" role="status">{{ cctvRefreshMessage }}</p>
