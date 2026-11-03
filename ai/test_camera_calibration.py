@@ -179,6 +179,51 @@ class TestValidationLandmarkReport(SyntheticCalibrationCase):
         self.assertGreater(max(v["error_deg"] for v in bad["validation"]), 5.0)
 
 
+class TestCalibrationWarnings(SyntheticCalibrationCase):
+    """docs/Camera_Calibration.md 경고 표"""
+
+    def test_no_landmarks_warns(self) -> None:
+        from ai.camera_calibration import calibrate_camera
+
+        res = calibrate_camera(self._job(), provider=self.provider)
+        self.assertIn("NO_LANDMARKS", res["warnings"])
+        self.assertIn("NO_VALIDATION_LANDMARKS", res["warnings"])
+
+    def test_clustered_fit_landmarks_warn_position_unconstrained(self) -> None:
+        from ai.camera_calibration import calibrate_camera
+
+        lms = make_landmarks(self.provider, "V1", TRUE_POSES["V1"], TRUE_FOV, "fit", offsets=(-10.0, 0.0, 10.0))
+        res = calibrate_camera(self._job(lms, views=("V1",)), provider=self.provider)
+        self.assertIn("POSITION_UNCONSTRAINED", res["warnings"])
+        self.assertNotIn("NO_LANDMARKS", res["warnings"])
+
+    def test_spread_fit_landmarks_do_not_warn_position(self) -> None:
+        from ai.camera_calibration import calibrate_camera
+
+        lms = make_landmarks(self.provider, "V1", TRUE_POSES["V1"], TRUE_FOV, "fit", offsets=(-20.0, 20.0))
+        lms += make_landmarks(self.provider, "V2", TRUE_POSES["V2"], TRUE_FOV, "fit", offsets=(-20.0, 20.0))
+        res = calibrate_camera(self._job(lms), provider=self.provider)
+        self.assertNotIn("POSITION_UNCONSTRAINED", res["warnings"])
+
+    def test_inconsistent_pan_offset_warns(self) -> None:
+        from ai.camera_calibration import calibrate_camera
+
+        job = self._job()
+        job["views"][1]["label_pan"] = 18.0  # 오프셋 123.8° vs 120.2°, 차이 3.6°
+        res = calibrate_camera(job, provider=self.provider)
+        self.assertIn("PAN_OFFSET_INCONSISTENT", res["warnings"])
+
+    def test_flat_fov_curve_is_ill_constrained(self) -> None:
+        from ai.camera_calibration import fov_interval
+
+        sharp = [(46.0, 0.01), (48.0, 0.004), (50.0, 0.001), (52.0, 0.004), (54.0, 0.01)]
+        flat = [(40.0, 0.0105), (44.0, 0.0102), (48.0, 0.0100), (52.0, 0.0101), (56.0, 0.0104)]
+        self.assertEqual(fov_interval(sharp), ((50.0, 50.0), False))
+        interval, ill = fov_interval(flat)
+        self.assertTrue(ill)
+        self.assertGreaterEqual(interval[1] - interval[0], 6.0)
+
+
 class TestFovAndPoseRecovery(SyntheticCalibrationCase):
     def test_recovers_fov_and_view_poses_from_ridges(self) -> None:
         from ai.camera_calibration import calibrate_camera

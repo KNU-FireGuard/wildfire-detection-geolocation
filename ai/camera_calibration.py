@@ -257,6 +257,26 @@ def _validation_report(provider, job: dict, views: dict, ridges: dict, fov: floa
     return out
 
 
+POSITION_SPREAD_LIMIT_DEG = 60.0
+
+
+def fov_interval(curve: list[tuple[float, float]]) -> tuple[tuple[float, float], bool]:
+    """최소 오차의 10% 이내 화각 구간과, 구간 폭이 6° 이상인지(FOV_ILL_CONSTRAINED) 반환"""
+    best_cost = min(c for _, c in curve)
+    inside = [f for f, c in curve if c <= best_cost * FOV_INTERVAL_RATIO + 1e-12]
+    interval = (min(inside), max(inside))
+    return interval, (interval[1] - interval[0]) >= FOV_ILL_CONSTRAINED_SPAN_DEG
+
+
+def _azimuth_spread_deg(azimuths: list[float]) -> float:
+    """방위각 집합이 차지하는 원 위의 범위 (가장 큰 빈 간격을 뺀 나머지)"""
+    if len(azimuths) < 2:
+        return 0.0
+    a = sorted(x % 360.0 for x in azimuths)
+    gaps = [a[i + 1] - a[i] for i in range(len(a) - 1)] + [a[0] + 360.0 - a[-1]]
+    return 360.0 - max(gaps)
+
+
 def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
     """
     보정 작업으로 화각과 화면별 자세를 추정 (docs/Camera_Calibration.md 절차)
@@ -315,8 +335,9 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
         fits[float(fov)] = per_view
 
     best_fov, best_cost = min(curve, key=lambda c: c[1])
-    inside = [f for f, c in curve if c <= best_cost * FOV_INTERVAL_RATIO + 1e-12]
-    interval = (min(inside), max(inside))
+    interval, ill_constrained = fov_interval(curve)
+    if ill_constrained:
+        warnings.append("FOV_ILL_CONSTRAINED")
 
     views = {}
     for view in job["views"]:
@@ -328,6 +349,19 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
     pan_offset = None
     if offsets:
         pan_offset = {"median": float(np.median(offsets)), "min": float(min(offsets)), "max": float(max(offsets))}
+        if pan_offset["max"] - pan_offset["min"] > PAN_OFFSET_SPREAD_LIMIT_DEG:
+            warnings.append("PAN_OFFSET_INCONSISTENT")
+
+    all_fit = [lm for lms in fit_lms.values() for lm in lms]
+    if not all_fit:
+        warnings.append("NO_LANDMARKS")
+    else:
+        vecs = _landmark_vectors(provider, all_fit)
+        azimuths = [math.degrees(math.atan2(v[0], v[1])) for v in vecs]
+        if _azimuth_spread_deg(azimuths) < POSITION_SPREAD_LIMIT_DEG:
+            warnings.append("POSITION_UNCONSTRAINED")
+    if not any(lm["use"] == "val" for lm in job["landmarks"]):
+        warnings.append("NO_VALIDATION_LANDMARKS")
 
     return {
         "status": "OK",
