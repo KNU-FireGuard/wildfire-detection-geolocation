@@ -15,3 +15,17 @@ test('선택한 카메라 상세는 지도와 같은 줄에, 관제 요약은 �
   assert.match(descriptor.styles[0].content, /\.map-panel\s*\{[^}]*grid-column:\s*1\s*;/)
   assert.match(descriptor.styles[0].content, /\.detail-panel\s*\{[^}]*grid-column:\s*2\s*;/)
 })
+
+test('실시간 관제 영상은 선택과 무관하게 표시하고 선택해도 같은 플레이어를 확대한다', () => {
+  const dashboard = parse(readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8')).descriptor
+  const wall = parse(readFileSync(new URL('../src/components/LiveCctvWall.vue', import.meta.url), 'utf8')).descriptor
+  const dashboardTemplate = dashboard.template.content
+  const wallTemplate = wall.template.content
+
+  assert.match(dashboardTemplate, /<LiveCctvWall\b[^>]*:cameras="liveCameras"[^>]*:selected-id="selectedCamera\?\.sourceType === 'live' \? selectedCamera\.id : null"/)
+  assert.ok(dashboardTemplate.indexOf('<LiveCctvWall') > dashboardTemplate.indexOf('<MonitoringMap'))
+  assert.match(wallTemplate, /v-for="camera in cameras"[^>]*:key="camera\.id"/)
+  assert.match(wallTemplate, /<LiveVideo\b[^>]*:url="camera\.streamUrl"/)
+  assert.match(wallTemplate, /:class="\{ selected: camera\.id === selectedId \}"/)
+  assert.doesNotMatch(wallTemplate, /v-if="camera\.id === selectedId"/)
+})
