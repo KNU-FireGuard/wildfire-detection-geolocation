@@ -269,13 +269,22 @@ def build_and_cache_dem(
     grid_size: int = 201,
     npz_path: Path | str | None = None,
     force_rebuild: bool = False,
+    anchor_source=None,
+    grid_source=None,
 ) -> dict[str, np.ndarray]:
     """
     Build a 5km-radius 3D elevation grid for any camera coordinate and cache to an .npz file.
     Validates cache coordinate alignment (haversine <= 10m, radius, grid_size).
     Automatically routes non-Gachang coordinates or mismatched parameters to a dynamic
     file path (dem_{lat:.4f}_{lon:.4f}_{int(radius_m)}m.npz) to protect existing caches.
+    Elevation sources can be injected (tests, offline use):
+      - anchor_source(lats, lons) -> 1D elevations or None  (default: Open-Meteo batch API)
+      - grid_source(lat_mesh, lon_mesh, zoom=12) -> elevation grid or None  (default: AWS Terrarium tiles)
     """
+    if anchor_source is None:
+        anchor_source = fetch_open_meteo_batch
+    if grid_source is None:
+        grid_source = fetch_terrarium_dem_grid
     target_path = Path(npz_path) if npz_path is not None else DEFAULT_NPZ_PATH
     dynamic_name = f"dem_{center_lat:.4f}_{center_lon:.4f}_{int(radius_m)}m.npz"
 
@@ -309,24 +318,20 @@ def build_and_cache_dem(
     anchor_lats = np.linspace(center_lat - dlat, center_lat + dlat, 10)
     anchor_lons = np.linspace(center_lon - dlon, center_lon + dlon, 10)
     a_lon_m, a_lat_m = np.meshgrid(anchor_lons, anchor_lats)
-    api_elev = fetch_open_meteo_batch(a_lat_m.ravel(), a_lon_m.ravel())
-    is_api_mocked = hasattr(fetch_open_meteo_batch, "_mock_name") or (
-        "unittest.mock" in type(fetch_open_meteo_batch).__module__
-    )
+    api_elev = anchor_source(a_lat_m.ravel(), a_lon_m.ravel())
 
-    # 2. Populate dense 201x201 (~50m step) elevation matrix using AWS Terrarium 30m tiles,
-    #    falling back to Open-Meteo bilinear interpolation when offline or explicitly mocked in tests
+    # 2. Populate dense 201x201 (~50m step) elevation matrix using the grid source (AWS Terrarium 30m tiles),
+    #    falling back to anchor bilinear interpolation when the grid source is unavailable (offline)
     elev_grid: np.ndarray | None = None
-    if not is_api_mocked:
-        sampled = fetch_terrarium_dem_grid(lat_mesh, lon_mesh, zoom=12)
-        if sampled is not None and not np.isnan(sampled).any():
-            elev_grid = sampled.astype(np.float32)
-            if api_elev is not None:
-                t_anchor = fetch_terrarium_dem_grid(a_lat_m, a_lon_m, zoom=12)
-                if t_anchor is not None:
-                    datum_bias = float(np.median(api_elev - t_anchor.ravel()))
-                    if abs(datum_bias) < 5.0:
-                        elev_grid = elev_grid + datum_bias * 0.1
+    sampled = grid_source(lat_mesh, lon_mesh, zoom=12)
+    if sampled is not None and not np.isnan(sampled).any():
+        elev_grid = np.asarray(sampled, dtype=np.float32)
+        if api_elev is not None:
+            t_anchor = grid_source(a_lat_m, a_lon_m, zoom=12)
+            if t_anchor is not None:
+                datum_bias = float(np.median(api_elev - np.asarray(t_anchor).ravel()))
+                if abs(datum_bias) < 5.0:
+                    elev_grid = elev_grid + datum_bias * 0.1
 
     if elev_grid is None:
         if api_elev is not None:
@@ -368,6 +373,8 @@ def build_and_cache_gachang_dem(
     grid_size: int = 201,
     npz_path: Path | str | None = None,
     force_rebuild: bool = False,
+    anchor_source=None,
+    grid_source=None,
 ) -> dict[str, np.ndarray]:
     """Backward-compatible wrapper around build_and_cache_dem()."""
     return build_and_cache_dem(
@@ -377,6 +384,8 @@ def build_and_cache_gachang_dem(
         grid_size=grid_size,
         npz_path=npz_path,
         force_rebuild=force_rebuild,
+        anchor_source=anchor_source,
+        grid_source=grid_source,
     )
 
 

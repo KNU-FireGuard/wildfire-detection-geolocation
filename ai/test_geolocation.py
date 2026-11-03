@@ -27,8 +27,6 @@ class TestGeolocationEngine(unittest.TestCase):
 
     def test_cache_validation_and_dynamic_path(self) -> None:
         """P1: 캐시 좌표 불일치 시 기존 캐시 재사용 거부, 원본 보호 및 동적 파일명 분리 검증"""
-        from unittest.mock import patch
-
         temp_cache = Path(self.temp_dir) / "test_gachang.npz"
         grid_size = 21
         lats = np.linspace(GACHANG_CAM_LAT - 0.01, GACHANG_CAM_LAT + 0.01, grid_size)
@@ -64,16 +62,17 @@ class TestGeolocationEngine(unittest.TestCase):
         diff_lon = GACHANG_CAM_LON + 0.05
         expected_dyn_path = Path(self.temp_dir) / f"dem_{diff_lat:.4f}_{diff_lon:.4f}_1000m.npz"
 
-        mock_api_elev = np.full(100, 500.0, dtype=np.float32)
-        with patch("ai.dem_skyline_engine.fetch_open_meteo_batch", return_value=mock_api_elev):
-            data_diff = build_and_cache_gachang_dem(
-                center_lat=diff_lat,
-                center_lon=diff_lon,
-                radius_m=1000.0,
-                grid_size=grid_size,
-                npz_path=temp_cache,
-                force_rebuild=False,
-            )
+        # 네트워크 없이 재현되도록 고도 소스 주입: 앵커 500m, 고해상도 격자 소스는 오프라인(None)
+        data_diff = build_and_cache_gachang_dem(
+            center_lat=diff_lat,
+            center_lon=diff_lon,
+            radius_m=1000.0,
+            grid_size=grid_size,
+            npz_path=temp_cache,
+            force_rebuild=False,
+            anchor_source=lambda lats, lons: np.full(len(lats), 500.0, dtype=np.float32),
+            grid_source=lambda *args, **kwargs: None,
+        )
 
         # (a) 반환된 데이터가 가창면 캐시(200m)가 아니라 새로 빌드된 타 지역 고도(500m)여야 함
         self.assertAlmostEqual(float(data_diff["elevation"][10, 10]), 500.0, places=3)
@@ -85,6 +84,27 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertTrue(expected_dyn_path.exists())
         with np.load(temp_cache) as orig_check:
             self.assertEqual(float(orig_check["elevation"][0, 0]), 200.0)
+
+    def test_injected_elevation_sources_are_used_without_patching(self) -> None:
+        """고도 소스를 인자로 주입하면 네트워크·mock 감지 없이 그 값으로 격자를 생성"""
+        out = Path(self.temp_dir) / "injected.npz"
+        calls = {"grid": 0}
+
+        def fake_grid(lat_mesh, lon_mesh, **_kwargs):
+            calls["grid"] += 1
+            return np.full(np.shape(lat_mesh), 123.0, dtype=np.float32)
+
+        data = build_and_cache_dem(
+            center_lat=GACHANG_CAM_LAT + 0.07,
+            center_lon=GACHANG_CAM_LON + 0.07,
+            radius_m=1000.0,
+            grid_size=21,
+            npz_path=out,
+            anchor_source=lambda lats, lons: np.full(len(lats), 500.0, dtype=np.float32),
+            grid_source=fake_grid,
+        )
+        self.assertGreaterEqual(calls["grid"], 1)
+        np.testing.assert_allclose(data["elevation"], 123.0)
 
     def test_provider_updates_on_tower_height_change(self) -> None:
         """철탑 높이(tower_height) 변경 시 DEMProvider 갱신 검증"""
