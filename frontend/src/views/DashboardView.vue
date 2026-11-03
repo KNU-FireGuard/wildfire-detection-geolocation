@@ -81,7 +81,7 @@ async function runAcknowledge(ids) {
   ackBusy.value = true
   try {
     if (dataSource === 'api') for (const id of ids) await acknowledgeEvent(id, adminToken.value)
-    events.value = events.value.map(event => ids.includes(event.id) ? { ...event, status: 'CONFIRMED' } : event)
+    events.value = events.value.map(event => ids.includes(event.id) ? { ...event, status: 'CONFIRMED', alerting: false } : event)
     fireAlerts.value = fireAlerts.value.filter(event => !ids.includes(event.id))
     ackWaitingIds.value = []
     if (dataSource === 'api') await loadData({ silent: true })

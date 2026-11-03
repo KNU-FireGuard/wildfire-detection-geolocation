@@ -137,6 +137,8 @@
 ```
 
 - `acknowledged_at`: 운영자가 확인한 시각, `null`이면 확인 대기
+- `is_alerting`: 확인하지 않았고 마지막 탐지가 30분 안인 `fire` 이벤트이면 `true`, 마지막 탐지는 종료된 이벤트의 `ended_at`, 진행 중이면 `updated_at`
+- `updated_at`: 진행 중 이벤트에서는 마지막 탐지 시각, 확인 API는 값을 바꾸지 않음
 
 - 실시간 탐지 이벤트는 `video_id: null`, `camera_id: 카메라 ID`
 
@@ -188,6 +190,7 @@
 - Header: `X-AI-Token: <AI_CALLBACK_TOKEN>`
 - `AI_CALLBACK_TOKEN`은 Backend와 AI가 동일하게 설정
 - 탐지 1건당 요청 1회
+- 같은 실행·클래스의 마지막 탐지가 30분 안이면 기존 이벤트를 갱신하고, 30분 넘게 탐지가 없었다면 새 이벤트를 만듦
 - 성공 `202` `{ "accepted": true }`
 
 ```json
@@ -231,7 +234,9 @@
 - 알림 번호는 공개 `GET /cameras`에 포함하지 않고 아래 관리자 API에서만 제공
 - 문자는 카메라의 `fire` 탐지 이벤트가 새로 생길 때 해당 카메라 번호로 발송, `smoke`는 발송하지 않음
 - Test 실행과 실시간 감시 모두 `POST /detections` 경로로 같은 규칙 적용
-- 같은 실행(run)에서 `fire` 이벤트는 1회만 발송, Test 실행을 새로 시작하면 다시 발송
+- 문자는 카메라가 "알림 중"이 아닌 상태에서 새 `fire` 이벤트가 생길 때(지도에서 파랑 → 빨강)만 발송
+- 같은 카메라에 알림 중인 `fire` 이벤트가 있으면 새 실행이 시작되어도 발송하지 않음, 서버 재시작·작업자 재시작 후에도 동일
+- 알림 중: 확인하지 않았고 마지막 탐지가 30분 안인 `fire` 이벤트
 - 발송 실패는 탐지 저장과 `POST /detections` 응답에 영향 없음, 결과는 `sms_logs`에 기록
 
 ### `GET /admin/cameras`

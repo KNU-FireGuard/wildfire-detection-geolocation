@@ -126,7 +126,7 @@ erDiagram
 | `estimated_latitude`, `estimated_longitude` | 선택 | 위도 -90~90, 경도 -180~180, 함께 값 또는 함께 `NULL` |
 | `error_range_m` | 선택 | 0 이상의 유한한 수, 위치 좌표가 없으면 `NULL` |
 | `acknowledged_at` | 선택 | 운영자가 확인한 시각, `NULL`이면 확인 대기, 처음 확인할 때만 기록 |
-| `created_at`, `updated_at` | 자동 | `updated_at`은 수정 시 Backend가 갱신 |
+| `created_at`, `updated_at` | 자동 | `updated_at`은 탐지 갱신 시 Backend가 갱신, 진행 중 이벤트에서는 마지막 탐지 시각, 확인 시에는 갱신하지 않음 |
 
 - AI 목표 JSON은 `camera_id`를 보내고 Backend가 실행 중인 영상의 `video_id`를 찾아 저장
 - `video_id`와 `camera_id`는 정확히 하나만 값이 있어야 함

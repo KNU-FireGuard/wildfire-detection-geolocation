@@ -47,8 +47,8 @@ async function acknowledgeEvent(req, res) {
   if (!/^\d+$/.test(raw) || !Number.isInteger(id) || id < 1 || id > 2147483647) {
     return res.status(400).json({ error: '이벤트 ID는 1~2147483647의 정수여야 합니다.' });
   }
-  await pool.query(`UPDATE detection_events SET acknowledged_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $1 AND acknowledged_at IS NULL`, [id]);
+  // updated_at은 마지막 탐지 시각 판단에 쓰므로 확인할 때 바꾸지 않습니다.
+  await pool.query('UPDATE detection_events SET acknowledged_at = CURRENT_TIMESTAMP WHERE id = $1 AND acknowledged_at IS NULL', [id]);
   const { rows } = await pool.query(`SELECT ${EVENT_COLUMNS} ${EVENT_FROM} WHERE e.id = $1`, [id]);
   if (rows.length === 0) return res.status(404).json({ error: '탐지 이벤트가 없습니다.' });
   return res.json({ item: rows[0] });
