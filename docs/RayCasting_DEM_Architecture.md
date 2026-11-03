@@ -24,42 +24,28 @@ Track 1 로직을 풀기 위해 프론트엔드/백엔드로부터 넘겨받아�
 }
 ```
 
-## 2. 2D 픽셀 → 3D Ray 변환 로직 (Python 초안)
+## 2. 2D 픽셀 → 3D Ray 변환 (정식 핀홀 회전 모델)
 
-화면 중심을 기준으로 픽셀 오프셋을 각도로 변환한 뒤, 현재 카메라의 Pan/Tilt와 합산하여 최종 광선(Ray)의 방향 벡터를 구하는 코드 뼈대입니다.
+- 구현: `ai/camera_model.py`, 추정기·영점 보정·360° 역산·합성 생성기가 모두 같은 모델 사용 (#55)
+- 좌표계: 카메라 위치 기준 ENU (X 동, Y 북, Z 위)
+- 초점 거리(px): `f = (W / 2) / tan(fov_h / 2)`, 주점은 화면 중심 `(W / 2, H / 2)`
+- 카메라 축 (pan `p`: 진북 기준 시계 방향 방위, tilt `t`: 위쪽 양수, roll `r`)
+  - 앞 `F = (sin p cos t, cos p cos t, sin t)`
+  - 기본 오른쪽 `R0 = (cos p, -sin p, 0)`, 기본 위쪽 `U0 = R0 × F`
+  - Roll 적용: `R = R0 cos r + U0 sin r`, `U = -R0 sin r + U0 cos r`
+  - Roll 양수면 화면 오른쪽 수평선이 아래로 내려감
+- 픽셀 `(x, y)` → 광선: `d = normalize(F + ((x - W/2) / f) R + ((H/2 - y) / f) U)`
+- 방향 → 픽셀: `x = W/2 + f (d·R) / (d·F)`, `y = H/2 - f (d·U) / (d·F)`, `d·F > 0`일 때만 화면 앞쪽
+- 이전 근사식과의 차이
+  - 이전: 고도각 `t + atan((H/2 - y) / f)`로 가로 위치를 무시, Roll은 기울이기로 근사
+  - 화면 가장자리(가로 30°)에서 고도각 약 1.3° 차이, 기울어진 카메라에서 방위 약 0.6° 차이
+  - 이전 테스트는 합성 데이터도 같은 근사를 써서 오차가 상쇄돼 발견되지 않았음
 
-```python
-import math
+## 2.1 실측에서 확인된 메타데이터 주의사항 (가창오리 카메라, #51)
 
-def calculate_ray_vector(meta, fire_x, fire_y):
-    """
-    2D 픽셀 좌표를 3D 방향 벡터(단위 벡터)로 변환합니다.
-    (Flat Earth 가정: 북쪽이 Y, 동쪽이 X, 위쪽이 Z축)
-    """
-    cam = meta["camera"]
-    
-    # 1. 픽셀 좌표를 이미지 중심 기준 오프셋 비율(-0.5 ~ 0.5)로 변환
-    offset_x = (fire_x - (cam["resolution_w"] / 2)) / cam["resolution_w"]
-    # y는 아래로 갈수록 커지므로 반전하여 위쪽을 양수로 처리
-    offset_y = ((cam["resolution_h"] / 2) - fire_y) / cam["resolution_h"] 
-    
-    # 2. 중심 픽셀 기준 광선의 오프셋 각도 계산
-    delta_pan = offset_x * cam["fov_h"]
-    delta_tilt = offset_y * cam["fov_v"]
-    
-    # 3. 실제 카메라 각도와 합산하여 최종 절대 각도 산출
-    ptz = meta["ptz"]
-    final_pan = math.radians(ptz["pan"] + delta_pan)
-    final_tilt = math.radians(ptz["tilt"] + delta_tilt)
-    
-    # 4. 3D 방향 벡터(Ray) 도출 (구면 좌표계 -> 직교 좌표계)
-    # X: 동(East), Y: 북(North), Z: 상(Up)
-    dx = math.sin(final_pan) * math.cos(final_tilt)
-    dy = math.cos(final_pan) * math.cos(final_tilt)
-    dz = math.sin(final_tilt)
-    
-    return dx, dy, dz
-```
+- 영상 OSD의 PTZ 프리셋 라벨은 진북 기준 방위가 아님: 실제 방향 = 라벨 + 약 120°
+- 화각은 60°가 아니라 약 46~52°
+- 카메라별 보정값(Pan 오프셋, 화각, 눈높이) 도입은 #57에서 진행
 
 ## 3. DEM 교차 탐색 알고리즘 구조 (Ray Marching + Binary Search)
 
@@ -78,5 +64,7 @@ def calculate_ray_vector(meta, fire_x, fire_y):
 ## 4. [Future Work / 트러블슈팅 예정 사항]
 
 - **지구 곡률 및 좌표계 투영 보정**:
+  - 현재 구현(`DEMProvider`)은 지구 곡률과 대기 굴절(k=0.13)을 `drop = d² / (2R) × (1 - k)`로 보정
+  - 아래는 최초 설계 당시 기록
   - 현재는 애자일한 구현을 위해 평면(Flat Earth)을 가정했습니다.
   - 향후 실제 테스트 시, 원거리(수 km 이상)에서 지구 곡률로 인해 타겟의 고도 오차가 발생하거나, 위경도 좌표(도 단위)와 직교 좌표(미터 단위) 간의 변환 충돌이 발생할 경우, **EPSG:3857(웹 메르카토르) 또는 UTM 투영 변환(Projection)**을 도입하여 알고리즘을 고도화할 예정입니다.
