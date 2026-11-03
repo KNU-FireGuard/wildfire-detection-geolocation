@@ -55,6 +55,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mirror { position: relative; }
-video { display: block; width: 100%; max-height: 420px; background: #111; }
+video { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #111; }
 .stream-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: #e8f1fc; background: #111; font-size: 12px; }
 </style>
