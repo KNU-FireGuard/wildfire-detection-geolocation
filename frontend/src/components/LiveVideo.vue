@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import Hls from 'hls.js'
 import { registerLiveVideo, unregisterLiveVideo } from '../composables/liveVideoRegistry'
+import { MAX_NETWORK_RETRIES, decideRecovery, describeHlsError } from '../utils/hlsRecovery'
 
 // cameraId를 주면 지도 아래 CCTV 영상 목록의 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
 const props = defineProps({
@@ -11,9 +12,16 @@ const props = defineProps({
 const video = ref(null)
 const error = ref('')
 const playing = ref(false)
+const retrying = ref(0)
 let player
+let retryTimer
+const attempts = { network: 0, media: 0 }
 
 function dispose() {
+  clearTimeout(retryTimer)
+  attempts.network = 0
+  attempts.media = 0
+  retrying.value = 0
   player?.destroy()
   player = null
   playing.value = false
@@ -24,6 +32,38 @@ function dispose() {
   }
 }
 
+// 재생이 시작되면 이전 오류와 재시도 상태를 지웁니다.
+function onPlaying() {
+  playing.value = true
+  error.value = ''
+  retrying.value = 0
+  attempts.network = 0
+  attempts.media = 0
+}
+
+function handleHlsError(detail) {
+  // 영상 주소 토큰이 남지 않도록 오류 종류와 상태 코드만 기록합니다.
+  console.warn('[LiveVideo]', { cameraId: props.cameraId, type: detail.type, details: detail.details, fatal: detail.fatal, status: detail.response?.code })
+  if (!detail.fatal) return
+  const next = decideRecovery(detail, attempts)
+  if (next.action === 'retry') {
+    attempts.network += 1
+    retrying.value = attempts.network
+    playing.value = false
+    clearTimeout(retryTimer)
+    // 재생목록 자체를 못 받은 경우에는 startLoad만으로 다시 받지 못하므로 주소를 다시 불러옵니다.
+    const reload = /^manifest/.test(detail.details ?? '') ? () => player?.loadSource(props.url) : () => player?.startLoad()
+    retryTimer = setTimeout(reload, next.delayMs)
+  } else if (next.action === 'recover') {
+    attempts.media += 1
+    player?.recoverMediaError()
+  } else {
+    playing.value = false
+    retrying.value = 0
+    error.value = `영상 연결에 실패했습니다. (${describeHlsError(detail)})`
+  }
+}
+
 watch(() => [props.url, video.value], ([url, element]) => {
   dispose()
   error.value = ''
@@ -31,12 +71,7 @@ watch(() => [props.url, video.value], ([url, element]) => {
   // hls.js(MSE)를 우선 사용: 브라우저 기본 HLS로 받은 교차 출처 영상은 captureStream으로 공유할 수 없음
   if (Hls.isSupported()) {
     player = new Hls({ enableWorker: true, liveSyncDurationCount: 2 })
-    player.on(Hls.Events.ERROR, (_event, detail) => {
-      if (detail.fatal) {
-        playing.value = false
-        error.value = '영상 연결에 실패했습니다. 방송 상태 또는 영상 서버의 CORS 설정을 확인하세요.'
-      }
-    })
+    player.on(Hls.Events.ERROR, (_event, detail) => handleHlsError(detail))
     player.loadSource(url)
     player.attachMedia(element)
   } else if (element.canPlayType('application/vnd.apple.mpegurl')) element.src = url
@@ -56,9 +91,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <video ref="video" autoplay muted playsinline preload="auto" @playing="playing = true" @waiting="playing = false" @error="playing = false; error = '영상 연결에 실패했습니다.'">이 브라우저는 영상을 재생할 수 없습니다.</video>
-    <p v-if="!playing && !error" class="stream-status" role="status">CCTV 영상 연결 중…</p>
-    <p v-if="error" class="stream-error" role="alert">{{ error }}</p>
+    <video ref="video" autoplay muted playsinline preload="auto" @playing="onPlaying" @waiting="playing = false" @error="playing = false; error = '영상 연결에 실패했습니다. (재생 오류)'">이 브라우저는 영상을 재생할 수 없습니다.</video>
+    <p v-if="!playing && !error" class="stream-status" role="status">{{ retrying ? `CCTV 영상 재연결 중… (${retrying}/${MAX_NETWORK_RETRIES})` : 'CCTV 영상 연결 중…' }}</p>
+    <p v-if="error && !playing" class="stream-error" role="alert">{{ error }}</p>
   </div>
 </template>
 
