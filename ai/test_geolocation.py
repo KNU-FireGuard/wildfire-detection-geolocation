@@ -565,6 +565,52 @@ class TestBlindPtzTiltRange(unittest.TestCase):
         self.assertAlmostEqual(res["tilt"], 1.3, delta=0.25)
 
 
+class TestExperimentReportRows(unittest.TestCase):
+    """실험 3 결과 표: 역산 실패도 크래시 없이 실제 상태대로 출력"""
+
+    FAILED = {
+        "intersected": False,
+        "status": "CALIBRATION_FAILED",
+        "lat": None,
+        "lon": None,
+        "calibration": {"pan": None, "tilt": None, "roll": None, "ncc": 0.0, "status": "CALIBRATION_FAILED"},
+        "location_estimation": None,
+    }
+    OK = {
+        "intersected": True,
+        "status": "OK",
+        "lat": 35.7938,
+        "lon": 128.5899,
+        "calibration": {"pan": 99.21, "tilt": 1.31, "roll": 0.79, "ncc": 0.97},
+    }
+
+    def test_blind_row_with_failed_calibration_does_not_crash(self) -> None:
+        from ai.run_paper_experiment import format_blind_row
+
+        row = format_blind_row("사례 1", (99.2, 1.3, 0.6), self.FAILED, (35.7938, 128.5899))
+        self.assertIn("CALIBRATION_FAILED", row)
+        self.assertNotIn("✅", row)
+
+    def test_blind_row_with_success_shows_pose_and_error(self) -> None:
+        from ai.run_paper_experiment import format_blind_row
+
+        row = format_blind_row("사례 1", (99.2, 1.3, 0.6), self.OK, (35.7938, 128.5899))
+        self.assertIn("✅", row)
+        self.assertIn("99.21", row)
+        self.assertIn("0.0 m", row)
+
+    def test_failsafe_row_reports_actual_outcome(self) -> None:
+        """안개 프레임 줄은 결과와 무관한 '오경보 0%' 고정 문구 대신 실제 차단 여부를 출력"""
+        from ai.run_paper_experiment import format_failsafe_row
+
+        blocked = format_failsafe_row(self.FAILED)
+        self.assertIn("CALIBRATION_FAILED", blocked)
+        self.assertNotIn("오경보 0%", blocked)
+        leaked = format_failsafe_row(self.OK)
+        self.assertIn("오경보", leaked)
+        self.assertNotIn("🛡️", leaked)
+
+
 class TestSkylineExtractorOSD(unittest.TestCase):
     """좌상단 OSD(카메라 이름·시각) 글씨 테두리를 산능선으로 오인하지 않아야 함"""
 

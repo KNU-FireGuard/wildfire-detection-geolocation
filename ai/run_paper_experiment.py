@@ -19,6 +19,41 @@ from ai.fire_location_estimator import FireLocationEstimator
 from ai.ridge_detector import render_synthetic_cctv_frame
 
 
+def format_blind_row(
+    case_id: str,
+    true_pose: tuple[float, float, float],
+    res: dict,
+    ref_coord: tuple[float, float],
+) -> str:
+    """실험 3 표의 한 줄: 역산 실패(lat None)도 크래시 없이 실제 상태대로 출력"""
+    t_pan, t_tilt, t_roll = true_pose
+    cal = res.get("calibration") or {}
+    ncc = cal.get("ncc")
+    ncc_txt = f"`{ncc:.4f}`" if ncc is not None else "`-`"
+    head = f"| **{case_id} (Blind)** | `({t_pan:.1f}°, {t_tilt:.1f}°, {t_roll:+.1f}°)` | "
+    if res.get("status") == "OK" and res.get("lat") is not None and cal.get("pan") is not None:
+        err = haversine_distance(ref_coord[0], ref_coord[1], res["lat"], res["lon"])
+        return (
+            head
+            + f"**`({cal['pan']:.2f}°, {cal['tilt']:.2f}°, {cal['roll']:+.2f}°)`** | {ncc_txt} | "
+            + f"`({res['lat']:.4f}, {res['lon']:.4f})`<br>(**`{err:.1f} m`**) | ✅ `{res['status']}` |"
+        )
+    return head + f"`복원 실패` | {ncc_txt} | `None` | ❌ `{res.get('status')}` |"
+
+
+def format_failsafe_row(res: dict) -> str:
+    """안개/야간 프레임 표의 한 줄: 위치를 내지 않았으면 차단, 냈으면 오경보로 실제 결과를 출력"""
+    if res.get("lat") is None:
+        return (
+            "| **안개/야간 불능 프레임 (Fail-Safe)** | `미제공 (ptz=None)` | `추정 차단 (None)` | "
+            f"`-` | `None` | 🛡️ `{res.get('status')}` |"
+        )
+    return (
+        "| **안개/야간 불능 프레임 (Fail-Safe)** | `미제공 (ptz=None)` | `위치 출력됨` | "
+        f"`-` | `({res['lat']:.4f}, {res['lon']:.4f})` | ⚠️ 오경보 `{res.get('status')}` |"
+    )
+
+
 def run_paper_experiment() -> None:
     t0 = time.perf_counter()
     provider = DEMProvider(
@@ -389,14 +424,7 @@ def run_paper_experiment() -> None:
             "frame": frame_img,
         }
         res_blind = estimator.estimate_location(bbox_px, blind_meta, use_skyline_calibration=True)
-        cal = res_blind["calibration"]
-        err_parcel = haversine_distance(ref_lat, ref_lon, res_blind["lat"], res_blind["lon"])
-        print(
-            f"| **{pc['case_id']} (Blind)** | `({t_pan:.1f}°, {t_tilt:.1f}°, {t_roll:+.1f}°)` | "
-            f"**`({cal['pan']:.2f}°, {cal['tilt']:.2f}°, {cal['roll']:+.2f}°)`** | "
-            f"`{cal['ncc']:.4f}` | `({res_blind['lat']:.4f}, {res_blind['lon']:.4f})`<br>(**`{err_parcel:.1f} m`**) | "
-            f"✅ `{res_blind['status']}` |"
-        )
+        print(format_blind_row(pc["case_id"], (t_pan, t_tilt, t_roll), res_blind, (ref_lat, ref_lon)))
 
     # 안개/야간 불능 프레임 안전 차단(Fail-Safe) 검증
     fog_frame = np.full((height, width, 3), 125, dtype=np.uint8)
@@ -404,10 +432,7 @@ def run_paper_experiment() -> None:
         [890, 58, 1010, 162],
         {"camera": {"lat": GACHANG_CAM_LAT, "lon": GACHANG_CAM_LON, "tower_height": 15.0}, "frame": fog_frame},
     )
-    print(
-        f"| **안개/야간 불능 프레임 (Fail-Safe)** | `미제공 (ptz=None)` | `추정 차단 (None)` | "
-        f"`0.0000` | `None` (오경보 0%) | 🛡️ `{fog_res['status']}` |"
-    )
+    print(format_failsafe_row(fog_res))
 
 
 if __name__ == "__main__":
