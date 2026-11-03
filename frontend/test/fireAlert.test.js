@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { parse } from '@vue/compiler-sfc'
-import { activeFireCameraIds, findNewFireEvents } from '../src/utils/fireAlert.js'
+import { activeFireCameraIds, findNewFireEvents, applyAcknowledged } from '../src/utils/fireAlert.js'
 import { cameraName } from '../src/utils/cameraName.js'
 import { createNaverScene } from '../src/maps/naverScene.js'
 
@@ -97,5 +97,33 @@ test('이벤트 목록의 확인 대기 행에는 확인 버튼이 있고 대시
   assert.match(dash, /@acknowledge="acknowledge"/)
   assert.match(dash, /ensureAdminToken\(loginAdmin/)
   // 확인 직후 다음 갱신을 기다리지 않고 바로 빨간색을 끔
-  assert.match(dash, /status: 'CONFIRMED', alerting: false/)
+  assert.match(dash, /applyAcknowledged\(events\.value, ids\)/)
+})
+
+test('이미 알림 중인 화재가 있는 카메라에 재시작으로 생긴 새 화재 이벤트는 새 알림으로 보지 않는다', () => {
+  const events = [{ ...event(1, 10, 'fire', 20), alerting: true }, { ...event(2, 10, 'fire', 1), alerting: true }, { ...event(3, 11, 'fire', 1), alerting: true }]
+  assert.deepEqual(findNewFireEvents(new Set([1]), events).map(item => item.id), [3])
+})
+
+test('이전 이벤트가 이미 확인되었거나 알림이 끝났다면 같은 카메라의 새 화재는 새 알림이다', () => {
+  const ended = [{ ...event(1, 10, 'fire', 90), alerting: false }, { ...event(2, 10, 'fire', 1), alerting: true }]
+  assert.deepEqual(findNewFireEvents(new Set([1]), ended).map(item => item.id), [2])
+})
+
+test('화재 이벤트를 확인하면 같은 카메라의 알림 중인 다른 화재 이벤트도 확인 완료로 바꾼다', () => {
+  const events = [
+    { ...event(1, 10, 'fire', 20), alerting: true },
+    { ...event(2, 10, 'fire', 1), alerting: true },
+    { ...event(3, 10, 'smoke', 1), alerting: false },
+    { ...event(4, 11, 'fire', 1), alerting: true },
+  ]
+  const next = applyAcknowledged(events, [2])
+  assert.deepEqual(next.map(item => [item.id, item.status, item.alerting]), [[1, 'CONFIRMED', false], [2, 'CONFIRMED', false], [3, null, false], [4, null, true]])
+})
+
+test('연기(smoke) 이벤트를 확인해도 화재 이벤트는 바뀌지 않는다', () => {
+  const events = [{ ...event(1, 10, 'fire', 1), alerting: true }, event(2, 10, 'smoke', 1)]
+  const next = applyAcknowledged(events, [2])
+  assert.equal(next[0].alerting, true)
+  assert.equal(next[1].status, 'CONFIRMED')
 })
