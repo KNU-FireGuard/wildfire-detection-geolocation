@@ -75,11 +75,13 @@ except ImportError:
 
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/elevation"
+TERRARIUM_TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 R_EARTH = 6371008.8
 K_REFRACTION = 0.13
 GACHANG_CAM_LAT = 35.791037
 GACHANG_CAM_LON = 128.591184
 DEFAULT_NPZ_PATH = Path(__file__).resolve().parent / "gachang_dem.npz"
+DEFAULT_TILE_CACHE_DIR = Path(__file__).resolve().parent / ".dem_cache"
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -140,6 +142,91 @@ def fetch_open_meteo_batch(lats: np.ndarray, lons: np.ndarray, timeout: float = 
     except Exception:
         return None
     return None
+
+
+def fetch_terrarium_dem_grid(
+    lat_mesh: np.ndarray,
+    lon_mesh: np.ndarray,
+    zoom: int = 12,
+    cache_dir: Path | str | None = None,
+    timeout: float = 8.0,
+) -> np.ndarray | None:
+    """
+    Download or load cached AWS Terrarium 30m elevation PNG tiles (zoom 12)
+    and bilinearly sample elevations onto (lat_mesh, lon_mesh) using PIL + NumPy.
+    Decoding formula: elevation_m = (R * 256.0 + G + B / 256.0) - 32768.0
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+
+    tile_dir = Path(cache_dir) if cache_dir is not None else DEFAULT_TILE_CACHE_DIR
+    tile_dir.mkdir(parents=True, exist_ok=True)
+
+    n = 2.0 ** zoom
+    lat_rad = np.radians(lat_mesh)
+    xtile_f = (lon_mesh + 180.0) / 360.0 * n
+    ytile_f = (1.0 - np.log(np.tan(lat_rad) + 1.0 / np.cos(lat_rad)) / math.pi) / 2.0 * n
+
+    tx_min, tx_max = int(math.floor(float(xtile_f.min()))), int(math.floor(float(xtile_f.max())))
+    ty_min, ty_max = int(math.floor(float(ytile_f.min()))), int(math.floor(float(ytile_f.max())))
+
+    nx = tx_max - tx_min + 1
+    ny = ty_max - ty_min + 1
+    if nx <= 0 or ny <= 0 or nx * ny > 64:
+        return None
+
+    mosaic = np.zeros((ny * 256, nx * 256), dtype=np.float32)
+
+    for ty in range(ty_min, ty_max + 1):
+        for tx in range(tx_min, tx_max + 1):
+            tile_file = tile_dir / f"terrarium_{zoom}_{tx}_{ty}.png"
+            if not tile_file.exists():
+                url = TERRARIUM_TILE_URL.format(z=zoom, x=tx, y=ty)
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "FireGuard-Research/1.0"})
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        tile_bytes = resp.read()
+                    tile_file.write_bytes(tile_bytes)
+                except Exception:
+                    return None
+
+            try:
+                with Image.open(tile_file) as img:
+                    rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
+                tile_elev = (rgb[:, :, 0] * 256.0 + rgb[:, :, 1] + rgb[:, :, 2] / 256.0) - 32768.0
+                r0 = (ty - ty_min) * 256
+                c0 = (tx - tx_min) * 256
+                mosaic[r0 : r0 + 256, c0 : c0 + 256] = tile_elev
+            except Exception:
+                return None
+
+    # Sub-pixel bilinear interpolation inside the stitched tile mosaic
+    px = (xtile_f - tx_min) * 256.0 - 0.5
+    py = (ytile_f - ty_min) * 256.0 - 0.5
+
+    h_m, w_m = mosaic.shape
+    px = np.clip(px, 0.0, w_m - 1.000001)
+    py = np.clip(py, 0.0, h_m - 1.000001)
+
+    j0 = np.floor(px).astype(int)
+    i0 = np.floor(py).astype(int)
+    du = py - i0
+    dv = px - j0
+
+    v00 = mosaic[i0, j0]
+    v01 = mosaic[i0, j0 + 1]
+    v10 = mosaic[i0 + 1, j0]
+    v11 = mosaic[i0 + 1, j0 + 1]
+
+    sampled = (
+        v00 * (1.0 - du) * (1.0 - dv)
+        + v01 * (1.0 - du) * dv
+        + v10 * du * (1.0 - dv)
+        + v11 * du * dv
+    )
+    return sampled.astype(np.float32)
 
 
 def _is_valid_dem_cache(
