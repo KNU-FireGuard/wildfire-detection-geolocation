@@ -288,6 +288,11 @@ class FireLocationEstimator:
                 "roll": float(ptz.get("roll", 0.0)),
                 "mode": "label_offset",
             }
+        elif not (isinstance(ptz, dict) and ptz.get("pan") is not None) and cfg is not None and cfg.get("fixed_pose"):
+            # Fixed camera without PTZ: use the stored pose (e.g. calibrated in daylight), so night frames
+            # without a visible skyline still get a location; skyline zero-point calibration still applies
+            # on top when a ridge is available and passes the quality gate
+            ptz = {**cfg["fixed_pose"], "mode": "config_fixed_pose"}
 
         result = self._estimate_location_core(bbox, {**metadata, "camera": cam, "ptz": ptz}, **kwargs)
         result["camera_config"] = info

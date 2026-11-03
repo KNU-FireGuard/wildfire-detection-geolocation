@@ -155,6 +155,61 @@ class TestUncalibratedCameraIsFlagged(unittest.TestCase):
         self.assertNotIn("FOV_DEFAULT_USED", res["camera_config"]["warnings"])
 
 
+class TestFixedCameraPose(unittest.TestCase):
+    """PTZ 없는 고정 카메라: 설정의 고정 자세로 추정, 밤처럼 능선이 안 보여도 동작"""
+
+    CAM = {"lat": 35.791037, "lon": 128.591184, "tower_height": 15.0, "near_m": 30.0}
+    FIXED = {
+        "key": "fixed-cam",
+        "name": "고정카메라",
+        "camera_id": 3,
+        "fov_h_deg": 52.0,
+        "fixed_pose": {"pan": 99.0, "tilt": 0.5, "roll": 1.6},
+    }
+
+    def _estimate(self, cam_extra: dict, configs: list[dict], frame=None) -> dict:
+        import numpy as np
+
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        meta = {"camera": {**self.CAM, **cam_extra}}
+        if frame is not None:
+            meta["frame"] = frame
+        return FireLocationEstimator(camera_configs=configs).estimate_location(
+            [1000.0, 640.0, 1080.0, 740.0], meta, bbox_normalized=False
+        )
+
+    def test_night_frame_uses_stored_fixed_pose(self) -> None:
+        import numpy as np
+
+        night = np.full((1080, 1920, 3), 12, dtype=np.uint8)
+        res = self._estimate({"id": 3}, [dict(self.FIXED)], frame=night)
+        self.assertEqual(res["status"], "OK")
+        self.assertEqual(res["calibration"]["mode"], "config_fixed_pose")
+        self.assertAlmostEqual(res["calibration"]["pan"], 99.0)
+        self.assertFalse(res["calibration"]["calibrated"])  # 능선이 없어 보정은 적용되지 않음
+
+    def test_without_fixed_pose_night_frame_fails_safely(self) -> None:
+        import numpy as np
+
+        night = np.full((1080, 1920, 3), 12, dtype=np.uint8)
+        res = self._estimate({"id": 3}, [], frame=night)
+        self.assertEqual(res["status"], "CALIBRATION_FAILED")
+        self.assertEqual(res["reason"], "RIDGE_NOT_DETECTED")
+
+    def test_explicit_ptz_takes_precedence_over_fixed_pose(self) -> None:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        res = FireLocationEstimator(camera_configs=[dict(self.FIXED)]).estimate_location(
+            [1000.0, 640.0, 1080.0, 740.0],
+            {"camera": {**self.CAM, "id": 3}, "ptz": {"pan": 101.0, "tilt": 0.5, "roll": 0.0}},
+            use_skyline_calibration=False,
+            bbox_normalized=False,
+        )
+        self.assertAlmostEqual(res["calibration"]["pan"], 101.0)
+        self.assertEqual(res["calibration"]["mode"], "ptz_known")
+
+
 class TestShippedCameraConfig(unittest.TestCase):
     """저장소에 포함된 ai/config/cameras.json이 유효하고 가창오리 보정값을 담고 있어야 함"""
 
