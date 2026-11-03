@@ -19,7 +19,7 @@ const rows = computed(() => data.value ?? [])
       <p>총 {{ rows.length }}건</p>
       <p v-if="!rows.length" class="empty-message">등록된 {{ resource === 'cameras' ? '카메라가' : '탐지 이벤트가' }} 없습니다.</p>
       <div v-else class="table-scroll">
-        <table v-if="resource === 'cameras'"><caption class="sr-only">카메라 목록</caption><thead><tr><th>이름</th><th>위도</th><th>경도</th><th>대시보드</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td>{{ row.name }}</td><td>{{ row.latitude ?? '정보 없음' }}</td><td>{{ row.longitude ?? '정보 없음' }}</td><td><RouterLink :to="{ path: '/', query: { camera: row.id } }">대시보드에서 보기</RouterLink></td></tr></tbody></table>
+        <table v-if="resource === 'cameras'"><caption class="sr-only">카메라 목록</caption><thead><tr><th>이름</th><th>위도</th><th>경도</th><th>대시보드</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td>{{ row.name }}</td><td>{{ row.latitude ?? '정보 없음' }}</td><td>{{ row.longitude ?? '정보 없음' }}</td><td><RouterLink :to="{ path: '/', query: { camera: row.id } }">보기</RouterLink></td></tr></tbody></table>
         <table v-else><caption class="sr-only">탐지 이벤트 목록</caption><thead><tr><th>ID</th><th>탐지 시각</th><th>카메라 ID</th><th>유형</th><th>신뢰도</th><th>상세</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td>{{ row.id }}</td><td>{{ formatDetectedAt(row.detectedAt) }}</td><td>{{ row.cameraId ?? '정보 없음' }}</td><td>{{ formatType(row.type) }}</td><td>{{ formatConfidence(row.confidence) }}</td><td><RouterLink :to="`/events/${row.id}`">상세 보기</RouterLink></td></tr></tbody></table>
       </div>
     </section>
