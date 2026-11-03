@@ -16,3 +16,10 @@ dist/
 
 # macOS 파일
 .DS_Store
+
+# Python 실행 캐시
+__pycache__/
+*.pyc
+
+# AI DEM 타일 캐시 (실행 시 자동 다운로드)
+ai/.dem_cache/
