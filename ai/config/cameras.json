@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "cameras": [
+    {
+      "key": "gachang-ori",
+      "name": "가창오리",
+      "camera_id": null,
+      "fov_h_deg": 52.0,
+      "eye_altitude_m": null,
+      "tower_height_m": null,
+      "ptz": {
+        "pan_offset_deg": 119.35,
+        "presets": {
+          "P269/T13": {"pan": 27.06, "tilt": 10.82, "roll": -1.35},
+          "P339/T03": {"pan": 98.83, "tilt": 0.5, "roll": 2.2},
+          "P023/T03": {"pan": 141.8, "tilt": 2.62, "roll": 2.5},
+          "P070/T03": {"pan": 189.78, "tilt": 5.88, "roll": 2.5},
+          "P107/T03": {"pan": 228.05, "tilt": 7.56, "roll": 1.8},
+          "P133/T03": {"pan": 252.33, "tilt": 6.01, "roll": 1.0}
+        }
+      },
+      "provenance": "가창오리 녹화본(2025-11-18 10:40) 프레임 19장, 화각 52°에서 360° 역산(#56 게이트 통과) 결과의 프리셋별 중앙값, 위성지도 랜드마크 독립 검증 방향 오차 0.9~1.9° (#51)",
+      "uncertainty": {
+        "pan_offset_deg_range": [117.93, 121.07],
+        "preset_pan_spread_deg_max": 0.48,
+        "preset_tilt_spread_deg_max": 0.13,
+        "fov_h_deg_note": "공동 보정 48~52°에서 잔차 최소, 랜드마크 역산 45.8°, 46~52° 범위로 판단",
+        "roll_note": "P023·P070은 Roll 탐색 한계 2.5°에 붙음, 받침대 기울어짐 가능성",
+        "position_note": "카메라 위치·높이는 랜드마크 분포 한계로 분리 추정 불가, 눈높이 해발 약 196m는 참고값으로만 기록하고 미적용"
+      }
+    }
+  ]
+}

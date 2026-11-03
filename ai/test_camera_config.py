@@ -81,5 +81,24 @@ class TestCameraConfigLoader(unittest.TestCase):
             load_camera_configs(self._write(bad))
 
 
+class TestShippedCameraConfig(unittest.TestCase):
+    """저장소에 포함된 ai/config/cameras.json이 유효하고 가창오리 보정값을 담고 있어야 함"""
+
+    def test_gachang_entry_is_present_and_consistent(self) -> None:
+        cfgs = load_camera_configs()
+        cam = find_camera_config(cfgs, name="가창오리")
+        self.assertIsNotNone(cam)
+        self.assertTrue(40.0 <= cam["fov_h_deg"] <= 60.0)
+        presets = cam["ptz"]["presets"]
+        self.assertEqual(set(presets), {"P269/T13", "P339/T03", "P023/T03", "P070/T03", "P107/T03", "P133/T03"})
+        # 프리셋 자세의 Pan은 라벨 + Pan 오프셋과 ±3° 이내로 일관
+        offset = cam["ptz"]["pan_offset_deg"]
+        for label, pose in presets.items():
+            label_pan = float(label[1:4])
+            diff = ((pose["pan"] - (label_pan + offset)) + 180.0) % 360.0 - 180.0
+            self.assertLess(abs(diff), 3.0, f"{label}: {diff:+.2f}°")
+        self.assertIn("provenance", cam)
+
+
 if __name__ == "__main__":
     unittest.main()
