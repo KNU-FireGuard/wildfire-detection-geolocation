@@ -16,7 +16,7 @@ test('선택한 카메라 상세는 지도와 같은 줄에, 관제 요약은 �
   assert.match(descriptor.styles[0].content, /\.detail-panel\s*\{[^}]*grid-column:\s*2\s*;/)
 })
 
-test('실시간 관제 영상은 선택과 무관하게 표시하고 선택해도 같은 플레이어를 확대한다', () => {
+test('실시간 관제 영상은 선택과 무관하게 표시하고 선택해도 영상 월의 플레이어를 유지한다', () => {
   const dashboard = parse(readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8')).descriptor
   const wall = parse(readFileSync(new URL('../src/components/LiveCctvWall.vue', import.meta.url), 'utf8')).descriptor
   const dashboardTemplate = dashboard.template.content
@@ -49,3 +49,15 @@ test('실시간 카메라나 이벤트를 선택해도 화면을 자동으로 �
   const { descriptor } = parse(readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8'))
   assert.doesNotMatch(descriptor.scriptSetup.content, /scrollIntoView|revealLiveWall|scrollTo\(/)
 })
+
+test('실시간 카메라를 선택하면 우측 상세 패널에 영상을 표시하고 영상 월의 타일은 확대하지 않는다', () => {
+  const read = name => parse(readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8')).descriptor
+  const dashboard = read('views/DashboardView.vue')
+  const wall = read('components/LiveCctvWall.vue')
+  const detail = read('components/EventDetail.vue')
+  assert.doesNotMatch(dashboard.template.content, /show-video/)
+  assert.doesNotMatch(detail.scriptSetup.content, /showVideo/)
+  assert.match(detail.template.content, /<LiveVideo v-if="camera\?\.sourceType === 'live' && camera\.streamUrl"/)
+  assert.doesNotMatch(wall.styles[0].content, /\.live-tile\.selected[^{]*\{[^}]*(grid-column|order\s*:)/)
+})
+
