@@ -14,7 +14,7 @@ const emit = defineEmits(['select'])
   <section class="dashboard-panel live-wall" aria-label="실시간 CCTV 영상">
     <div class="wall-heading">
       <div><h2>실시간 CCTV</h2><p>영상은 관제 화면이 열려 있는 동안 계속 재생됩니다</p></div>
-      <span>{{ cameras.length }}대 영상</span>
+      <span>{{ cameras.length }}대</span>
     </div>
     <div class="live-grid">
       <article
@@ -22,7 +22,8 @@ const emit = defineEmits(['select'])
         class="live-tile" :class="{ selected: camera.id === selectedId }"
         @click="emit('select', camera.id)"
       >
-        <LiveVideo :url="camera.streamUrl" />
+        <LiveVideo v-if="camera.streamUrl" :url="camera.streamUrl" />
+        <div v-else class="tile-empty" role="status"><strong>영상 주소가 없습니다.</strong><span>CCTV 주소 갱신 후 다시 확인하세요.</span></div>
         <button
           type="button" class="tile-select"
           :aria-pressed="camera.id === selectedId"
@@ -47,6 +48,8 @@ const emit = defineEmits(['select'])
 .live-tile.selected { grid-column: 1 / -1; order: -1; border-color: #337fc8; }
 .live-tile :deep(video) { width: 100%; height: 160px; max-height: none; object-fit: contain; }
 .live-tile.selected :deep(video) { height: min(52vw, 480px); }
+.tile-empty { display: grid; align-content: center; justify-items: center; gap: 4px; height: 160px; color: #e8f1fc; background: #111; font-size: 12px; text-align: center; }
+.live-tile.selected .tile-empty { height: min(52vw, 480px); }
 .tile-select { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 0; background: #253444; color: #fff; text-align: left; cursor: pointer; }
 .tile-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .tile-select span { flex-shrink: 0; color: #bcd3ea; font-size: 11px; }

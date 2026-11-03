@@ -28,4 +28,5 @@ test('실시간 관제 영상은 선택과 무관하게 표시하고 선택해�
   assert.match(wallTemplate, /<LiveVideo\b[^>]*:url="camera\.streamUrl"/)
   assert.match(wallTemplate, /:class="\{ selected: camera\.id === selectedId \}"/)
   assert.doesNotMatch(wallTemplate, /v-if="camera\.id === selectedId"/)
+  assert.match(dashboard.scriptSetup.content, /liveCameras = computed\(\(\) => cameras\.value\.filter\(camera => camera\.sourceType === 'live'\)\)/)
 })

@@ -36,7 +36,7 @@ const clock = computed(() => now.value.toLocaleString('ko-KR', { timeZone: 'Asia
 const selectedEvent = computed(() => events.value.find(event => event.id === selectedEventId.value) ?? null)
 const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedCameraId.value)
   ?? cameras.value.find(camera => camera.id === selectedEvent.value?.cameraId) ?? null)
-const liveCameras = computed(() => cameras.value.filter(camera => camera.sourceType === 'live' && camera.streamUrl))
+const liveCameras = computed(() => cameras.value.filter(camera => camera.sourceType === 'live'))
 const onlineCount = computed(() => cameras.value.some(camera => camera.status != null)
   ? cameras.value.filter(camera => camera.status === 'ONLINE').length : '—')
 const locatedCount = computed(() => events.value.filter(event => event.estimatedLocation != null).length)

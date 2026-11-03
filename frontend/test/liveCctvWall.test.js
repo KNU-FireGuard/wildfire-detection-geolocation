@@ -75,3 +75,24 @@ test('선택을 바꾸어도 이미 연결된 CCTV 영상 노드를 재생성하
   assert.deepEqual(findAll(root, 'video'), originalVideos)
   app.unmount()
 })
+
+function allText(node) {
+  return [node.tag === '#text' ? node.text : '', ...node.children.map(allText)].join(' ')
+}
+
+test('영상 주소가 없는 실시간 CCTV도 타일에 표시하고 갱신 안내를 보여 준다', async () => {
+  const cameras = [
+    { id: 1, name: '주소 있는 CCTV', streamUrl: 'https://example.test/1.m3u8' },
+    { id: 2, name: '주소 없는 CCTV', streamUrl: null },
+  ]
+  const root = makeNode('root')
+  const app = renderer.createApp({ render: () => h(LiveCctvWall, { cameras, selectedId: null }) })
+  app.mount(root)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  await nextTick()
+  assert.equal(findAll(root, 'video').length, 1)
+  const text = allText(root)
+  assert.match(text, /주소 없는 CCTV/)
+  assert.match(text, /영상 주소가 없습니다/)
+  app.unmount()
+})
