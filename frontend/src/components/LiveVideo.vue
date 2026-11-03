@@ -42,9 +42,9 @@ function onPlaying() {
 }
 
 function handleHlsError(detail) {
-  // 영상 주소 토큰이 남지 않도록 오류 종류와 상태 코드만 기록합니다.
-  console.warn('[LiveVideo]', { cameraId: props.cameraId, type: detail.type, details: detail.details, fatal: detail.fatal, status: detail.response?.code })
   if (!detail.fatal) return
+  // 영상 주소 토큰이 남지 않도록 오류 종류와 상태 코드만, 치명적 오류에서만 기록합니다.
+  console.warn('[LiveVideo]', { cameraId: props.cameraId, type: detail.type, details: detail.details, fatal: detail.fatal, status: detail.response?.code })
   const next = decideRecovery(detail, attempts)
   if (next.action === 'retry') {
     attempts.network += 1

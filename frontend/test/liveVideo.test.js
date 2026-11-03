@@ -54,3 +54,9 @@ test('연결 오류가 나도 영상이 실제로 재생 중이면 영상을 가
   assert.match(descriptor.styles[0].content, /\.stream-badge\s*\{[^}]*position:\s*absolute/)
 })
 
+test('오류 기록은 치명적 오류에서만 남겨 일시적 경고로 콘솔이 넘치지 않게 한다', () => {
+  const { descriptor } = parse(readFileSync(new URL('../src/components/LiveVideo.vue', import.meta.url), 'utf8'))
+  const script = descriptor.scriptSetup.content
+  assert.match(script, /if \(!detail\.fatal\) return[\s\S]*console\.warn\('\[LiveVideo\]'/)
+})
+
