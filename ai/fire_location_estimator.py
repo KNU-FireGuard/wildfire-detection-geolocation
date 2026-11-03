@@ -179,6 +179,16 @@ class FireLocationEstimator:
         return fire_x, fire_y
 
     @staticmethod
+    def _apply_zero_point_result(cal_info: dict, cal_res: dict) -> None:
+        """Apply the zero-point correction only when it passed the quality gate; otherwise keep the given PTZ."""
+        if cal_res.get("calibrated"):
+            cal_info.update(cal_res)
+        else:
+            cal_info["calibrated"] = False
+            cal_info["reason"] = cal_res.get("reason")
+            cal_info["rms_deg"] = cal_res.get("rms_deg", 999.0)
+
+    @staticmethod
     def _frame_size(frame: object) -> tuple[int, int] | None:
         """Return (width, height) of a frame given as np.ndarray, PIL.Image or file path, else None."""
         if frame is None:
@@ -340,8 +350,7 @@ class FireLocationEstimator:
                     height=height,
                     fov_h=fov_h,
                 )
-                cal_info.update(cal_res)
-                cal_info["calibrated"] = True
+                self._apply_zero_point_result(cal_info, cal_res)
         elif has_default_ptz:
             init_pan = float(cam["default_pan"])
             init_tilt = float(cam["default_tilt"])
@@ -365,11 +374,16 @@ class FireLocationEstimator:
                     height=height,
                     fov_h=fov_h,
                 )
-                cal_info.update(cal_res)
-                cal_info["calibrated"] = True
+                self._apply_zero_point_result(cal_info, cal_res)
         else:
             # Blind Pose Estimation (360° Coarse-to-Fine Skyline Matching with 3-way Fail-Safe)
             if ridge_pts is None or len(ridge_pts) < 15:
+                # Frame given but no usable skyline detected vs. too few ridge points supplied
+                no_ridge_reason = (
+                    "RIDGE_NOT_DETECTED"
+                    if ridge_extraction_info is not None and not ridge_extraction_info["is_valid"]
+                    else "INSUFFICIENT_RIDGE"
+                )
                 cal_info = {
                     "pan": None,
                     "tilt": None,
@@ -379,6 +393,7 @@ class FireLocationEstimator:
                     "rms_deg": 999.0,
                     "calibrated": False,
                     "status": "CALIBRATION_FAILED",
+                    "reason": no_ridge_reason,
                     "mode": "blind_360",
                 }
                 if ridge_extraction_info is not None:
@@ -386,6 +401,7 @@ class FireLocationEstimator:
                 return {
                     "intersected": False,
                     "status": "CALIBRATION_FAILED",
+                    "reason": no_ridge_reason,
                     "lat": None,
                     "lon": None,
                     "altitude_m": None,
@@ -412,6 +428,7 @@ class FireLocationEstimator:
                 return {
                     "intersected": False,
                     "status": "CALIBRATION_FAILED",
+                    "reason": blind_res.get("reason"),
                     "lat": None,
                     "lon": None,
                     "altitude_m": None,
@@ -490,6 +507,26 @@ class FireLocationEstimator:
             }
 
         # 3. 3D DEM Ray Marching (50m step forward)
+        # If the ray is already below the terrain at near_m, the intersection lies closer than near_m:
+        # report it instead of returning a point near near_m as a valid location
+        lat_n, lon_n = dest_point(cam_lat, cam_lon, ray_bearing, near_m)
+        drop_n = (near_m ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
+        if eye_alt + near_m * slope_dz_per_m <= float(provider.get_elevation(lat_n, lon_n)) - drop_n:
+            return {
+                "intersected": False,
+                "status": "TARGET_TOO_CLOSE",
+                "reason": f"광선이 near_m({near_m:.0f}m) 이전에 지형과 교차함",
+                "lat": None,
+                "lon": None,
+                "altitude_m": None,
+                "distance_m": None,
+                "bearing_deg": ray_bearing,
+                "elevation_angle_deg": ray_el_deg,
+                "ray_vector": (dx, dy, dz),
+                "calibration": cal_info,
+                "location_estimation": None,
+            }
+
         prev_d = near_m
         curr_d = near_m
         hit = False
