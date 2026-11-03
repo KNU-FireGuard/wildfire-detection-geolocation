@@ -29,11 +29,11 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
         <button
           type="button" class="tile-select"
           :aria-pressed="camera.id === selectedId"
-          :aria-label="`${camera.name} 영상 ${camera.id === selectedId ? '선택 해제' : '확대'}`"
+          :aria-label="`${camera.name} 영상 ${camera.id === selectedId ? '선택 해제' : '우측 패널에 표시'}`"
           @click.stop="toggle(camera.id)"
         >
           <strong>{{ camera.name }}</strong>
-          <span>{{ camera.id === selectedId ? '작게 보기' : '크게 보기' }}</span>
+          <span>{{ camera.id === selectedId ? '선택 해제' : '우측에 표시' }}</span>
         </button>
       </article>
     </div>
@@ -47,15 +47,13 @@ function toggle(id) { emit('select', id === props.selectedId ? null : id) }
 .wall-heading p, .wall-heading > span { margin: 0; color: #66768b; font-size: 12px; }
 .live-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .live-tile { min-width: 0; overflow: hidden; border: 2px solid transparent; border-radius: 6px; background: #111; cursor: pointer; }
-.live-tile.selected { grid-column: 1 / -1; order: -1; border-color: #337fc8; }
+.live-tile.selected { border-color: #337fc8; }
 .live-tile :deep(video) { width: 100%; height: 160px; max-height: none; object-fit: contain; }
-.live-tile.selected :deep(video) { height: min(52vw, 480px); }
 .tile-empty { display: grid; align-content: center; justify-items: center; gap: 4px; height: 160px; color: #e8f1fc; background: #111; font-size: 12px; text-align: center; }
-.live-tile.selected .tile-empty { height: min(52vw, 480px); }
 .tile-select { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 0; background: #253444; color: #fff; text-align: left; cursor: pointer; }
 .tile-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .tile-select span { flex-shrink: 0; color: #bcd3ea; font-size: 11px; }
 .tile-select:focus-visible { outline: 3px solid #7fc4ff; outline-offset: -3px; }
 @media (max-width: 800px) { .live-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .live-grid { grid-template-columns: minmax(0, 1fr); }.live-tile.selected :deep(video) { height: 240px; } }
+@media (max-width: 520px) { .live-grid { grid-template-columns: minmax(0, 1fr); } }
 </style>

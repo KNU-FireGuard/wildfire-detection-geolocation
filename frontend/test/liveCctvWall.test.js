@@ -116,3 +116,21 @@ test('선택된 타일을 다시 누르면 선택을 해제하고 다른 타일�
   assert.deepEqual(emitted, [null, 1])
   app.unmount()
 })
+
+test('타일 버튼은 영상이 우측 패널에 표시됨을 안내하고 선택된 타일은 선택 해제를 안내한다', async () => {
+  const cameras = [
+    { id: 1, name: '첫 번째 CCTV', streamUrl: 'https://example.test/1.m3u8' },
+    { id: 2, name: '두 번째 CCTV', streamUrl: 'https://example.test/2.m3u8' },
+  ]
+  const root = makeNode('root')
+  const app = renderer.createApp({ render: () => h(LiveCctvWall, { cameras, selectedId: 2 }) })
+  app.mount(root)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  await nextTick()
+  const text = allText(root)
+  assert.match(text, /우측에 표시/)
+  assert.match(text, /선택 해제/)
+  assert.doesNotMatch(text, /크게 보기|작게 보기/)
+  app.unmount()
+})
+
