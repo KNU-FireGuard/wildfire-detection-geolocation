@@ -30,7 +30,7 @@ watch([target, source], ([element, from]) => {
     try { element.srcObject = from.captureStream() } catch { captureFailed.value = true }
   }
   capture()
-  // 지도 아래 CCTV 영상이 새로 로드되면(주소 갱신 등) 다시 받습니다.
+  // 지도 아래 실시간 CCTV 영상이 새로 로드되면(주소 갱신 등) 다시 받습니다.
   const recapture = capture
   from.addEventListener?.('loadedmetadata', recapture)
   detach = () => from.removeEventListener?.('loadedmetadata', recapture)
@@ -55,6 +55,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mirror { position: relative; }
-video { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #111; }
-.stream-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: #e8f1fc; background: #111; font-size: 12px; }
+video { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #05080c; }
+.stream-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--text-2); background: #05080c; font-size: 12px; letter-spacing: 0.2px; }
 </style>

@@ -103,7 +103,7 @@ watch(isLoggedIn, loggedIn => {
 <template>
   <div class="catalog-page admin-page">
     <header class="page-heading">
-      <h1>관리자</h1>
+      <h1>문자 알림 관리</h1>
       <button v-if="isLoggedIn" type="button" class="secondary-button" @click="logout">로그아웃</button>
     </header>
 
@@ -183,26 +183,27 @@ watch(isLoggedIn, loggedIn => {
 <style scoped>
 .admin-page { display: grid; gap: 20px; align-content: start; }
 .page-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-h1 { font-size: 26px; margin: 0; }
-.hint { color: #64748b; font-size: 12px; line-height: 1.6; }
+h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.8px; margin: 0; }
+.hint { color: var(--text-3); font-size: 12px; line-height: 1.6; }
 .admin-login { max-width: 420px; }
 .admin-login form { display: grid; gap: 14px; margin-top: 14px; }
-label { display: grid; gap: 4px; font-size: 12px; }
-input { padding: 8px; border: 1px solid #cad8e8; border-radius: 4px; font-size: 13px; }
+label { display: grid; gap: 5px; font-size: 12px; color: var(--text-2); }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
-th { background: #f5f7fb; white-space: nowrap; }
-th, td { padding: 12px 14px; border-bottom: 1px solid #edf1f6; vertical-align: middle; }
+th { background: var(--surface-2); color: var(--text-3); font-weight: 600; font-size: 12px; letter-spacing: 0.3px; white-space: nowrap; }
+th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td { color: var(--text); }
 .save-cell { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .time-cell { white-space: nowrap; }
 .message-cell { min-width: 260px; }
 .compact { padding: 8px 14px; }
-.secondary-button { border: 1px solid #cad8e8; background: white; color: #33475b; border-radius: 6px; padding: 9px 14px; font-size: 13px; cursor: pointer; }
-.secondary-button:disabled { opacity: .5; cursor: default; }
-.form-error { color: #b83535; font-size: 12px; }
-.form-ok { color: #1f7a45; font-size: 12px; }
-.badge { display: inline-block; padding: 3px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; background: #eef2f7; color: #475569; }
-.badge.ok { background: #e3f5ea; color: #1f7a45; }
-.badge.error { background: #fde8e8; color: #b83535; }
+.secondary-button { border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); border-radius: 10px; padding: 9px 15px; font-size: 13px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.secondary-button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--accent); }
+.secondary-button:disabled { opacity: 0.5; cursor: default; }
+.form-error { color: var(--fire); font-size: 12px; }
+.form-ok { color: var(--ok); font-size: 12px; }
+.badge { display: inline-block; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; white-space: nowrap; background: var(--surface-3); color: var(--text-2); }
+.badge.ok { background: var(--ok-soft); color: var(--ok); border-color: rgba(54, 214, 163, 0.3); }
+.badge.error { background: var(--fire-soft); color: var(--fire); border-color: rgba(255, 106, 87, 0.3); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>

@@ -4,7 +4,7 @@ import Hls from 'hls.js'
 import { registerLiveVideo, unregisterLiveVideo } from '../composables/liveVideoRegistry'
 import { MAX_NETWORK_RETRIES, decideRecovery, describeHlsError } from '../utils/hlsRecovery'
 
-// cameraId를 주면 지도 아래 CCTV 영상 목록의 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
+// cameraId를 주면 지도 아래 실시간 CCTV 영상의 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
 const props = defineProps({
   url: { type: String, required: true },
   cameraId: { type: [Number, String], default: null },
@@ -98,8 +98,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 div { position: relative; }
-video { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #111; }
-.stream-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: #e8f1fc; background: #111; font-size: 12px; }
-.stream-badge { position: absolute; top: 6px; right: 6px; margin: 0; padding: 3px 8px; border-radius: 4px; color: #fff; background: #000b; font-size: 11px; pointer-events: none; }
-.stream-error { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 8px 12px; box-sizing: border-box; color: #fff; background: #111; font-size: 12px; text-align: center; }
+video { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #05080c; }
+.stream-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--text-2); background: #05080c; font-size: 12px; letter-spacing: 0.2px; }
+.stream-badge { position: absolute; top: 8px; right: 8px; margin: 0; padding: 4px 10px; border: 1px solid rgba(246, 189, 74, 0.35); border-radius: 999px; color: var(--warn); background: var(--glass); backdrop-filter: blur(6px); font-size: 11px; pointer-events: none; }
+.stream-error { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 8px 12px; box-sizing: border-box; color: var(--fire); background: #05080c; font-size: 12px; text-align: center; }
 </style>

@@ -61,3 +61,11 @@ test('실시간 카메라를 선택하면 우측 상세 패널에 영상을 표�
   assert.doesNotMatch(wall.styles[0].content, /\.live-tile\.selected[^{]*\{[^}]*(grid-column|order\s*:)/)
 })
 
+
+test('대시보드 헤더는 제목 "대시보드"만 보여 주고 홍보성 문구와 부제는 두지 않는다', () => {
+  const { descriptor } = parse(readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8'))
+  const header = descriptor.template.content.match(/<header class="dashboard-header">([\s\S]*?)<\/header>/)?.[1] ?? ''
+  assert.match(header, /<h1>대시보드<\/h1>/)
+  assert.doesNotMatch(header, /산불로부터|지켜줍니다/)
+  assert.doesNotMatch(header, /<p>/)
+})

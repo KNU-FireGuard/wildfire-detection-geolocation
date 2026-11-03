@@ -14,7 +14,7 @@ const rawEvent = {
   estimated_longitude: 128.7118, error_range_m: 50,
 }
 
-test('영상 목록은 videos API 메타데이터를 그대로 조회한다', async () => {
+test('등록 영상 메타데이터를 videos API에서 그대로 조회한다', async () => {
   const video = { id: 20, camera_id: 1, original_filename: 'sample.mp4', created_at: rawEvent.started_at }
   globalThis.fetch = async url => {
     assert.equal(url, '/api/videos?limit=100&offset=0')

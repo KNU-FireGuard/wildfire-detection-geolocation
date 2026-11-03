@@ -24,7 +24,7 @@ export function createNaverScene(maps, map, onCameraSelect) {
         map, position: position(camera), title: camera.name,
         zIndex: selected ? 20 : 10,
         icon: {
-          content: `<div style="display:grid;place-items:center;width:38px;height:38px;border:2px solid white;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);background:${selected ? '#195baf' : '#337fd4'};box-shadow:0 2px 6px #0006"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(45deg)"><path d="M4 8.5h10a2 2 0 0 1 2 2v6H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z"/><path d="m16 11 6-3v9l-6-3"/><path d="M6 6h5"/></svg></div>`,
+          content: `<div style="display:grid;place-items:center;width:38px;height:38px;border:2px solid #ffffffee;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);background:${selected ? 'linear-gradient(135deg,#2f86ec,#1a57b0)' : 'linear-gradient(135deg,#4aa3ff,#2a78d8)'};box-shadow:0 0 0 ${selected ? 6 : 3}px rgba(85,169,255,${selected ? '.32' : '.18'}),0 8px 16px #0009"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(45deg)"><path d="M4 8.5h10a2 2 0 0 1 2 2v6H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z"/><path d="m16 11 6-3v9l-6-3"/><path d="M6 6h5"/></svg></div>`,
           anchor: new maps.Point(19, 38),
         },
       })
@@ -35,10 +35,10 @@ export function createNaverScene(maps, map, onCameraSelect) {
     if (hasCoordinates(fire)) {
       overlays.push(new maps.Marker({
         map, position: position(fire), title: '추정 산불 위치', zIndex: 30,
-        icon: { content: '<div style="border:2px solid white;border-radius:8px;padding:7px 10px;background:#df4036;color:white;font:12px sans-serif;white-space:nowrap">추정 산불 위치</div>', anchor: new maps.Point(16, 16) },
+        icon: { content: '<div style="border:2px solid #ffffffee;border-radius:10px;padding:7px 11px;background:linear-gradient(180deg,#ff7a68,#e0402e);color:white;font:600 12px sans-serif;white-space:nowrap;box-shadow:0 0 0 5px rgba(255,106,87,.25),0 0 26px rgba(255,106,87,.65),0 8px 16px #0009">추정 산불 위치</div>', anchor: new maps.Point(16, 16) },
       }))
       if (hasCoordinates(selectedCamera)) {
-        overlays.push(new maps.Polyline({ map, path: [position(selectedCamera), position(fire)], strokeColor: '#74bdff', strokeWeight: 3, strokeStyle: 'shortdash' }))
+        overlays.push(new maps.Polyline({ map, path: [position(selectedCamera), position(fire)], strokeColor: '#7cc0ff', strokeWeight: 3, strokeStyle: 'shortdash' }))
       }
     }
   }
