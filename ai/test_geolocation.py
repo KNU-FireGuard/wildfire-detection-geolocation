@@ -106,6 +106,38 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertGreaterEqual(calls["grid"], 1)
         np.testing.assert_allclose(data["elevation"], 123.0)
 
+    def test_dem_cache_records_source_and_upgrades_coarse_grid(self) -> None:
+        """오프라인 보간 격자는 출처를 기록하고, 고해상도 소스가 가능해지면 다시 만들며, 고해상도 캐시는 재사용"""
+        out = Path(self.temp_dir) / "source.npz"
+        kwargs = dict(
+            center_lat=GACHANG_CAM_LAT + 0.07,
+            center_lon=GACHANG_CAM_LON + 0.07,
+            radius_m=1000.0,
+            grid_size=21,
+            npz_path=out,
+            anchor_source=lambda lats, lons: np.full(len(lats), 500.0, dtype=np.float32),
+        )
+
+        # 1. 고해상도 소스 없음(오프라인) -> 앵커 보간 격자, 출처 기록
+        coarse = build_and_cache_dem(grid_source=lambda *a, **k: None, **kwargs)
+        self.assertEqual(str(coarse["source"]), "open_meteo_anchor_interp")
+        np.testing.assert_allclose(coarse["elevation"], 500.0)
+
+        # 2. 같은 요청인데 고해상도 소스가 가능해짐 -> 거친 캐시를 버리고 다시 만듦
+        fine = build_and_cache_dem(
+            grid_source=lambda lat_m, lon_m, **k: np.full(np.shape(lat_m), 123.0, dtype=np.float32), **kwargs
+        )
+        self.assertEqual(str(fine["source"]), "terrarium")
+        np.testing.assert_allclose(fine["elevation"], 123.0)
+
+        # 3. 고해상도 캐시는 재사용: 격자 소스를 다시 호출하지 않음
+        def must_not_call(*_a, **_k):
+            raise AssertionError("고해상도 캐시가 있는데 격자 소스를 다시 호출함")
+
+        reused = build_and_cache_dem(grid_source=must_not_call, **kwargs)
+        self.assertEqual(str(reused["source"]), "terrarium")
+        np.testing.assert_allclose(reused["elevation"], 123.0)
+
     def test_provider_updates_on_tower_height_change(self) -> None:
         """철탑 높이(tower_height) 변경 시 DEMProvider 갱신 검증"""
         estimator = FireLocationEstimator()
