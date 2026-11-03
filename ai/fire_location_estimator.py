@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 try:
     from ai.dem_skyline_engine import (
@@ -67,35 +68,97 @@ class FireLocationEstimator:
             )
         return self.dem_provider
 
+    BBOX_FORMATS = ("xyxy", "xywh", "cxcyhw")
+    BBOX_PIXEL_TOLERANCE = 2.0
+
+    @staticmethod
+    def resolve_bbox_pixel_bounds(
+        bbox: list[float] | tuple[float, float, float, float] | dict[str, float | int],
+        width: int = 1920,
+        height: int = 1080,
+        bbox_format: str = "xyxy",
+        normalized: bool | None = None,
+    ) -> tuple[float, float, float, float]:
+        """
+        Convert any bounding box into pixel bounds (x_min_px, y_min_px, x_max_px, y_max_px)
+        of the original frame (width x height).
+
+        bbox_format:
+          - "xyxy":   [x_min, y_min, x_max, y_max]  (ultralytics boxes.xyxy, Backend API dict)
+          - "xywh":   [x_center, y_center, width, height]  (standard YOLO, ultralytics boxes.xywh[n])
+          - "cxcyhw": [x_center, y_center, height, width]  (height before width)
+        normalized:
+          - True:  values must be within 0~1 (relative to the original frame), else ValueError
+          - False: values are original-frame pixels
+          - None:  legacy auto-detect (all values <= 1.0 -> normalized); prefer an explicit flag
+        Backend API dict {"x1", "y1", "x2", "y2"} is always interpreted as xyxy pixels.
+        Raises ValueError for unknown formats, flipped / empty boxes, and boxes outside the frame.
+        """
+        if isinstance(bbox, dict):
+            if all(k in bbox for k in ("x1", "y1", "x2", "y2")):
+                b0, b1, b2, b3 = float(bbox["x1"]), float(bbox["y1"]), float(bbox["x2"]), float(bbox["y2"])
+            elif all(k in bbox for k in ("xmin", "ymin", "xmax", "ymax")):
+                b0, b1, b2, b3 = float(bbox["xmin"]), float(bbox["ymin"]), float(bbox["xmax"]), float(bbox["ymax"])
+            else:
+                raise ValueError("bbox 딕셔너리에 x1, y1, x2, y2 키가 필요합니다.")
+            fmt = "xyxy"
+            if normalized is None:
+                normalized = False
+        else:
+            values = tuple(float(v) for v in bbox)
+            if len(values) != 4:
+                raise ValueError("bbox는 4개의 값이어야 합니다.")
+            b0, b1, b2, b3 = values
+            fmt = bbox_format
+
+        if fmt not in FireLocationEstimator.BBOX_FORMATS:
+            raise ValueError(f"지원하지 않는 bbox 포맷입니다: {fmt!r} (지원: {FireLocationEstimator.BBOX_FORMATS})")
+        if not all(math.isfinite(v) for v in (b0, b1, b2, b3)):
+            raise ValueError("bbox 값이 유한한 숫자가 아닙니다.")
+
+        is_normalized = (max(b0, b1, b2, b3) <= 1.0) if normalized is None else bool(normalized)
+        if is_normalized and (min(b0, b1, b2, b3) < 0.0 or max(b0, b1, b2, b3) > 1.0):
+            raise ValueError("정규화 bbox 값은 0~1 범위여야 합니다.")
+
+        sx = float(width) if is_normalized else 1.0
+        sy = float(height) if is_normalized else 1.0
+
+        if fmt == "xyxy":
+            x_min, y_min, x_max, y_max = b0 * sx, b1 * sy, b2 * sx, b3 * sy
+        else:
+            xc, yc = b0 * sx, b1 * sy
+            if fmt == "xywh":
+                w, h = b2 * sx, b3 * sy
+            else:  # cxcyhw
+                h, w = b2 * sy, b3 * sx
+            x_min, x_max = xc - w / 2.0, xc + w / 2.0
+            y_min, y_max = yc - h / 2.0, yc + h / 2.0
+
+        if x_min >= x_max or y_min >= y_max:
+            raise ValueError("bbox가 비어 있거나 뒤집혀 있습니다.")
+        tol = FireLocationEstimator.BBOX_PIXEL_TOLERANCE
+        if x_min < -tol or y_min < -tol or x_max > width + tol or y_max > height + tol:
+            raise ValueError(f"bbox가 프레임({width}x{height}) 범위를 벗어납니다.")
+
+        return float(x_min), float(y_min), float(x_max), float(y_max)
+
     @staticmethod
     def resolve_target_pixel(
-        bbox: list[float] | tuple[float, float, float, float],
+        bbox: list[float] | tuple[float, float, float, float] | dict[str, float | int],
         width: int = 1920,
         height: int = 1080,
         target_mode: str = "bottom_center",
         bbox_format: str = "xyxy",
+        normalized: bool | None = None,
     ) -> tuple[float, float]:
         """
-        Convert YOLO bounding box (either 0~1 normalized or pixel coordinates) to target pixel (fire_x, fire_y).
+        Convert a bounding box (see resolve_bbox_pixel_bounds) to target pixel (fire_x, fire_y).
         - target_mode="bottom_center": (x_center, y_max) corresponding to the ground ignition base
         - target_mode="center": (x_center, y_center) corresponding to the smoke plume center
         """
-        b0, b1, b2, b3 = (float(v) for v in bbox)
-        is_normalized = max(b0, b1, b2, b3) <= 1.0
-
-        if bbox_format == "xywh":
-            xc, yc, w, h = b0, b1, b2, b3
-            if is_normalized:
-                xc, w = xc * width, w * width
-                yc, h = yc * height, h * height
-            x_min, x_max = xc - w / 2.0, xc + w / 2.0
-            y_min, y_max = yc - h / 2.0, yc + h / 2.0
-        else:
-            x_min, y_min, x_max, y_max = b0, b1, b2, b3
-            if is_normalized:
-                x_min, x_max = x_min * width, x_max * width
-                y_min, y_max = y_min * height, y_max * height
-
+        x_min, y_min, x_max, y_max = FireLocationEstimator.resolve_bbox_pixel_bounds(
+            bbox, width=width, height=height, bbox_format=bbox_format, normalized=normalized
+        )
         fire_x = (x_min + x_max) / 2.0
         if target_mode == "center":
             fire_y = (y_min + y_max) / 2.0
@@ -104,6 +167,26 @@ class FireLocationEstimator:
             fire_y = y_max
 
         return fire_x, fire_y
+
+    @staticmethod
+    def _frame_size(frame: object) -> tuple[int, int] | None:
+        """Return (width, height) of a frame given as np.ndarray, PIL.Image or file path, else None."""
+        if frame is None:
+            return None
+        try:
+            if isinstance(frame, (str, Path)):
+                from PIL import Image
+
+                with Image.open(frame) as img:
+                    return int(img.size[0]), int(img.size[1])
+            if hasattr(frame, "size") and hasattr(frame, "convert"):  # PIL.Image
+                return int(frame.size[0]), int(frame.size[1])  # type: ignore[attr-defined]
+            shape = getattr(frame, "shape", None)
+            if shape is not None and len(shape) >= 2:
+                return int(shape[1]), int(shape[0])
+        except Exception:
+            return None
+        return None
 
     @staticmethod
     def compute_3d_ray_vector(
@@ -142,7 +225,7 @@ class FireLocationEstimator:
 
     def estimate_location(
         self,
-        bbox: list[float] | tuple[float, float, float, float],
+        bbox: list[float] | tuple[float, float, float, float] | dict[str, float | int],
         metadata: dict,
         target_mode: str = "bottom_center",
         terrain_mode: str = "3d_dem",
@@ -150,12 +233,14 @@ class FireLocationEstimator:
         step_size_m: float = 50.0,
         binary_search_iters: int = 10,
         bbox_format: str = "xyxy",
+        bbox_normalized: bool | None = None,
     ) -> dict:
         """
         Estimate wildfire ignition coordinates (lat, lon, altitude_m, distance_m)
         using 50m Ray Marching + 10-step Binary Search on DEMProvider.
         Note: Supports upward rays (dz >= 0) intersecting high mountainsides above camera level.
-        bbox_format: "xyxy" [xmin, ymin, xmax, ymax] or "xywh" [xcenter, ycenter, width, height].
+        bbox: "xyxy", "xywh", "cxcyhw" list or Backend API dict {"x1", "y1", "x2", "y2"};
+        bbox_normalized declares 0~1 normalized (True) or pixel (False) values explicitly.
         """
         if "camera" not in metadata or "ptz" not in metadata:
             raise ValueError("메타데이터에 'camera' 및 'ptz' 필드가 필요합니다.")
@@ -170,9 +255,39 @@ class FireLocationEstimator:
         height = int(cam.get("resolution_h", 1080))
         fov_h = float(cam.get("fov_h", 60.0))
 
+        # The frame the detector actually analysed defines the pixel space of the bbox:
+        # prefer its real size over the (default 1920x1080) camera metadata resolution
+        frame_size = self._frame_size(metadata.get("frame"))
+        if frame_size is not None:
+            width, height = frame_size
+
         provider = self._get_provider(cam_lat, cam_lon, tower_h)
         ground_alt = provider.ground_alt
         eye_alt = float(cam["altitude"]) if "altitude" in cam and cam.get("use_abs_alt") else provider.eye_alt
+
+        # Convert bbox into pixel coordinates first so smoke horizontal masking gets [x_min_px, x_max_px]
+        fmt = metadata.get("bbox_format", bbox_format)
+        norm_flag = metadata.get("bbox_normalized", bbox_normalized)
+        try:
+            x_min_px, y_min_px, x_max_px, y_max_px = self.resolve_bbox_pixel_bounds(
+                bbox, width=width, height=height, bbox_format=fmt, normalized=norm_flag
+            )
+        except ValueError as exc:
+            return {
+                "intersected": False,
+                "status": "INVALID_BBOX",
+                "reason": str(exc),
+                "lat": None,
+                "lon": None,
+                "altitude_m": None,
+                "distance_m": None,
+                "bearing_deg": None,
+                "elevation_angle_deg": None,
+                "ray_vector": None,
+                "calibration": None,
+            }
+        fire_x = (x_min_px + x_max_px) / 2.0
+        fire_y = (y_min_px + y_max_px) / 2.0 if target_mode == "center" else y_max_px
 
         init_pan = float(ptz["pan"])
         init_tilt = float(ptz["tilt"])
@@ -201,11 +316,7 @@ class FireLocationEstimator:
             cal_info.update(cal_res)
             cal_info["calibrated"] = True
 
-        # 2. Target Pixel & 3D Unit Direction Vector (dz >= 0 upward rays are allowed!)
-        fmt = metadata.get("bbox_format", bbox_format)
-        fire_x, fire_y = self.resolve_target_pixel(
-            bbox, width=width, height=height, target_mode=target_mode, bbox_format=fmt
-        )
+        # 2. 3D Unit Direction Vector (dz >= 0 upward rays are allowed!)
         (dx, dy, dz), ray_bearing, ray_el_deg = self.compute_3d_ray_vector(
             fire_x=fire_x,
             fire_y=fire_y,

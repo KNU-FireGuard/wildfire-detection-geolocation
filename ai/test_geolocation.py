@@ -266,5 +266,110 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertLess(rmse_px, 2.0)
 
 
+class TestBBoxAdapter(unittest.TestCase):
+    """bbox 입력 계약: 명시적 포맷·정규화 지정, 모호하거나 잘못된 입력은 조용히 보정하지 않고 실패"""
+
+    XYXY_NORM = [0.465, 0.055, 0.525, 0.148]
+    # 같은 상자를 [cx, cy, 높이, 너비] 순서로 표현 (cx=0.495, cy=0.1015, h=0.093, w=0.060)
+    CXCYHW_NORM = [0.495, 0.1015, 0.093, 0.060]
+
+    def test_cxcyhw_normalized_matches_xyxy(self) -> None:
+        """[cx, cy, 높이, 너비] 정규화 입력이 동일 상자의 xyxy와 같은 픽셀 경계로 변환되는지 검증"""
+        expected = FireLocationEstimator.resolve_bbox_pixel_bounds(
+            self.XYXY_NORM, 1920, 1080, bbox_format="xyxy"
+        )
+        actual = FireLocationEstimator.resolve_bbox_pixel_bounds(
+            self.CXCYHW_NORM, 1920, 1080, bbox_format="cxcyhw", normalized=True
+        )
+        for e, a in zip(expected, actual):
+            self.assertAlmostEqual(e, a, delta=0.5)
+
+    def test_cxcyhw_and_xywh_are_not_interchangeable(self) -> None:
+        """높이·너비 순서가 다른 두 포맷을 혼동하면 하단점(y_max)이 크게 달라져야 함 (순서 오류 탐지용 음성 테스트)"""
+        as_hw = FireLocationEstimator.resolve_bbox_pixel_bounds(
+            self.CXCYHW_NORM, 1920, 1080, bbox_format="cxcyhw", normalized=True
+        )
+        as_wh = FireLocationEstimator.resolve_bbox_pixel_bounds(
+            self.CXCYHW_NORM, 1920, 1080, bbox_format="xywh", normalized=True
+        )
+        self.assertGreater(abs(as_hw[3] - as_wh[3]), 10.0)
+
+    def test_unknown_format_is_rejected(self) -> None:
+        """알 수 없는 포맷이 조용히 xyxy로 처리되지 않고 ValueError를 내는지 검증"""
+        with self.assertRaises(ValueError):
+            FireLocationEstimator.resolve_bbox_pixel_bounds(
+                self.XYXY_NORM, 1920, 1080, bbox_format="unknown"
+            )
+
+    def test_normalized_flag_rejects_pixel_values(self) -> None:
+        """normalized=True인데 값이 0~1 범위를 벗어나면 ValueError"""
+        with self.assertRaises(ValueError):
+            FireLocationEstimator.resolve_bbox_pixel_bounds(
+                [890.0, 60.0, 1010.0, 160.0], 1920, 1080, bbox_format="xyxy", normalized=True
+            )
+
+    def test_degenerate_or_out_of_frame_bbox_is_rejected(self) -> None:
+        """상자가 뒤집혔거나(x_min>=x_max) 프레임 밖이면 ValueError"""
+        with self.assertRaises(ValueError):
+            FireLocationEstimator.resolve_bbox_pixel_bounds(
+                [1010.0, 60.0, 890.0, 160.0], 1920, 1080, bbox_format="xyxy", normalized=False
+            )
+        with self.assertRaises(ValueError):
+            FireLocationEstimator.resolve_bbox_pixel_bounds(
+                [1800.0, 60.0, 2400.0, 160.0], 1920, 1080, bbox_format="xyxy", normalized=False
+            )
+
+    def test_invalid_bbox_returns_failsafe_result(self) -> None:
+        """estimate_location은 잘못된 bbox에서 예외 대신 위치 없는 INVALID_BBOX 결과를 반환"""
+        estimator = FireLocationEstimator()
+        meta = {
+            "camera": {
+                "lat": GACHANG_CAM_LAT,
+                "lon": GACHANG_CAM_LON,
+                "tower_height": 15.0,
+                "fov_h": 60.0,
+            },
+            "ptz": {"pan": 339.0, "tilt": 3.0, "roll": 0.0},
+        }
+        res = estimator.estimate_location(
+            [1010.0, 60.0, 890.0, 160.0], meta, use_skyline_calibration=False, bbox_normalized=False
+        )
+        self.assertFalse(res["intersected"])
+        self.assertEqual(res["status"], "INVALID_BBOX")
+        self.assertIsNone(res["lat"])
+
+    def test_frame_size_overrides_default_resolution(self) -> None:
+        """프레임이 주어지면 camera 메타 기본 해상도(1920x1080)가 아니라 실제 프레임 크기로 픽셀 bbox를 해석"""
+        estimator = FireLocationEstimator()
+        cam = {
+            "lat": GACHANG_CAM_LAT,
+            "lon": GACHANG_CAM_LON,
+            "tower_height": 15.0,
+            "fov_h": 60.0,
+            "near_m": 30.0,
+            "max_range_m": 5000.0,
+        }
+        ptz = {"pan": 339.0, "tilt": 3.0, "roll": 0.0}
+
+        # 기준: 1920x1080 프레임의 픽셀 bbox
+        ref = estimator.estimate_location(
+            [892.5, 60.0, 1008.0, 160.5],
+            {"camera": dict(cam), "ptz": ptz},
+            use_skyline_calibration=False,
+            bbox_normalized=False,
+        )
+        # 동일 장면을 1280x720으로 본 프레임 (모든 좌표 1/1.5배), 해상도 메타는 생략
+        small_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        small = estimator.estimate_location(
+            [595.0, 40.0, 672.0, 107.0],
+            {"camera": dict(cam), "ptz": ptz, "frame": small_frame},
+            use_skyline_calibration=False,
+            bbox_normalized=False,
+        )
+        self.assertTrue(ref["intersected"])
+        self.assertTrue(small["intersected"])
+        self.assertLess(haversine_distance(ref["lat"], ref["lon"], small["lat"], small["lon"]), 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()
