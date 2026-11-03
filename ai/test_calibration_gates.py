@@ -41,6 +41,27 @@ class TestBlindPoseFailureReasons(unittest.TestCase):
         self.assertIsNone(res["reason"])
 
 
+class TestReliefThreshold(unittest.TestCase):
+    """능선 고도각 표준편차 0.35° 미만은 LOW_RELIEF (#51의 0.12° 타협 복원)"""
+
+    def test_nearly_flat_skyline_is_rejected(self) -> None:
+        """
+        기복이 거의 없는 능선(정확한 기복 약 0.09°)은 OK가 아니어야 함
+        0.12° 기준에서는 틀린 자세에서 잰 기복이 부풀려져(약 0.14°) OK로 통과했음
+        """
+        from ai.camera_model import pixel_to_direction
+
+        provider = DEMProvider()
+        sky = provider.skyline_el_deg
+        provider.skyline_el_deg = float(np.mean(sky)) + (sky - np.mean(sky)) * 0.03
+        ridge = provider.synthesize_observed_skyline(*TRUE, noise_std_px=0.0)
+        _, el = pixel_to_direction(ridge[:, 0], ridge[:, 1], *TRUE, W, H, FOV)
+        self.assertLess(float(np.std(el)), 0.12, "테스트 장면의 실제 기복이 0.12° 미만이어야 함")
+        res = provider.estimate_blind_ptz(ridge, W, H, FOV)
+        self.assertEqual(res["status"], "CALIBRATION_FAILED")
+        self.assertEqual(res["reason"], "LOW_RELIEF")
+
+
 class TestRidgeCoverage(unittest.TestCase):
     """능선 점의 가로 범위가 15° 미만이면 형상 비교 근거 부족"""
 

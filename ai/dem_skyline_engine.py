@@ -694,7 +694,7 @@ class DEMProvider:
         fine_window_deg: float = 1.0,
         fine_step_deg: float = 0.1,
         roll_max_deg: float = 2.5,
-        min_relief_std_deg: float = 0.12,
+        min_relief_std_deg: float = 0.35,
         min_ncc: float = 0.65,
         max_rms_deg: float = 1.5,
         min_tilt_deg: float = -15.0,
