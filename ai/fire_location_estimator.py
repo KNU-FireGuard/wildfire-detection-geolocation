@@ -507,6 +507,26 @@ class FireLocationEstimator:
             }
 
         # 3. 3D DEM Ray Marching (50m step forward)
+        # If the ray is already below the terrain at near_m, the intersection lies closer than near_m:
+        # report it instead of returning a point near near_m as a valid location
+        lat_n, lon_n = dest_point(cam_lat, cam_lon, ray_bearing, near_m)
+        drop_n = (near_m ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
+        if eye_alt + near_m * slope_dz_per_m <= float(provider.get_elevation(lat_n, lon_n)) - drop_n:
+            return {
+                "intersected": False,
+                "status": "TARGET_TOO_CLOSE",
+                "reason": f"광선이 near_m({near_m:.0f}m) 이전에 지형과 교차함",
+                "lat": None,
+                "lon": None,
+                "altitude_m": None,
+                "distance_m": None,
+                "bearing_deg": ray_bearing,
+                "elevation_angle_deg": ray_el_deg,
+                "ray_vector": (dx, dy, dz),
+                "calibration": cal_info,
+                "location_estimation": None,
+            }
+
         prev_d = near_m
         curr_d = near_m
         hit = False

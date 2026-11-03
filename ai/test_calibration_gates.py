@@ -136,6 +136,40 @@ class TestZeroPointCalibrationGate(unittest.TestCase):
         self.assertAlmostEqual(cal["tilt"], given["tilt"], places=9)
 
 
+class TestTargetTooClose(unittest.TestCase):
+    """광선이 near_m 이전에 이미 지형 아래면 near_m 지점을 OK로 내지 않고 TARGET_TOO_CLOSE"""
+
+    @staticmethod
+    def _meta(near_m: float) -> dict:
+        return {
+            "camera": {"lat": 35.791037, "lon": 128.591184, "tower_height": 15.0, "fov_h": FOV, "near_m": near_m},
+            "ptz": {"pan": 99.2, "tilt": -20.0, "roll": 0.0},
+        }
+
+    def test_steep_downward_ray_inside_near_range_is_reported(self) -> None:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        bbox = [940.0, 900.0, 980.0, 1000.0]  # 화면 아래쪽: 카메라 바로 앞 지면
+        res = FireLocationEstimator().estimate_location(
+            bbox, self._meta(200.0), use_skyline_calibration=False, bbox_normalized=False
+        )
+        self.assertFalse(res["intersected"])
+        self.assertEqual(res["status"], "TARGET_TOO_CLOSE")
+        self.assertIsNone(res["lat"])
+        self.assertIsNone(res["location_estimation"])
+
+    def test_same_ray_with_small_near_range_is_located(self) -> None:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        bbox = [940.0, 900.0, 980.0, 1000.0]
+        res = FireLocationEstimator().estimate_location(
+            bbox, self._meta(5.0), use_skyline_calibration=False, bbox_normalized=False
+        )
+        self.assertTrue(res["intersected"])
+        self.assertEqual(res["status"], "OK")
+        self.assertLess(res["distance_m"], 200.0)
+
+
 class TestEstimatorExposesReason(unittest.TestCase):
     def test_calibration_failure_reason_reaches_estimator_result(self) -> None:
         from ai.fire_location_estimator import FireLocationEstimator
