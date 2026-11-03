@@ -9,7 +9,7 @@ const props = defineProps({
   event: { type: Object, default: null },
   camera: { type: Object, default: null },
   videos: { type: Array, default: () => [] },
-  // true이면 지도 아래 CCTV 영상 목록에서 재생 중인 같은 영상을 공유하고 영상 서버에 다시 접속하지 않음
+  // true이면 지도 아래 실시간 CCTV 영상에서 재생 중인 같은 영상을 공유하고 영상 서버에 다시 접속하지 않음
   mirror: { type: Boolean, default: false },
 })
 const showDetails = ref(false)
@@ -41,7 +41,7 @@ const cameraStatusLabel = computed(() => {
       <video v-else-if="selectedVideo" :key="selectedVideo.id" controls preload="metadata" :src="`/api/videos/${selectedVideo.id}/stream`">
         이 브라우저는 영상 재생을 지원하지 않습니다.
       </video>
-      <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong><p>영상 목록에 파일을 등록하고 DB에 메타데이터를 추가하세요.</p></div>
+      <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong><p>영상 파일을 data/videos/에 두고 DB에 영상 정보를 등록하세요.</p></div>
       <span v-if="selectedVideo && camera?.sourceType !== 'live'" class="preview-footnote">{{ selectedVideo.original_filename }}</span>
     </div>
     <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" />

@@ -30,7 +30,7 @@ watch([target, source], ([element, from]) => {
     try { element.srcObject = from.captureStream() } catch { captureFailed.value = true }
   }
   capture()
-  // 지도 아래 CCTV 영상이 새로 로드되면(주소 갱신 등) 다시 받습니다.
+  // 지도 아래 실시간 CCTV 영상이 새로 로드되면(주소 갱신 등) 다시 받습니다.
   const recapture = capture
   from.addEventListener?.('loadedmetadata', recapture)
   detach = () => from.removeEventListener?.('loadedmetadata', recapture)

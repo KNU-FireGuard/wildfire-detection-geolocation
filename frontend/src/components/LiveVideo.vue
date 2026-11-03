@@ -4,7 +4,7 @@ import Hls from 'hls.js'
 import { registerLiveVideo, unregisterLiveVideo } from '../composables/liveVideoRegistry'
 import { MAX_NETWORK_RETRIES, decideRecovery, describeHlsError } from '../utils/hlsRecovery'
 
-// cameraId를 주면 지도 아래 CCTV 영상 목록의 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
+// cameraId를 주면 지도 아래 실시간 CCTV 영상의 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
 const props = defineProps({
   url: { type: String, required: true },
   cameraId: { type: [Number, String], default: null },

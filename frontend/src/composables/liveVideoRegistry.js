@@ -1,6 +1,6 @@
 import { shallowReactive } from 'vue'
 
-// 지도 아래 CCTV 영상 목록에서 재생 중인 video 요소를 카메라 ID로 보관합니다.
+// 지도 아래 실시간 CCTV 영상에서 재생 중인 video 요소를 카메라 ID로 보관합니다.
 // 우측 패널이 같은 영상을 공유해 영상 서버에 두 번째 연결을 열지 않도록 하기 위한 저장소입니다.
 const videos = shallowReactive(new Map())
 
