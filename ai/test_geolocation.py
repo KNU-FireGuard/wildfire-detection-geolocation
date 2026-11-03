@@ -11,7 +11,9 @@ from ai.dem_skyline_engine import (
     DEMProvider,
     GACHANG_CAM_LAT,
     GACHANG_CAM_LON,
+    build_and_cache_dem,
     build_and_cache_gachang_dem,
+    fetch_terrarium_dem_grid,
     haversine_distance,
 )
 from ai.fire_location_estimator import FireLocationEstimator
@@ -335,6 +337,7 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertEqual(res_fog["status"], "CALIBRATION_FAILED")
         self.assertIsNone(res_fog["lat"])
         self.assertIsNone(res_fog["lon"])
+        self.assertIsNone(res_fog["location_estimation"])
 
         # 2. 기복이 전혀 없는 수평 직선(도로 연석/건물 지붕, std < 0.35°)이 입력된 경우
         flat_xs = np.arange(100, 1820, 20, dtype=np.float64)
@@ -353,6 +356,45 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertFalse(res_flat["intersected"])
         self.assertEqual(res_flat["status"], "CALIBRATION_FAILED")
         self.assertIsNone(res_flat["lat"])
+        self.assertIsNone(res_flat["location_estimation"])
+
+    def test_terrarium_loader_and_backend_api_contract(self) -> None:
+        """Issue #51: AWS Terrarium 30m 타일 로더, build_and_cache_dem 범용 함수 및 백엔드 API 입출력 포맷 검증"""
+        # 1. 로컬 캐시된 AWS Terrarium 30m 타일로부터 고해상도 표고 격자 추출 확인
+        lats = np.linspace(GACHANG_CAM_LAT - 0.005, GACHANG_CAM_LAT + 0.005, 11)
+        lons = np.linspace(GACHANG_CAM_LON - 0.005, GACHANG_CAM_LON + 0.005, 11)
+        lon_m, lat_m = np.meshgrid(lons, lats)
+        terr_grid = fetch_terrarium_dem_grid(lat_m, lon_m, zoom=12)
+        self.assertIsNotNone(terr_grid)
+        self.assertEqual(terr_grid.shape, (11, 11))
+        self.assertGreater(float(terr_grid.max() - terr_grid.min()), 20.0)
+
+        # 2. build_and_cache_dem 범용 함수 동작 확인
+        dem_data = build_and_cache_dem(center_lat=GACHANG_CAM_LAT, center_lon=GACHANG_CAM_LON)
+        self.assertEqual(dem_data["elevation"].shape, (201, 201))
+
+        # 3. 백엔드 POST /api/detections 규격 bbox 딕셔너리 입력 및 location_estimation 출력 확인
+        estimator = FireLocationEstimator()
+        api_bbox = {"x1": 893, "y1": 59, "x2": 1008, "y2": 160}
+        meta = {
+            "camera": {
+                "lat": GACHANG_CAM_LAT,
+                "lon": GACHANG_CAM_LON,
+                "tower_height": 15.0,
+                "fov_h": 60.0,
+                "near_m": 30.0,
+            },
+            "ptz": {"pan": 339.0, "tilt": 3.0, "roll": 0.0},
+        }
+        res = estimator.estimate_location(api_bbox, meta, use_skyline_calibration=False)
+        self.assertTrue(res["intersected"])
+        self.assertIsNotNone(res["location_estimation"])
+        loc_est = res["location_estimation"]
+        self.assertIn("latitude", loc_est)
+        self.assertIn("longitude", loc_est)
+        self.assertIn("error_range_m", loc_est)
+        self.assertAlmostEqual(loc_est["latitude"], res["lat"], places=5)
+        self.assertAlmostEqual(loc_est["longitude"], res["lon"], places=5)
 
 
 class TestBBoxAdapter(unittest.TestCase):
@@ -426,6 +468,7 @@ class TestBBoxAdapter(unittest.TestCase):
         self.assertFalse(res["intersected"])
         self.assertEqual(res["status"], "INVALID_BBOX")
         self.assertIsNone(res["lat"])
+        self.assertIsNone(res["location_estimation"])
 
     def test_frame_size_overrides_default_resolution(self) -> None:
         """프레임이 주어지면 camera 메타 기본 해상도(1920x1080)가 아니라 실제 프레임 크기로 픽셀 bbox를 해석"""
@@ -458,6 +501,40 @@ class TestBBoxAdapter(unittest.TestCase):
         self.assertTrue(ref["intersected"])
         self.assertTrue(small["intersected"])
         self.assertLess(haversine_distance(ref["lat"], ref["lon"], small["lat"], small["lon"]), 3.0)
+
+
+class TestLocationEstimationContract(unittest.TestCase):
+    """location_estimation 출력 계약: 근거 없는 오차 범위를 만들어내지 않음"""
+
+    def test_error_range_is_none_until_modelled(self) -> None:
+        """오차 범위 산출 모델이 없으므로 모든 지형 모드에서 error_range_m은 None이어야 함 (API 명세상 null 허용)"""
+        estimator = FireLocationEstimator()
+        meta = {
+            "camera": {
+                "lat": GACHANG_CAM_LAT,
+                "lon": GACHANG_CAM_LON,
+                "tower_height": 15.0,
+                "fov_h": 60.0,
+                "near_m": 30.0,
+                "max_range_m": 5000.0,
+            },
+            "ptz": {"pan": 339.0, "tilt": 3.0, "roll": 0.0},
+        }
+        bbox = [892.5, 60.0, 1008.0, 160.5]
+        res_dem = estimator.estimate_location(
+            bbox, meta, terrain_mode="3d_dem", use_skyline_calibration=False, bbox_normalized=False
+        )
+        self.assertTrue(res_dem["intersected"])
+        self.assertIsNotNone(res_dem["location_estimation"])
+        self.assertIsNone(res_dem["location_estimation"]["error_range_m"])
+
+        # 평면 지구 모드는 하향 광선이어야 교차하므로 tilt를 낮춘 별도 메타 사용
+        flat_meta = {**meta, "ptz": {"pan": 339.0, "tilt": -10.0, "roll": 0.0}}
+        res_flat = estimator.estimate_location(
+            [0.45, 0.60, 0.55, 0.80], flat_meta, terrain_mode="flat_earth", use_skyline_calibration=False
+        )
+        self.assertTrue(res_flat["intersected"])
+        self.assertIsNone(res_flat["location_estimation"]["error_range_m"])
 
 
 if __name__ == "__main__":

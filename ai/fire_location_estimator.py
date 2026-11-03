@@ -295,6 +295,7 @@ class FireLocationEstimator:
                 "elevation_angle_deg": None,
                 "ray_vector": None,
                 "calibration": None,
+                "location_estimation": None,
             }
         fire_x = (x_min_px + x_max_px) / 2.0
         fire_y = (y_min_px + y_max_px) / 2.0 if target_mode == "center" else y_max_px
@@ -404,6 +405,7 @@ class FireLocationEstimator:
                     "elevation_angle_deg": None,
                     "ray_vector": None,
                     "calibration": cal_info,
+                    "location_estimation": None,
                 }
 
             blind_res = provider.estimate_blind_ptz(
@@ -429,6 +431,7 @@ class FireLocationEstimator:
                     "elevation_angle_deg": None,
                     "ray_vector": None,
                     "calibration": cal_info,
+                    "location_estimation": None,
                 }
 
         if ridge_extraction_info is not None:
@@ -473,6 +476,7 @@ class FireLocationEstimator:
                     "elevation_angle_deg": ray_el_deg,
                     "ray_vector": (dx, dy, dz),
                     "calibration": cal_info,
+                    "location_estimation": None,
                 }
 
             flat_d = max(flat_d, near_m)
@@ -488,6 +492,12 @@ class FireLocationEstimator:
                 "elevation_angle_deg": ray_el_deg,
                 "ray_vector": (dx, dy, dz),
                 "calibration": cal_info,
+                "location_estimation": {
+                    "latitude": round(est_lat, 6),
+                    "longitude": round(est_lon, 6),
+                    # 오차 범위 산출 모델이 없어 null (임의 수식 금지, 후속 이슈에서 민감도 기반 산출)
+                    "error_range_m": None,
+                },
             }
 
         # 3. 3D DEM Ray Marching (50m step forward)
@@ -522,6 +532,7 @@ class FireLocationEstimator:
                 "elevation_angle_deg": ray_el_deg,
                 "ray_vector": (dx, dy, dz),
                 "calibration": cal_info,
+                "location_estimation": None,
             }
 
         # 4. 10-step Binary Search for sub-decimeter surface intersection precision
@@ -554,6 +565,12 @@ class FireLocationEstimator:
             "elevation_angle_deg": ray_el_deg,
             "ray_vector": (dx, dy, dz),
             "calibration": cal_info,
+            "location_estimation": {
+                "latitude": round(est_lat, 6),
+                "longitude": round(est_lon, 6),
+                # 오차 범위 산출 모델이 없어 null (임의 수식 금지, 후속 이슈에서 민감도 기반 산출)
+                "error_range_m": None,
+            },
         }
 
 
