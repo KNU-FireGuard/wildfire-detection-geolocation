@@ -96,3 +96,23 @@ test('영상 주소가 없는 실시간 CCTV도 타일에 표시하고 갱신 �
   assert.match(text, /영상 주소가 없습니다/)
   app.unmount()
 })
+
+test('선택된 타일을 다시 누르면 선택을 해제하고 다른 타일을 누르면 그 카메라를 선택한다', async () => {
+  const cameras = [
+    { id: 1, name: '첫 번째 CCTV', streamUrl: 'https://example.test/1.m3u8' },
+    { id: 2, name: '두 번째 CCTV', streamUrl: 'https://example.test/2.m3u8' },
+  ]
+  const emitted = []
+  const root = makeNode('root')
+  const app = renderer.createApp({ render: () => h(LiveCctvWall, { cameras, selectedId: 2, onSelect: id => emitted.push(id) }) })
+  app.mount(root)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  await nextTick()
+  const [first, second] = findAll(root, 'button')
+  const click = button => button.props.onClick({ stopPropagation() {} })
+
+  click(second)
+  click(first)
+  assert.deepEqual(emitted, [null, 1])
+  app.unmount()
+})

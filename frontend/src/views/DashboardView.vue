@@ -57,6 +57,14 @@ function selectCamera(id) {
   selectedEventId.value = latest?.id ?? null
   if (cameras.value.some(camera => camera.id === id && camera.sourceType === 'live')) revealLiveWall()
 }
+function selectLiveTile(id) {
+  if (id === null) {
+    selectedCameraId.value = null
+    selectedEventId.value = null
+    return
+  }
+  selectCamera(id)
+}
 async function revealLiveWall() {
   await nextTick()
   document.getElementById('live-cctv-wall')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -183,7 +191,7 @@ onBeforeUnmount(() => {
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
           <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select-camera="selectCamera" />
           <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" :show-video="selectedCamera?.sourceType !== 'live'" />
-          <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectCamera" />
+          <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
           <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" />
         </section>
         <section class="summary-grid" aria-label="관제 요약">

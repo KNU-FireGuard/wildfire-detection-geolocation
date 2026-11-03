@@ -3,11 +3,13 @@ import { defineAsyncComponent } from 'vue'
 
 const LiveVideo = defineAsyncComponent(() => import('./LiveVideo.vue'))
 
-defineProps({
+const props = defineProps({
   cameras: { type: Array, required: true },
   selectedId: { type: Number, default: null },
 })
 const emit = defineEmits(['select'])
+// 선택된 타일을 다시 누르면 null로 선택 해제
+function toggle(id) { emit('select', id === props.selectedId ? null : id) }
 </script>
 
 <template>
@@ -20,18 +22,18 @@ const emit = defineEmits(['select'])
       <article
         v-for="camera in cameras" :key="camera.id"
         class="live-tile" :class="{ selected: camera.id === selectedId }"
-        @click="emit('select', camera.id)"
+        @click="toggle(camera.id)"
       >
         <LiveVideo v-if="camera.streamUrl" :url="camera.streamUrl" />
         <div v-else class="tile-empty" role="status"><strong>영상 주소가 없습니다.</strong><span>CCTV 주소 갱신 후 다시 확인하세요.</span></div>
         <button
           type="button" class="tile-select"
           :aria-pressed="camera.id === selectedId"
-          :aria-label="`${camera.name} 영상 ${camera.id === selectedId ? '선택됨' : '확대'}`"
-          @click.stop="emit('select', camera.id)"
+          :aria-label="`${camera.name} 영상 ${camera.id === selectedId ? '선택 해제' : '확대'}`"
+          @click.stop="toggle(camera.id)"
         >
           <strong>{{ camera.name }}</strong>
-          <span>{{ camera.id === selectedId ? '선택됨' : '크게 보기' }}</span>
+          <span>{{ camera.id === selectedId ? '작게 보기' : '크게 보기' }}</span>
         </button>
       </article>
     </div>
