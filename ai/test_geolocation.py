@@ -386,22 +386,37 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertIsNone(res_flat["lat"])
         self.assertIsNone(res_flat["location_estimation"])
 
-    def test_terrarium_loader_and_backend_api_contract(self) -> None:
-        """Issue #51: AWS Terrarium 30m 타일 로더, build_and_cache_dem 범용 함수 및 백엔드 API 입출력 포맷 검증"""
-        # 1. 로컬 캐시된 AWS Terrarium 30m 타일로부터 고해상도 표고 격자 추출 확인
+    @staticmethod
+    def _gachang_mesh() -> tuple[np.ndarray, np.ndarray]:
         lats = np.linspace(GACHANG_CAM_LAT - 0.005, GACHANG_CAM_LAT + 0.005, 11)
         lons = np.linspace(GACHANG_CAM_LON - 0.005, GACHANG_CAM_LON + 0.005, 11)
         lon_m, lat_m = np.meshgrid(lons, lats)
-        terr_grid = fetch_terrarium_dem_grid(lat_m, lon_m, zoom=12)
-        self.assertIsNotNone(terr_grid)
+        return lat_m, lon_m
+
+    def test_terrarium_cache_only_mode_does_not_download(self) -> None:
+        """allow_download=False이고 캐시가 비어 있으면 네트워크 없이 None 반환, 파일도 만들지 않음"""
+        lat_m, lon_m = self._gachang_mesh()
+        empty_cache = Path(self.temp_dir) / "empty_tiles"
+        grid = fetch_terrarium_dem_grid(lat_m, lon_m, zoom=12, cache_dir=empty_cache, allow_download=False)
+        self.assertIsNone(grid)
+        self.assertFalse(any(empty_cache.glob("*.png")) if empty_cache.exists() else False)
+
+    def test_terrarium_loader_from_local_cache(self) -> None:
+        """로컬 캐시된 AWS Terrarium 30m 타일로 고해상도 표고 격자 추출 (캐시가 없는 환경에서는 건너뜀)"""
+        lat_m, lon_m = self._gachang_mesh()
+        terr_grid = fetch_terrarium_dem_grid(lat_m, lon_m, zoom=12, allow_download=False)
+        if terr_grid is None:
+            self.skipTest("로컬 DEM 타일 캐시(ai/.dem_cache/) 없음, 네트워크 다운로드 테스트는 생략")
         self.assertEqual(terr_grid.shape, (11, 11))
         self.assertGreater(float(terr_grid.max() - terr_grid.min()), 20.0)
 
-        # 2. build_and_cache_dem 범용 함수 동작 확인
+    def test_dem_builder_and_backend_api_contract(self) -> None:
+        """Issue #51: build_and_cache_dem 범용 함수 및 백엔드 API 입출력 포맷 검증 (저장소의 가창 DEM 캐시 사용)"""
+        # 1. build_and_cache_dem 범용 함수 동작 확인
         dem_data = build_and_cache_dem(center_lat=GACHANG_CAM_LAT, center_lon=GACHANG_CAM_LON)
         self.assertEqual(dem_data["elevation"].shape, (201, 201))
 
-        # 3. 백엔드 POST /api/detections 규격 bbox 딕셔너리 입력 및 location_estimation 출력 확인
+        # 2. 백엔드 POST /api/detections 규격 bbox 딕셔너리 입력 및 location_estimation 출력 확인
         estimator = FireLocationEstimator()
         api_bbox = {"x1": 893, "y1": 59, "x2": 1008, "y2": 160}
         meta = {

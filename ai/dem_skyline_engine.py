@@ -150,11 +150,13 @@ def fetch_terrarium_dem_grid(
     zoom: int = 12,
     cache_dir: Path | str | None = None,
     timeout: float = 8.0,
+    allow_download: bool = True,
 ) -> np.ndarray | None:
     """
     Download or load cached AWS Terrarium 30m elevation PNG tiles (zoom 12)
     and bilinearly sample elevations onto (lat_mesh, lon_mesh) using PIL + NumPy.
     Decoding formula: elevation_m = (R * 256.0 + G + B / 256.0) - 32768.0
+    allow_download=False uses only cached tiles (offline / tests) and returns None if any tile is missing.
     """
     try:
         from PIL import Image
@@ -162,7 +164,6 @@ def fetch_terrarium_dem_grid(
         return None
 
     tile_dir = Path(cache_dir) if cache_dir is not None else DEFAULT_TILE_CACHE_DIR
-    tile_dir.mkdir(parents=True, exist_ok=True)
 
     n = 2.0 ** zoom
     lat_rad = np.radians(lat_mesh)
@@ -183,6 +184,9 @@ def fetch_terrarium_dem_grid(
         for tx in range(tx_min, tx_max + 1):
             tile_file = tile_dir / f"terrarium_{zoom}_{tx}_{ty}.png"
             if not tile_file.exists():
+                if not allow_download:
+                    return None
+                tile_dir.mkdir(parents=True, exist_ok=True)
                 url = TERRARIUM_TILE_URL.format(z=zoom, x=tx, y=ty)
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "FireGuard-Research/1.0"})
