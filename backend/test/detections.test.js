@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 process.env.AI_CALLBACK_TOKEN = 'test-only-ai-callback-token-with-32-bytes';
 
 const queryCalls = [];
+// 테스트별로 바꾸는 DB 응답: 갱신 대상 이벤트가 아직 진행 중인지, 같은 카메라에 알림 중인 화재가 있는지
+const db = { updateRows: null, alertingRows: [] };
 const dbPath = require.resolve('../src/config/db');
 require.cache[dbPath] = {
   id: dbPath,
@@ -13,7 +15,8 @@ require.cache[dbPath] = {
     async query(sql, params = []) {
       queryCalls.push({ sql, params });
       if (/INSERT INTO detection_events/.test(sql)) return { rows: [{ id: 1 }] };
-      if (/UPDATE detection_events/.test(sql)) return { rows: [{ id: params[0] }] };
+      if (/UPDATE detection_events/.test(sql)) return { rows: db.updateRows ?? [{ id: params[0] }] };
+      if (/e\.acknowledged_at IS NULL/.test(sql)) return { rows: db.alertingRows };
       // 화재 알림 조회는 카메라가 없는 것으로 처리해 발송과 기록을 건너뜀
       if (/FROM cameras WHERE id/.test(sql)) return { rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
@@ -200,4 +203,73 @@ test('화재 알림이 실패해도 탐지 결과는 202로 저장된다', async
     fireAlert.notifyFireDetected = original;
     console.error = originalError;
   }
+});
+
+function postDetection(body) {
+  return fetch(base, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-AI-Token': process.env.AI_CALLBACK_TOKEN },
+    body: JSON.stringify(body),
+  });
+}
+
+async function withAlertSpy(fn) {
+  const fireAlert = require('../src/services/fire-alert');
+  const original = fireAlert.notifyFireDetected;
+  const alerts = [];
+  fireAlert.notifyFireDetected = async alert => { alerts.push(alert); };
+  try { await fn(alerts); } finally { fireAlert.notifyFireDetected = original; db.updateRows = null; db.alertingRows = []; }
+}
+
+test('같은 카메라에 확인하지 않은 화재가 알림 중이면 새 실행의 fire 이벤트는 만들되 문자는 보내지 않는다', async () => {
+  await withAlertSpy(async alerts => {
+    db.alertingRows = [{ '?column?': 1 }];
+    const restarted = testRuns.createRun({ cameraId: 7, videoId: null, sourceUrl: 'https://video.example.test/live.m3u8' });
+    const before = queryCalls.length;
+    assert.equal((await postDetection({ ...payload, run_id: restarted.id, camera_id: 7 })).status, 202);
+    const calls = queryCalls.slice(before);
+    assert.ok(calls.some(call => /INSERT INTO detection_events/.test(call.sql)), '이벤트는 저장한다');
+    const check = calls.find(call => /e\.acknowledged_at IS NULL/.test(call.sql));
+    assert.deepEqual(check.params, [7]);
+    assert.match(check.sql, /INTERVAL '30 minutes'/);
+    assert.equal(alerts.length, 0);
+  });
+});
+
+test('알림 중인 화재가 없으면(파랑에서 빨강으로 바뀔 때) 문자를 보낸다', async () => {
+  await withAlertSpy(async alerts => {
+    const fresh = testRuns.createRun({ cameraId: 8, videoId: null, sourceUrl: 'https://video.example.test/live.m3u8' });
+    assert.equal((await postDetection({ ...payload, run_id: fresh.id, camera_id: 8 })).status, 202);
+    assert.equal(alerts.length, 1);
+  });
+});
+
+test('마지막 탐지 후 30분이 지난 이벤트는 갱신하지 않고 새 이벤트로 만들어 다시 알린다', async () => {
+  await withAlertSpy(async alerts => {
+    const longRun = testRuns.createRun({ cameraId: 9, videoId: null, sourceUrl: 'https://video.example.test/live.m3u8' });
+    const body = { ...payload, run_id: longRun.id, camera_id: 9 };
+    assert.equal((await postDetection(body)).status, 202);
+    assert.equal(alerts.length, 1);
+    // 두 번째 탐지: 기존 이벤트가 30분 넘게 조용해 갱신 대상이 없음
+    db.updateRows = [];
+    const before = queryCalls.length;
+    assert.equal((await postDetection(body)).status, 202);
+    const calls = queryCalls.slice(before);
+    const update = calls.find(call => /UPDATE detection_events/.test(call.sql));
+    assert.match(update.sql, /COALESCE\(ended_at, updated_at\) > CURRENT_TIMESTAMP - INTERVAL '30 minutes'/);
+    assert.ok(calls.some(call => /INSERT INTO detection_events/.test(call.sql)), '새 이벤트를 만든다');
+    assert.equal(alerts.length, 2);
+  });
+});
+
+test('30분 안에 계속 오는 탐지는 기존 이벤트를 갱신하고 문자를 다시 보내지 않는다', async () => {
+  await withAlertSpy(async alerts => {
+    const steady = testRuns.createRun({ cameraId: 10, videoId: null, sourceUrl: 'https://video.example.test/live.m3u8' });
+    const body = { ...payload, run_id: steady.id, camera_id: 10 };
+    await postDetection(body);
+    const before = queryCalls.length;
+    await postDetection(body);
+    assert.ok(!queryCalls.slice(before).some(call => /INSERT INTO detection_events/.test(call.sql)));
+    assert.equal(alerts.length, 1);
+  });
 });

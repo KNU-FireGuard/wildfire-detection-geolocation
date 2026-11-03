@@ -39,6 +39,8 @@ function normalizeEvent(event) {
     } : null,
     // 운영자가 확인한 시각이 있으면 확인 완료, 없으면 확인 대기입니다. ended_at은 종료 시각이라 상태와 무관합니다.
     acknowledgedAt: event.acknowledged_at ?? null,
+    // 서버가 계산한 값: 확인하지 않았고 마지막 탐지가 30분 안인 화재 이벤트
+    alerting: event.is_alerting === true,
     status: event.acknowledged_at ? 'CONFIRMED' : 'UNCONFIRMED',
   }
 }

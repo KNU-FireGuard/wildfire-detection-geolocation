@@ -14,7 +14,7 @@ import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
 import { summarizeOperatingCameras } from '../utils/cameraSummary'
 import { findRequestedCameraId } from '../utils/cameraLink'
-import { activeFireCameraIds, findNewFireEvents } from '../utils/fireAlert'
+import { activeFireCameraIds, findNewFireEvents, applyAcknowledged } from '../utils/fireAlert'
 import { playAlertTone } from '../utils/alertSound'
 
 // 데이터 공급 모드를 명시적으로 선택합니다. API 실패 시 mock으로 자동 대체하지 않습니다.
@@ -81,8 +81,8 @@ async function runAcknowledge(ids) {
   ackBusy.value = true
   try {
     if (dataSource === 'api') for (const id of ids) await acknowledgeEvent(id, adminToken.value)
-    events.value = events.value.map(event => ids.includes(event.id) ? { ...event, status: 'CONFIRMED' } : event)
-    fireAlerts.value = fireAlerts.value.filter(event => !ids.includes(event.id))
+    events.value = applyAcknowledged(events.value, ids)
+    fireAlerts.value = fireAlerts.value.filter(alert => events.value.find(event => event.id === alert.id)?.alerting)
     ackWaitingIds.value = []
     if (dataSource === 'api') await loadData({ silent: true })
   } catch (error) {

@@ -222,6 +222,13 @@ test('확인 시각이 있는 이벤트는 확인 완료로 변환한다', async
   assert.equal(event.acknowledgedAt, '2026-10-07T06:00:00.000Z')
 })
 
+test('서버의 알림 중(is_alerting) 값을 alerting으로 변환하고 값이 없으면 false로 본다', async () => {
+  globalThis.fetch = async () => page([{ ...rawEvent, class: 'fire', is_alerting: true }, { ...rawEvent, id: 11 }])
+  const events = await fetchEvents()
+  assert.equal(events[0].alerting, true)
+  assert.equal(events[1].alerting, false)
+})
+
 test('이벤트 확인은 관리자 토큰으로 이벤트별 주소에 POST하고 401을 로그인 만료로 구분한다', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
