@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
@@ -45,17 +45,12 @@ const pendingCount = computed(() => events.value.some(event => event.status != n
 function selectEvent(id) {
   selectedCameraId.value = null
   selectedEventId.value = id
-  const event = events.value.find(item => item.id === id)
-  if (event && cameras.value.some(camera => camera.id === event.cameraId && camera.sourceType === 'live')) {
-    revealLiveWall()
-  }
 }
 function selectCamera(id) {
   selectedCameraId.value = id
   const latest = events.value.filter(event => event.cameraId === id)
     .reduce((current, event) => !current || Date.parse(event.detectedAt) > Date.parse(current.detectedAt) ? event : current, null)
   selectedEventId.value = latest?.id ?? null
-  if (cameras.value.some(camera => camera.id === id && camera.sourceType === 'live')) revealLiveWall()
 }
 function selectLiveTile(id) {
   if (id === null) {
@@ -64,10 +59,6 @@ function selectLiveTile(id) {
     return
   }
   selectCamera(id)
-}
-async function revealLiveWall() {
-  await nextTick()
-  document.getElementById('live-cctv-wall')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 function applyData(nextCameras, nextEvents, nextVideos = []) {
   const selection = retainSelection(selectedCameraId.value, selectedEventId.value, nextCameras, nextEvents)
@@ -241,7 +232,7 @@ h1 { margin: 0 0 6px; font-size: clamp(23px, 2vw, 30px); letter-spacing: -1.1px;
 .summary-card small { font-size: 11px; margin-left: 4px; }.metric-total { color: #a0adbd; font-weight: 400; font-size: 10px; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .dashboard-grid.with-detail:not(.map-hidden) { grid-template-columns: minmax(0, 1.6fr) minmax(320px, .9fr); }
-.map-panel { grid-column: 1; }.detail-panel { grid-column: 2; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }.events-panel { grid-column: 1 / -1; scroll-margin-top: 20px; }
+.map-panel { grid-column: 1; }.detail-panel { grid-column: 2; }.events-panel { grid-column: 1 / -1; scroll-margin-top: 20px; }
 .dashboard-grid.map-hidden .detail-panel { grid-column: 1; }
 .dashboard-grid > * { min-width: 0; }
 .load-status { padding: 26px; background: white; border-radius: 8px; color: #65748a; }
@@ -251,6 +242,6 @@ h1 { margin: 0 0 6px; font-size: clamp(23px, 2vw, 30px); letter-spacing: -1.1px;
 @media (min-width: 1600px) { .dashboard-content { padding: 30px 36px; }.sidebar { padding-top: 30px; } }
 @media (max-width: 1200px) { .app-shell { grid-template-columns: 188px minmax(0, 1fr); }.brand strong { font-size: 18px; }.brand > svg { width: 32px; }.nav-item { gap: 10px; font-size: 14px; }.dashboard-content { padding: 22px 18px; }.header-tools { gap: 10px; }.live-clock { display: none; } }
 @media (max-width: 960px) { .app-shell { grid-template-columns: 72px minmax(0, 1fr); }.sidebar { padding: 20px 9px; }.brand { padding: 0; justify-content: center; }.brand span, .nav-item span, .sidebar-footer { display: none; }.brand > svg { width: 37px; }.nav-item { padding: 15px; justify-content: center; } }
-@media (max-width: 800px) { .dashboard-grid.with-detail:not(.map-hidden) { grid-template-columns: minmax(0, 1fr); }.detail-panel { grid-column: 1; position: static; max-height: none; overflow: visible; } }
+@media (max-width: 800px) { .dashboard-grid.with-detail:not(.map-hidden) { grid-template-columns: minmax(0, 1fr); }.detail-panel { grid-column: 1; } }
 @media (max-width: 600px) { .dashboard-content { padding: 18px 12px; }.dashboard-header { align-items: start; }.dashboard-header h1 { font-size: 20px; letter-spacing: -.7px; }.dashboard-header p { font-size: 11px; }.user-profile { padding-left: 0; border: 0; font-size: 0; }.summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }.summary-card { padding: 9px; }.dashboard-footer { flex-direction: column; }.app-shell { grid-template-columns: 58px minmax(0, 1fr); }.sidebar { padding-left: 6px; padding-right: 6px; }.nav-item { padding: 14px 10px; } }
 </style>

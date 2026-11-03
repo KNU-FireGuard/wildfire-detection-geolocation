@@ -32,3 +32,20 @@ test('실시간 관제 영상은 선택과 무관하게 표시하고 선택해�
   assert.match(dashboardTemplate, /<LiveCctvWall\b[^>]*@select="selectLiveTile"/)
   assert.match(dashboard.scriptSetup.content, /function selectLiveTile\(id\) \{\s*if \(id === null\)/)
 })
+
+test('우측 상세 패널은 화면에 고정되거나 자체 스크롤을 갖지 않고 페이지와 함께 스크롤한다', () => {
+  const { descriptor } = parse(readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8'))
+  const css = descriptor.styles[0].content
+  // 넓은 화면의 기본 규칙 전체를 검사(미디어 쿼리 안의 해제 규칙으로 가려지지 않도록 쿼리를 제외)
+  const base = css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '')
+  const rules = [...base.matchAll(/(^|[}\s])([^{}]*\.detail-panel[^{}]*)\{([^}]*)\}/g)].map(match => match[3]).join(';')
+  assert.match(rules, /grid-column:\s*2/)
+  assert.doesNotMatch(rules, /position:\s*sticky/)
+  assert.doesNotMatch(rules, /max-height/)
+  assert.doesNotMatch(rules, /overflow(-y)?:\s*(auto|scroll)/)
+})
+
+test('실시간 카메라나 이벤트를 선택해도 화면을 자동으로 스크롤하지 않는다', () => {
+  const { descriptor } = parse(readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8'))
+  assert.doesNotMatch(descriptor.scriptSetup.content, /scrollIntoView|revealLiveWall|scrollTo\(/)
+})
