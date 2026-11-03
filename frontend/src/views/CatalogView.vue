@@ -2,11 +2,16 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchCameras, fetchEvents } from '../api/catalog'
+import { cameraName } from '../utils/cameraName'
 import { formatConfidence, formatDetectedAt, formatType } from '../utils/eventFormat'
 import { useQuery } from '../composables/useQuery'
 const props = defineProps({ resource: { type: String, required: true } })
 const titles = { cameras: '카메라 목록', events: '탐지 이벤트' }
-const loaders = { cameras: fetchCameras, events: fetchEvents }
+async function fetchEventsWithCameraNames({ signal }) {
+  const [events, cameras] = await Promise.all([fetchEvents({ signal }), fetchCameras({ signal })])
+  return events.map(event => ({ ...event, cameraName: cameraName(event.cameraId, cameras) }))
+}
+const loaders = { cameras: fetchCameras, events: fetchEventsWithCameraNames }
 const title = computed(() => titles[props.resource])
 const { data, loading, error, reload } = useQuery(() => props.resource, signal => loaders[props.resource]({ signal }))
 const rows = computed(() => data.value ?? [])
@@ -25,7 +30,7 @@ function openOnDashboard(id) {
       <p v-if="!rows.length" class="empty-message">등록된 {{ resource === 'cameras' ? '카메라가' : '탐지 이벤트가' }} 없습니다.</p>
       <div v-else class="table-scroll">
         <table v-if="resource === 'cameras'"><caption class="sr-only">카메라 목록</caption><thead><tr><th>이름</th><th>위도</th><th>경도</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id" class="camera-row" tabindex="0" title="더블클릭하면 대시보드에서 이 카메라를 봅니다" @dblclick="openOnDashboard(row.id)" @keydown.enter="openOnDashboard(row.id)"><td>{{ row.name }}</td><td>{{ row.latitude ?? '정보 없음' }}</td><td>{{ row.longitude ?? '정보 없음' }}</td></tr></tbody></table>
-        <table v-else><caption class="sr-only">탐지 이벤트 목록</caption><thead><tr><th>ID</th><th>탐지 시각</th><th>카메라 ID</th><th>유형</th><th>신뢰도</th><th>상세</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td>{{ row.id }}</td><td>{{ formatDetectedAt(row.detectedAt) }}</td><td>{{ row.cameraId ?? '정보 없음' }}</td><td>{{ formatType(row.type) }}</td><td>{{ formatConfidence(row.confidence) }}</td><td><RouterLink :to="`/events/${row.id}`">상세 보기</RouterLink></td></tr></tbody></table>
+        <table v-else><caption class="sr-only">탐지 이벤트 목록</caption><thead><tr><th>ID</th><th>탐지 시각</th><th>카메라</th><th>유형</th><th>신뢰도</th><th>상세</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td>{{ row.id }}</td><td>{{ formatDetectedAt(row.detectedAt) }}</td><td>{{ row.cameraName }}</td><td>{{ formatType(row.type) }}</td><td>{{ formatConfidence(row.confidence) }}</td><td><RouterLink :to="`/events/${row.id}`">상세 보기</RouterLink></td></tr></tbody></table>
       </div>
     </section>
   </div>

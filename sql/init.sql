@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS detection_events (
 
 ALTER TABLE detection_events ALTER COLUMN video_id DROP NOT NULL;
 ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS camera_id INTEGER REFERENCES cameras(id);
+-- 운영자가 이벤트를 확인한 시각, NULL이면 확인 대기입니다.
+ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ;
 DO $$ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint

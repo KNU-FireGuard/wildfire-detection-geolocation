@@ -4,15 +4,18 @@ import { useRoute } from 'vue-router'
 import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
+import FireAlertBanner from '../components/FireAlertBanner.vue'
 import EventDetail from '../components/EventDetail.vue'
 import LiveCctvWall from '../components/LiveCctvWall.vue'
-import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, loginAdmin, refreshLiveCctvs } from '../api/catalog'
+import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, loginAdmin, refreshLiveCctvs, acknowledgeEvent } from '../api/catalog'
 import { ensureAdminToken, useAdminSession } from '../composables/useAdminSession'
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
 import { summarizeOperatingCameras } from '../utils/cameraSummary'
 import { findRequestedCameraId } from '../utils/cameraLink'
+import { activeFireCameraIds, findNewFireEvents } from '../utils/fireAlert'
+import { playAlertTone } from '../utils/alertSound'
 
 // 데이터 공급 모드를 명시적으로 선택합니다. API 실패 시 mock으로 자동 대체하지 않습니다.
 const dataSource = import.meta.env.VITE_DATA_SOURCE ?? 'api'
@@ -26,7 +29,7 @@ const mapVisible = ref(true)
 const isLoading = ref(true)
 const loadError = ref('')
 const refreshError = ref('')
-const { isLoggedIn, signOut } = useAdminSession()
+const { token: adminToken, isLoggedIn, signOut } = useAdminSession()
 const showCctvRefreshForm = ref(false)
 const cctvRefreshBusy = ref(false)
 const cctvRefreshMessage = ref('')
@@ -39,6 +42,56 @@ let clockInterval
 let refreshInterval
 let loading = false
 let linkApplied = false
+let knownEventIds = null
+const fireAlerts = ref([])
+// 확인하지 않은 화재 카메라가 바뀔 때만 지도를 다시 그리도록 문자열 키를 거쳐 집합을 만듦
+const fireKey = computed(() => [...activeFireCameraIds(events.value)].sort((a, b) => a - b).join(','))
+const fireCameraIds = computed(() => new Set(fireKey.value ? fireKey.value.split(',').map(Number) : []))
+function openFireAlert(id) {
+  selectEvent(id)
+  fireAlerts.value = []
+}
+// 이벤트 확인은 관리자만 할 수 있어 로그인하지 않았다면 로그인 입력을 먼저 보여줌
+const ackWaitingIds = ref([])
+const ackBusy = ref(false)
+const ackError = ref('')
+function acknowledge(ids) {
+  ackError.value = ''
+  const list = Array.isArray(ids) ? ids : [ids]
+  if (dataSource === 'mock' || isLoggedIn.value) runAcknowledge(list)
+  else ackWaitingIds.value = list
+}
+async function submitAckLogin() {
+  if (ackBusy.value) return
+  ackBusy.value = true
+  ackError.value = ''
+  try {
+    await ensureAdminToken(loginAdmin, adminUsername.value, adminPassword.value)
+  } catch (error) {
+    ackError.value = error.message
+    ackBusy.value = false
+    adminPassword.value = ''
+    return
+  }
+  adminPassword.value = ''
+  ackBusy.value = false
+  await runAcknowledge(ackWaitingIds.value)
+}
+async function runAcknowledge(ids) {
+  ackBusy.value = true
+  try {
+    if (dataSource === 'api') for (const id of ids) await acknowledgeEvent(id, adminToken.value)
+    events.value = events.value.map(event => ids.includes(event.id) ? { ...event, status: 'CONFIRMED' } : event)
+    fireAlerts.value = fireAlerts.value.filter(event => !ids.includes(event.id))
+    ackWaitingIds.value = []
+    if (dataSource === 'api') await loadData({ silent: true })
+  } catch (error) {
+    ackError.value = error.message
+    if (error.code === 'unauthorized') { signOut(); ackWaitingIds.value = ids }
+  } finally {
+    ackBusy.value = false
+  }
+}
 const clock = computed(() => now.value.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }))
 const selectedEvent = computed(() => events.value.find(event => event.id === selectedEventId.value) ?? null)
 const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedCameraId.value)
@@ -73,6 +126,12 @@ function applyData(nextCameras, nextEvents, nextVideos = []) {
   videos.value = nextVideos
   selectedCameraId.value = selection.cameraId
   selectedEventId.value = selection.eventId
+  const fresh = findNewFireEvents(knownEventIds, nextEvents)
+  knownEventIds = new Set(nextEvents.map(event => event.id))
+  if (fresh.length) {
+    fireAlerts.value = [...fresh, ...fireAlerts.value]
+    playAlertTone()
+  }
 }
 async function loadData({ silent = false } = {}) {
   if (loading) return
@@ -195,11 +254,20 @@ onBeforeUnmount(() => {
       <div v-else-if="loadError" class="load-status" role="alert"><p>{{ loadError }}</p><button class="primary-button" @click="loadData">다시 시도</button></div>
       <template v-else>
         <p v-if="refreshError" class="refresh-error" role="alert">{{ refreshError }}</p>
+        <FireAlertBanner :events="fireAlerts" :cameras="cameras" @open="openFireAlert" @dismiss="fireAlerts = []" @acknowledge="acknowledge" />
+        <form v-if="ackWaitingIds.length" class="cctv-refresh-form" @submit.prevent="submitAckLogin">
+          <p>이벤트를 확인하려면 관리자 로그인이 필요합니다.</p>
+          <label>관리자 ID <input v-model="adminUsername" name="username" autocomplete="username" required></label>
+          <label>비밀번호 <input v-model="adminPassword" name="password" type="password" autocomplete="current-password" required></label>
+          <button type="submit" class="primary-button" :disabled="ackBusy">{{ ackBusy ? '확인 중…' : '로그인 후 확인' }}</button>
+          <button type="button" class="cctv-refresh-button" @click="ackWaitingIds = []">취소</button>
+        </form>
+        <p v-if="ackError" class="refresh-error" role="alert">{{ ackError }}</p>
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
-          <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" @select-camera="selectCamera" />
+          <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" :fire-camera-ids="fireCameraIds" @select-camera="selectCamera" />
           <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror />
           <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
-          <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" />
+          <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" @acknowledge="acknowledge" />
         </section>
         <section class="summary-grid" aria-label="관제 요약">
           <article class="summary-card"><span class="summary-icon red"><DashboardIcon name="fire" :size="29" /></span><div><p>탐지 이벤트</p><strong>{{ events.length }}<small>건</small></strong></div></article>

@@ -1,12 +1,11 @@
 ﻿<script setup>
 import { computed } from 'vue'
+import { cameraName as nameOf } from '../utils/cameraName'
 import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
 const props = defineProps({ events: { type: Array, default: () => [] }, cameras: { type: Array, default: () => [] }, selectedId: { type: [Number, String], default: null } })
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'acknowledge'])
+const cameraName = cameraId => nameOf(cameraId, props.cameras)
 const sortedEvents = computed(() => [...props.events].sort((a, b) => Date.parse(b.detectedAt) - Date.parse(a.detectedAt)))
-function cameraName(cameraId) {
-  return props.cameras.find(camera => camera.id === cameraId)?.name ?? (cameraId == null ? '카메라 정보 없음' : `카메라 ${cameraId}`)
-}
 </script>
 
 <template>
@@ -24,7 +23,7 @@ function cameraName(cameraId) {
             <td class="camera-cell">{{ cameraName(event.cameraId) }}</td>
             <td><span class="type-label" :class="event.type"><i />{{ formatType(event.type) }}</span></td>
             <td class="confidence-cell">{{ formatConfidence(event.confidence) }}</td>
-            <td><span class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span></td>
+            <td><span class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span><button v-if="event.status === 'UNCONFIRMED'" type="button" class="ack-button" :aria-label="`이벤트 ${event.id} 확인`" @click.stop="emit('acknowledge', event.id)">확인</button></td>
           </tr>
         </tbody>
       </table>
@@ -33,6 +32,8 @@ function cameraName(cameraId) {
 </template>
 
 <style scoped>
+.ack-button { margin-left: 8px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface-3); color: var(--text); font-size: 11px; }
+.ack-button:hover { border-color: var(--accent); color: var(--accent); }
 .event-count { color: var(--text-3); font-size: 12px; }
 .table-scroll { overflow-x: auto; }
 .event-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; white-space: nowrap; }

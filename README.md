@@ -49,7 +49,7 @@ python -m pip install -r ai/requirements.txt
 docker compose up -d db
 ```
 
-- 기존 DB 볼륨을 사용하는 경우 아래 명령을 다시 실행해 ITS 카메라·실시간 탐지 컬럼 반영
+- 기존 DB 볼륨을 사용하는 경우 아래 명령을 다시 실행해 ITS 카메라·실시간 탐지·이벤트 확인 컬럼 반영, 기존 데이터는 유지
 
 ### Bash
 

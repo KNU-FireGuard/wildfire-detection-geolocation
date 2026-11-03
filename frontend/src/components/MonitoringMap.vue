@@ -6,6 +6,7 @@ import { createNaverScene, hasCoordinates } from '../maps/naverScene'
 const props = defineProps({
   cameras: { type: Array, default: () => [] }, events: { type: Array, default: () => [] },
   selectedEvent: { type: Object, default: null }, selectedCamera: { type: Object, default: null },
+  fireCameraIds: { type: Object, default: () => new Set() },
 })
 const emit = defineEmits(['select-camera'])
 const container = ref(null)
@@ -74,6 +75,7 @@ async function initialize() {
   }
 }
 watch(mode, value => map?.setMapTypeId(maps.MapTypeId[value]))
+watch(() => props.fireCameraIds, render)
 watch(() => [props.cameras, props.events], () => { render(); showAll() }, { deep: true })
 watch(() => [props.selectedEvent, props.selectedCamera], () => {
   render()
@@ -101,7 +103,7 @@ onBeforeUnmount(() => {
           <button v-for="item in [{ id: 'NORMAL', label: '일반' }, { id: 'SATELLITE', label: '위성' }, { id: 'HYBRID', label: '위성·지명' }]" :key="item.id" :aria-pressed="mode === item.id" @click="mode = item.id">{{ item.label }}</button>
           <button @click="showAll">전체 위치</button>
         </div>
-        <div class="map-legend"><span class="camera-key">● CCTV</span><span class="fire-key">● 추정 산불 위치</span></div>
+        <div class="map-legend"><span class="camera-key">● CCTV</span><span class="fire-key">● 화재 탐지 CCTV</span><span class="fire-key">● 추정 산불 위치</span></div>
       </template>
     </div>
     <div class="map-selection" aria-live="polite">

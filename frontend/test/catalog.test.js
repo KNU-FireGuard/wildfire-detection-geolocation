@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { fetchCameras, fetchEvents, fetchVideos, fetchEvent, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, loginAdmin, startTestRun, fetchTestRunStatus, openTestRunStream } from '../src/api/catalog.js'
+import { fetchCameras, fetchEvents, fetchVideos, fetchEvent, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, loginAdmin, startTestRun, fetchTestRunStatus, openTestRunStream, acknowledgeEvent } from '../src/api/catalog.js'
 
 // feature/backend catalog.controller.js의 응답 규격에 대한 회귀 테스트입니다.
 const originalFetch = globalThis.fetch
@@ -64,7 +64,7 @@ test('Camera/Event를 API 필드에서 UI 모델로 분리하고 숫자 ID를 �
   assert.equal(events[0].detectedAt, rawEvent.started_at)
   assert.equal(events[0].type, 'smoke')
   assert.equal(events[0].confidence, 0.93)
-  assert.equal(events[0].status, null)
+  assert.equal(events[0].status, 'UNCONFIRMED')
   assert.deepEqual(events[0].estimatedLocation, { latitude: 36.0089, longitude: 128.7118, address: null, errorRadiusM: 50 })
   assert.ok(!('cameraName' in events[0]) && !('cameraLatitude' in events[0]))
 })
@@ -213,4 +213,29 @@ test('AI 감시 상태는 카메라 ID와 마지막 프레임 시각을 유지�
   assert.equal(status.state, 'running')
   assert.equal(status.cameras[0].camera_id, 9)
   assert.equal(status.cameras[0].last_frame_at, '2026-10-29T02:00:00Z')
+})
+
+test('확인 시각이 있는 이벤트는 확인 완료로 변환한다', async () => {
+  globalThis.fetch = async () => page([{ ...rawEvent, acknowledged_at: '2026-10-07T06:00:00.000Z' }])
+  const [event] = await fetchEvents()
+  assert.equal(event.status, 'CONFIRMED')
+  assert.equal(event.acknowledgedAt, '2026-10-07T06:00:00.000Z')
+})
+
+test('이벤트 확인은 관리자 토큰으로 이벤트별 주소에 POST하고 401을 로그인 만료로 구분한다', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return Response.json({ item: { ...rawEvent, acknowledged_at: '2026-10-07T06:00:00.000Z' } })
+  }
+  const event = await acknowledgeEvent(10, 'short-lived-token')
+  assert.equal(event.status, 'CONFIRMED')
+  assert.equal(calls[0].url, '/api/admin/events/10/acknowledge')
+  assert.equal(calls[0].options.method, 'POST')
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer short-lived-token')
+  globalThis.fetch = async () => Response.json({ error: '토큰 만료' }, { status: 401 })
+  await assert.rejects(acknowledgeEvent(10, 'old'), error => error.code === 'unauthorized')
+  globalThis.fetch = async () => Response.json({ error: '탐지 이벤트가 없습니다.' }, { status: 404 })
+  await assert.rejects(acknowledgeEvent(10, 'token'), /탐지 이벤트가 없습니다/)
+  await assert.rejects(acknowledgeEvent(0, 'token'), /올바르지 않은/)
 })
