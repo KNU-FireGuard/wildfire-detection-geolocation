@@ -81,6 +81,50 @@ class TestCameraConfigLoader(unittest.TestCase):
             load_camera_configs(self._write(bad))
 
 
+class TestEstimatorUsesCameraConfig(unittest.TestCase):
+    """추정기: 메타데이터 > 설정 파일 > 기본값, 프리셋·라벨 변환"""
+
+    CAM = {"lat": 35.791037, "lon": 128.591184, "tower_height": 15.0, "near_m": 30.0, "name": "가창오리"}
+    BBOX = [1000.0, 640.0, 1080.0, 740.0]
+
+    def _estimate(self, ptz: dict, cam_extra: dict | None = None) -> dict:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        cfgs = [dict(VALID["cameras"][0])]
+        cfgs[0]["ptz"] = {"pan_offset_deg": 119.4, "presets": {"P339/T03": {"pan": 99.0, "tilt": 0.5, "roll": 1.6}}}
+        est = FireLocationEstimator(camera_configs=cfgs)
+        cam = {**self.CAM, **(cam_extra or {})}
+        return est.estimate_location(
+            self.BBOX, {"camera": cam, "ptz": ptz}, use_skyline_calibration=False, bbox_normalized=False
+        )
+
+    def test_preset_label_uses_configured_pose_and_fov(self) -> None:
+        res = self._estimate({"preset": "P339/T03"})
+        self.assertEqual(res["status"], "OK")
+        self.assertAlmostEqual(res["calibration"]["pan"], 99.0)
+        self.assertAlmostEqual(res["calibration"]["tilt"], 0.5)
+        self.assertEqual(res["calibration"]["mode"], "config_preset")
+        self.assertEqual(res["camera_config"]["key"], "gachang-ori")
+        self.assertEqual(res["camera_config"]["fov_source"], "config")
+        self.assertAlmostEqual(res["camera_config"]["fov_h_deg"], 52.0)
+
+    def test_raw_label_pan_is_converted_with_offset(self) -> None:
+        res = self._estimate({"label_pan": 339.0, "label_tilt": 3.0})
+        self.assertAlmostEqual(res["calibration"]["pan"], (339.0 + 119.4) % 360.0)
+        self.assertAlmostEqual(res["calibration"]["tilt"], 3.0)
+        self.assertEqual(res["calibration"]["mode"], "label_offset")
+
+    def test_explicit_metadata_fov_overrides_config(self) -> None:
+        res = self._estimate({"preset": "P339/T03"}, {"fov_h": 47.0})
+        self.assertEqual(res["camera_config"]["fov_source"], "metadata")
+        self.assertAlmostEqual(res["camera_config"]["fov_h_deg"], 47.0)
+
+    def test_unknown_preset_is_reported_without_location(self) -> None:
+        res = self._estimate({"preset": "P999/T00"})
+        self.assertEqual(res["status"], "UNKNOWN_PRESET")
+        self.assertIsNone(res["location_estimation"])
+
+
 class TestShippedCameraConfig(unittest.TestCase):
     """저장소에 포함된 ai/config/cameras.json이 유효하고 가창오리 보정값을 담고 있어야 함"""
 

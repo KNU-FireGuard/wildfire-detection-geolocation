@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 
 try:
+    from ai.camera_config import find_camera_config, load_camera_configs
     from ai.camera_model import pixel_to_vector
     from ai.dem_skyline_engine import (
         DEMProvider,
@@ -16,6 +17,7 @@ try:
     )
     from ai.ridge_detector import SkylineExtractor
 except ImportError:
+    from camera_config import find_camera_config, load_camera_configs
     from camera_model import pixel_to_vector
     from dem_skyline_engine import (
         DEMProvider,
@@ -42,9 +44,12 @@ class FireLocationEstimator:
         self,
         dem_provider: DEMProvider | None = None,
         skyline_extractor: SkylineExtractor | None = None,
+        camera_configs: list[dict] | None = None,
     ):
         self.dem_provider = dem_provider
         self.skyline_extractor = skyline_extractor or SkylineExtractor()
+        # Per-camera calibration (ADR 0018): ai/config/cameras.json unless given explicitly
+        self.camera_configs = camera_configs if camera_configs is not None else load_camera_configs()
 
     def _get_provider(
         self,
@@ -234,6 +239,79 @@ class FireLocationEstimator:
         self,
         bbox: list[float] | tuple[float, float, float, float] | dict[str, float | int],
         metadata: dict,
+        **kwargs,
+    ) -> dict:
+        """
+        Estimate the fire location, applying the per-camera calibration (ADR 0018) first:
+          - FOV / tower height: metadata > ai/config/cameras.json > code default
+          - ptz {"preset": label}: configured preset pose (mode "config_preset")
+          - ptz {"label_pan", "label_tilt"}: label + configured pan offset (mode "label_offset")
+          - ptz {"pan", "tilt"}: already true-north azimuth (unchanged contract)
+        The result carries "camera_config": which config entry and FOV source were used.
+        See _estimate_location_core for the remaining options.
+        """
+        if "camera" not in metadata:
+            raise ValueError("메타데이터에 'camera' 필드가 필요합니다.")
+        cam = dict(metadata["camera"])
+        cfg = find_camera_config(self.camera_configs, camera_id=cam.get("id"), name=cam.get("name"))
+
+        if cam.get("fov_h") is not None:
+            fov_source = "metadata"
+        elif cfg is not None:
+            cam["fov_h"], fov_source = cfg["fov_h_deg"], "config"
+        else:
+            fov_source = "default"
+        if cam.get("tower_height") is None and cfg is not None and cfg.get("tower_height_m") is not None:
+            cam["tower_height"] = cfg["tower_height_m"]
+        info = {
+            "key": cfg["key"] if cfg is not None else None,
+            "fov_h_deg": float(cam.get("fov_h", 60.0)),
+            "fov_source": fov_source,
+        }
+
+        ptz = metadata.get("ptz")
+        if isinstance(ptz, dict) and ptz.get("preset") is not None:
+            pose = ((cfg or {}).get("ptz") or {}).get("presets", {}).get(str(ptz["preset"]))
+            if pose is None:
+                return self._no_location("UNKNOWN_PRESET", f"보정 설정에 프리셋 {ptz['preset']!r}가 없음", info)
+            ptz = {**pose, "mode": "config_preset"}
+        elif isinstance(ptz, dict) and ptz.get("label_pan") is not None and ptz.get("label_tilt") is not None:
+            offset = ((cfg or {}).get("ptz") or {}).get("pan_offset_deg")
+            if offset is None:
+                return self._no_location("UNKNOWN_PAN_OFFSET", "보정 설정에 Pan 오프셋이 없어 라벨을 변환할 수 없음", info)
+            ptz = {
+                "pan": (float(ptz["label_pan"]) + float(offset)) % 360.0,
+                "tilt": float(ptz["label_tilt"]),
+                "roll": float(ptz.get("roll", 0.0)),
+                "mode": "label_offset",
+            }
+
+        result = self._estimate_location_core(bbox, {**metadata, "camera": cam, "ptz": ptz}, **kwargs)
+        result["camera_config"] = info
+        return result
+
+    @staticmethod
+    def _no_location(status: str, reason: str, camera_config: dict) -> dict:
+        return {
+            "intersected": False,
+            "status": status,
+            "reason": reason,
+            "lat": None,
+            "lon": None,
+            "altitude_m": None,
+            "distance_m": None,
+            "bearing_deg": None,
+            "elevation_angle_deg": None,
+            "ray_vector": None,
+            "calibration": None,
+            "location_estimation": None,
+            "camera_config": camera_config,
+        }
+
+    def _estimate_location_core(
+        self,
+        bbox: list[float] | tuple[float, float, float, float] | dict[str, float | int],
+        metadata: dict,
         target_mode: str = "bottom_center",
         terrain_mode: str = "3d_dem",
         use_skyline_calibration: bool = True,
@@ -339,7 +417,7 @@ class FireLocationEstimator:
                 "d_tilt": 0.0,
                 "rms_deg": 0.0,
                 "calibrated": False,
-                "mode": "ptz_known",
+                "mode": str(ptz.get("mode", "ptz_known")),  # type: ignore[union-attr]
             }
             if use_skyline_calibration and ridge_pts is not None and len(ridge_pts) >= 3:
                 cal_res = provider.calibrate_ptz_zero_point(
