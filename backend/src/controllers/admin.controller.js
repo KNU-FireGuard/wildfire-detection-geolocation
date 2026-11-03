@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { pagination } = require('./catalog.controller');
+const { pagination, EVENT_COLUMNS, EVENT_FROM } = require('./catalog.controller');
 const { DOMESTIC_MOBILE } = require('../services/notifier');
 
 const PAGE_ERROR = 'limit은 1~100, offset은 0~2147483647의 정수여야 합니다.';
@@ -40,4 +40,18 @@ async function listSmsLogs(req, res) {
   return res.json({ items: rows, ...page });
 }
 
-module.exports = { listAdminCameras, updateAlertPhone, listSmsLogs };
+// 운영자가 화재 이벤트를 확인했음을 기록합니다. 이미 확인한 이벤트는 확인 시각을 바꾸지 않고 그대로 돌려줍니다.
+async function acknowledgeEvent(req, res) {
+  const raw = req.params.id;
+  const id = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isInteger(id) || id < 1 || id > 2147483647) {
+    return res.status(400).json({ error: '이벤트 ID는 1~2147483647의 정수여야 합니다.' });
+  }
+  await pool.query(`UPDATE detection_events SET acknowledged_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1 AND acknowledged_at IS NULL`, [id]);
+  const { rows } = await pool.query(`SELECT ${EVENT_COLUMNS} ${EVENT_FROM} WHERE e.id = $1`, [id]);
+  if (rows.length === 0) return res.status(404).json({ error: '탐지 이벤트가 없습니다.' });
+  return res.json({ item: rows[0] });
+}
+
+module.exports = { listAdminCameras, updateAlertPhone, listSmsLogs, acknowledgeEvent };

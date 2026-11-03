@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { cameraName } from '../utils/cameraName'
 import { formatDetectedAt } from '../utils/eventFormat'
 const props = defineProps({ events: { type: Array, required: true }, cameras: { type: Array, default: () => [] } })
-const emit = defineEmits(['open', 'dismiss'])
+const emit = defineEmits(['open', 'dismiss', 'acknowledge'])
 const latest = computed(() => props.events[0])
 </script>
 <template>
@@ -12,6 +12,7 @@ const latest = computed(() => props.events[0])
     <span>{{ cameraName(latest.cameraId, cameras) }} · {{ formatDetectedAt(latest.detectedAt) }}<template v-if="events.length > 1"> 외 {{ events.length - 1 }}건</template></span>
     <span class="fire-alert-actions">
       <button type="button" class="open" @click="emit('open', latest.id)">이벤트 보기</button>
+      <button type="button" class="open" @click="emit('acknowledge', events.map(event => event.id))">확인 완료</button>
       <button type="button" @click="emit('dismiss')">닫기</button>
     </span>
   </div>

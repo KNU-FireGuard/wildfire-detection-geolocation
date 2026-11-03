@@ -37,8 +37,9 @@ function normalizeEvent(event) {
       address: null,
       errorRadiusM: event.error_range_m,
     } : null,
-    // ended_at은 종료 시각입니다. 확인/미확인 상태로 해석하지 않습니다.
-    status: null,
+    // 운영자가 확인한 시각이 있으면 확인 완료, 없으면 확인 대기입니다. ended_at은 종료 시각이라 상태와 무관합니다.
+    acknowledgedAt: event.acknowledged_at ?? null,
+    status: event.acknowledged_at ? 'CONFIRMED' : 'UNCONFIRMED',
   }
 }
 
@@ -130,6 +131,23 @@ export async function refreshLiveCctvs(token) {
   const result = await response.json()
   if (result?.source !== 'live' || !Array.isArray(result.items)) throw new Error('CCTV 목록 갱신 응답이 올바르지 않습니다.')
   return result
+}
+
+// 운영자가 이벤트를 확인했다고 기록하고 갱신된 이벤트를 돌려줍니다.
+export async function acknowledgeEvent(eventId, token) {
+  if (!Number.isSafeInteger(eventId) || eventId < 1) throw new Error('올바르지 않은 이벤트 번호입니다.')
+  const response = await fetch(`/api/admin/events/${eventId}/acknowledge`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (response.status === 401) throw unauthorizedError()
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.error || `이벤트 확인에 실패했습니다. (HTTP ${response.status})`)
+  }
+  const data = await response.json()
+  if (!data?.item || typeof data.item !== 'object' || Array.isArray(data.item)) throw new Error('이벤트 확인 응답이 올바르지 않습니다.')
+  return normalizeEvent(data.item)
 }
 
 export async function loginAdmin(username, password) {

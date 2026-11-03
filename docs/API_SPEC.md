@@ -130,10 +130,13 @@
   "estimated_latitude": null,
   "estimated_longitude": null,
   "error_range_m": null,
+  "acknowledged_at": null,
   "created_at": "2026-10-01T09:10:00.000Z",
   "updated_at": "2026-10-01T09:10:00.000Z"
 }
 ```
+
+- `acknowledged_at`: 운영자가 확인한 시각, `null`이면 확인 대기
 
 - 실시간 탐지 이벤트는 `video_id: null`, `camera_id: 카메라 ID`
 
@@ -244,6 +247,15 @@
 - `200` `{ "id": 1, "name": "카메라 1", "alert_phone": "01012345678" }`
 - `400` 카메라 ID 또는 번호 형식 오류
 - `404` 카메라 없음
+
+### `POST /admin/events/:id/acknowledge`
+
+- 운영자가 이벤트를 확인했음을 기록, Request 본문 없음
+- 처음 확인하면 `acknowledged_at`에 현재 시각 저장, 이미 확인했다면 값을 바꾸지 않고 `200`
+- `200` `{ "item": <event> }`
+- `400` 이벤트 ID 형식 오류
+- `401` 토큰 없음 또는 만료
+- `404` 이벤트 없음
 
 ### `GET /admin/sms-logs`
 
