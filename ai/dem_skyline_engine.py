@@ -142,22 +142,74 @@ def fetch_open_meteo_batch(lats: np.ndarray, lons: np.ndarray, timeout: float = 
     return None
 
 
+def _is_valid_dem_cache(
+    npz_file: Path,
+    center_lat: float,
+    center_lon: float,
+    radius_m: float,
+    grid_size: int,
+) -> dict[str, np.ndarray] | None:
+    """Validate an existing .npz DEM cache against requested center (<=10m), radius, and grid_size."""
+    if not npz_file.exists():
+        return None
+    try:
+        with np.load(npz_file) as data:
+            if "center" not in data.files or "radius_m" not in data.files or "elevation" not in data.files:
+                return None
+            cached_center = data["center"]
+            cached_radius = float(data["radius_m"])
+            cached_elev = data["elevation"]
+            c_dist = haversine_distance(
+                center_lat, center_lon, float(cached_center[0]), float(cached_center[1])
+            )
+            if (
+                c_dist <= 10.0
+                and abs(cached_radius - radius_m) < 1.0
+                and cached_elev.shape == (grid_size, grid_size)
+            ):
+                out = {k: data[k] for k in data.files}
+                out["npz_path"] = npz_file  # type: ignore[assignment]
+                return out
+    except Exception:
+        return None
+    return None
+
+
 def build_and_cache_gachang_dem(
     center_lat: float = GACHANG_CAM_LAT,
     center_lon: float = GACHANG_CAM_LON,
     radius_m: float = 5000.0,
     grid_size: int = 201,
-    npz_path: Path = DEFAULT_NPZ_PATH,
+    npz_path: Path | str | None = None,
     force_rebuild: bool = False,
 ) -> dict[str, np.ndarray]:
     """
-    Build a 5km-radius elevation grid around Gachang O-ri CCTV and cache to gachang_dem.npz.
-    Verifies live Open-Meteo Elevation API anchor points and fuses high-resolution 30m DEM tiles
-    for fast, rate-limit-free execution.
+    Build a 5km-radius elevation grid and cache to an npz file.
+    Validates cache coordinate alignment (haversine <= 10m, radius, grid_size).
+    Automatically routes non-Gachang coordinates or mismatched parameters to a dynamic
+    file path (dem_{lat:.4f}_{lon:.4f}_{int(radius_m)}m.npz) to protect existing caches.
     """
-    if npz_path.exists() and not force_rebuild:
-        with np.load(npz_path) as data:
-            return {k: data[k] for k in data.files}
+    target_path = Path(npz_path) if npz_path is not None else DEFAULT_NPZ_PATH
+    dynamic_name = f"dem_{center_lat:.4f}_{center_lon:.4f}_{int(radius_m)}m.npz"
+
+    # 1. 가창면 기본 캐시 파일(gachang_dem.npz) 보호: 좌표(>10m), 반경(!=5000m), 격자(!=201)가 다르면 즉시 동적 파일명으로 분리
+    dist_to_gachang = haversine_distance(center_lat, center_lon, GACHANG_CAM_LAT, GACHANG_CAM_LON)
+    if target_path == DEFAULT_NPZ_PATH and (
+        dist_to_gachang > 10.0 or abs(radius_m - 5000.0) >= 1.0 or grid_size != 201
+    ):
+        target_path = target_path.parent / dynamic_name
+
+    # 2. 기존 캐시 파일 검증 (좌표 일치도 <= 10m, 반경, 격자 크기 확인)
+    if target_path.exists() and not force_rebuild:
+        cached = _is_valid_dem_cache(target_path, center_lat, center_lon, radius_m, grid_size)
+        if cached is not None:
+            return cached
+
+        # 요청 좌표/파라미터와 기존 파일이 불일치하면 기존 파일을 덮어쓰지 않도록 동적 파일명으로 우회
+        target_path = target_path.parent / dynamic_name
+        cached_dyn = _is_valid_dem_cache(target_path, center_lat, center_lon, radius_m, grid_size)
+        if cached_dyn is not None:
+            return cached_dyn
 
     dlat = radius_m / 111320.0
     dlon = radius_m / (111320.0 * math.cos(math.radians(center_lat)))
@@ -208,8 +260,9 @@ def build_and_cache_gachang_dem(
         else:
             raise RuntimeError("DEM 데이터를 다운로드할 수 없습니다. 네트워크 상태를 확인해주세요.")
 
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
-        npz_path,
+        target_path,
         lats=lats,
         lons=lons,
         elevation=elev_grid,
@@ -222,6 +275,7 @@ def build_and_cache_gachang_dem(
         "elevation": elev_grid,
         "center": np.array([center_lat, center_lon], dtype=np.float64),
         "radius_m": np.array(radius_m, dtype=np.float64),
+        "npz_path": target_path,  # type: ignore[dict-item]
     }
 
 
@@ -236,13 +290,13 @@ class DEMProvider:
         cam_lat: float = GACHANG_CAM_LAT,
         cam_lon: float = GACHANG_CAM_LON,
         radius_m: float = 5000.0,
-        npz_path: Path = DEFAULT_NPZ_PATH,
+        npz_path: Path | str | None = None,
         tower_height_m: float = 15.0,
     ):
         self.cam_lat = float(cam_lat)
         self.cam_lon = float(cam_lon)
         self.radius_m = float(radius_m)
-        self.npz_path = Path(npz_path)
+        self.npz_path = Path(npz_path) if npz_path is not None else DEFAULT_NPZ_PATH
         self.tower_height_m = float(tower_height_m)
 
         data = build_and_cache_gachang_dem(
@@ -251,6 +305,7 @@ class DEMProvider:
             radius_m=self.radius_m,
             npz_path=self.npz_path,
         )
+        self.npz_path = Path(data.get("npz_path", self.npz_path))  # type: ignore[arg-type]
         self.lats = data["lats"]
         self.lons = data["lons"]
         self.elevation = data["elevation"]

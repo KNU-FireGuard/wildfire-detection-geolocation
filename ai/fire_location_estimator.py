@@ -10,6 +10,7 @@ try:
         K_REFRACTION,
         R_EARTH,
         dest_point,
+        haversine_distance,
     )
 except ImportError:
     from dem_skyline_engine import (
@@ -19,6 +20,7 @@ except ImportError:
         K_REFRACTION,
         R_EARTH,
         dest_point,
+        haversine_distance,
     )
 
 
@@ -33,14 +35,35 @@ class FireLocationEstimator:
     def __init__(self, dem_provider: DEMProvider | None = None):
         self.dem_provider = dem_provider
 
-    def _get_provider(self, cam_lat: float, cam_lon: float, tower_height: float) -> DEMProvider:
-        if (
+    def _get_provider(
+        self,
+        cam_meta_or_lat: dict | float = GACHANG_CAM_LAT,
+        cam_lon: float | None = None,
+        tower_height: float = 15.0,
+    ) -> DEMProvider:
+        """
+        Return the DEMProvider, automatically updating when either camera coordinates
+        differ by > 10m or tower_height differs by > 0.1m.
+        Supports both _get_provider(cam_meta) and _get_provider(lat, lon, tower_h).
+        """
+        if isinstance(cam_meta_or_lat, dict):
+            cam = cam_meta_or_lat.get("camera", cam_meta_or_lat)
+            lat = float(cam.get("lat", GACHANG_CAM_LAT))
+            lon = float(cam.get("lon", GACHANG_CAM_LON))
+            t_h = float(cam.get("tower_height", 15.0))
+        else:
+            lat = float(cam_meta_or_lat)
+            lon = float(cam_lon if cam_lon is not None else GACHANG_CAM_LON)
+            t_h = float(tower_height)
+
+        need_new = (
             self.dem_provider is None
-            or abs(self.dem_provider.cam_lat - cam_lat) > 1e-4
-            or abs(self.dem_provider.cam_lon - cam_lon) > 1e-4
-        ):
+            or haversine_distance(self.dem_provider.cam_lat, self.dem_provider.cam_lon, lat, lon) > 10.0
+            or abs(self.dem_provider.tower_height_m - t_h) > 0.1
+        )
+        if need_new:
             self.dem_provider = DEMProvider(
-                cam_lat=cam_lat, cam_lon=cam_lon, tower_height_m=tower_height
+                cam_lat=lat, cam_lon=lon, tower_height_m=t_h
             )
         return self.dem_provider
 
@@ -126,11 +149,13 @@ class FireLocationEstimator:
         use_skyline_calibration: bool = True,
         step_size_m: float = 50.0,
         binary_search_iters: int = 10,
+        bbox_format: str = "xyxy",
     ) -> dict:
         """
         Estimate wildfire ignition coordinates (lat, lon, altitude_m, distance_m)
         using 50m Ray Marching + 10-step Binary Search on DEMProvider.
         Note: Supports upward rays (dz >= 0) intersecting high mountainsides above camera level.
+        bbox_format: "xyxy" [xmin, ymin, xmax, ymax] or "xywh" [xcenter, ycenter, width, height].
         """
         if "camera" not in metadata or "ptz" not in metadata:
             raise ValueError("메타데이터에 'camera' 및 'ptz' 필드가 필요합니다.")
@@ -177,8 +202,9 @@ class FireLocationEstimator:
             cal_info["calibrated"] = True
 
         # 2. Target Pixel & 3D Unit Direction Vector (dz >= 0 upward rays are allowed!)
+        fmt = metadata.get("bbox_format", bbox_format)
         fire_x, fire_y = self.resolve_target_pixel(
-            bbox, width=width, height=height, target_mode=target_mode
+            bbox, width=width, height=height, target_mode=target_mode, bbox_format=fmt
         )
         (dx, dy, dz), ray_bearing, ray_el_deg = self.compute_3d_ray_vector(
             fire_x=fire_x,
@@ -201,17 +227,30 @@ class FireLocationEstimator:
         if terrain_mode == "flat_earth":
             ref_plane_alt = ground_alt + float(cam.get("flat_plane_offset_m", 0.0))
             if abs(slope_dz_per_m) < 1e-5:
-                flat_d = 2000.0
+                flat_d = None
             else:
                 flat_d = (ref_plane_alt - eye_alt) / slope_dz_per_m
-                if flat_d <= 0.0:
-                    # Upward ray never hits a flat ground plane below the camera -> diverges to max range
-                    flat_d = max_range_m
-                else:
-                    flat_d = min(max(flat_d, near_m), max_range_m)
 
+            if flat_d is None or flat_d <= 0.0 or flat_d > max_range_m:
+                # Upward or out-of-range ray never hits a flat ground plane below the camera
+                return {
+                    "intersected": False,
+                    "status": "NO_INTERSECTION",
+                    "lat": None,
+                    "lon": None,
+                    "altitude_m": None,
+                    "distance_m": None,
+                    "bearing_deg": ray_bearing,
+                    "elevation_angle_deg": ray_el_deg,
+                    "ray_vector": (dx, dy, dz),
+                    "calibration": cal_info,
+                }
+
+            flat_d = max(flat_d, near_m)
             est_lat, est_lon = dest_point(cam_lat, cam_lon, ray_bearing, flat_d)
             return {
+                "intersected": True,
+                "status": "OK",
                 "lat": est_lat,
                 "lon": est_lon,
                 "altitude_m": ref_plane_alt,
@@ -242,9 +281,19 @@ class FireLocationEstimator:
             prev_d = curr_d
 
         if not hit:
-            # If ray grazed slightly above the peak due to severe upward tilt error, clamp to max horizon peak
-            curr_d = max_range_m
-            prev_d = max_range_m - step_size_m
+            # Ray escaped to the sky without intersecting any terrain up to max_range_m
+            return {
+                "intersected": False,
+                "status": "NO_INTERSECTION",
+                "lat": None,
+                "lon": None,
+                "altitude_m": None,
+                "distance_m": None,
+                "bearing_deg": ray_bearing,
+                "elevation_angle_deg": ray_el_deg,
+                "ray_vector": (dx, dy, dz),
+                "calibration": cal_info,
+            }
 
         # 4. 10-step Binary Search for sub-decimeter surface intersection precision
         low_d, high_d = prev_d, curr_d
@@ -266,6 +315,8 @@ class FireLocationEstimator:
         est_alt = float(provider.get_elevation(est_lat, est_lon))
 
         return {
+            "intersected": True,
+            "status": "OK",
             "lat": est_lat,
             "lon": est_lon,
             "altitude_m": est_alt,
