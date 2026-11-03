@@ -117,7 +117,7 @@ test('선택된 타일을 다시 누르면 선택을 해제하고 다른 타일�
   app.unmount()
 })
 
-test('타일 버튼은 영상이 우측 패널에 표시됨을 안내하고 선택된 타일은 선택 해제를 안내한다', async () => {
+test('타일마다 버튼 하나만 두고 화면에는 카메라 이름만 보이며 접근성 이름과 선택 상태는 유지한다', async () => {
   const cameras = [
     { id: 1, name: '첫 번째 CCTV', streamUrl: 'https://example.test/1.m3u8' },
     { id: 2, name: '두 번째 CCTV', streamUrl: 'https://example.test/2.m3u8' },
@@ -127,10 +127,13 @@ test('타일 버튼은 영상이 우측 패널에 표시됨을 안내하고 선�
   app.mount(root)
   await new Promise(resolve => setTimeout(resolve, 0))
   await nextTick()
-  const text = allText(root)
-  assert.match(text, /우측에 표시/)
-  assert.match(text, /선택 해제/)
-  assert.doesNotMatch(text, /크게 보기|작게 보기/)
+  const buttons = findAll(root, 'button')
+  assert.equal(buttons.length, 2)
+  buttons.forEach((button, index) => {
+    assert.equal(allText(button).trim(), cameras[index].name)
+    assert.match(button.props['aria-label'], /선택/)
+  })
+  assert.equal(buttons[1].props['aria-pressed'], true)
+  assert.equal(buttons[0].props['aria-pressed'], false)
   app.unmount()
 })
-
