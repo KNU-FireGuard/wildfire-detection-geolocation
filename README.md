@@ -98,6 +98,10 @@ npm run dev
 - 대시보드의 CCTV 주소 갱신 버튼에서 관리자 계정으로 최초 목록 조회 또는 영상 주소 수동 갱신
 - Test 카메라를 선택한 뒤 `Test 분석 시작`에서 관리자 계정으로 등록 영상 분석 실행
 - AI 실시간 작업자가 준비되면 `.env`의 `AI_LIVE_RUNNER_PATH`에 저장소 루트 기준 Python 파일 경로 입력 후 Backend 재시작
+- 화재 문자: 기존 DB는 `sql/init.sql` 재실행, 사이드 메뉴 `관리자`에서 로그인 후 카메라별 번호 설정과 발송 내역 확인
+- `.env`의 `SMS_PROVIDER=console`이면 실제 발송 없이 Backend 로그와 발송 내역만 기록
+- 실제 발송은 [솔라피](https://solapi.com) 가입 후 API 키 발급, `.env`에 `SMS_PROVIDER=solapi`, `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`, `SOLAPI_SENDER`(발신번호) 설정 후 Backend 재시작
+- 가입 본인인증 휴대전화 번호는 발신번호로 자동 등록, 가입 시 300P 무료 지급, 포인트가 소진되면 충전 필요
 
 ## 4 Frontend
 

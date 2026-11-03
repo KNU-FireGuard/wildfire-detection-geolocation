@@ -222,17 +222,57 @@
 - `200` `{ "id": 1, "username": "admin" }`
 - `401` 토큰 누락·오류·만료
 
-## SMS 수신자
+## 화재 알림 SMS 관리
 
-| Method · 경로 | 요청 | 성공 응답 |
-| --- | --- | --- |
-| `GET /sms-recipients` | Bearer JWT | `200` `{ "items": [<recipient>] }` |
-| `POST /sms-recipients` | Bearer JWT · `{ "name": "담당자", "phone_number": "01012345678" }` | `201` 생성 항목 |
-| `PATCH /sms-recipients/:id` | Bearer JWT · 변경할 필드 | `200` 수정 항목 |
-| `DELETE /sms-recipients/:id` | Bearer JWT | `204` |
+- 모든 `/admin/*` API는 `Authorization: Bearer <JWT>` 필요, 누락·오류·만료 시 `401`
+- 알림 번호는 공개 `GET /cameras`에 포함하지 않고 아래 관리자 API에서만 제공
+- 문자는 카메라의 `fire` 탐지 이벤트가 새로 생길 때 해당 카메라 번호로 발송, `smoke`는 발송하지 않음
+- Test 실행과 실시간 감시 모두 `POST /detections` 경로로 같은 규칙 적용
+- 같은 실행(run)에서 `fire` 이벤트는 1회만 발송, Test 실행을 새로 시작하면 다시 발송
+- 발송 실패는 탐지 저장과 `POST /detections` 응답에 영향 없음, 결과는 `sms_logs`에 기록
 
-### 수신자 항목
+### `GET /admin/cameras`
+
+- Query: `limit` 기본 `50` · `1~100`, `offset` 기본 `0` · `0~2147483647`
+- `200` `{ "items": [{ "id": 1, "name": "카메라 1", "source_type": "test", "alert_phone": "01012345678" }], "limit": 50, "offset": 0 }`
+- `alert_phone`: 문자열 또는 `null`
+
+### `PATCH /admin/cameras/:id/alert-phone`
+
+- Request: `{ "alert_phone": "01012345678" }`, `null`이면 번호 해제
+- `alert_phone` 형식: 하이픈 없는 `010` 휴대전화 11자리 또는 `null`
+- `200` `{ "id": 1, "name": "카메라 1", "alert_phone": "01012345678" }`
+- `400` 카메라 ID 또는 번호 형식 오류
+- `404` 카메라 없음
+
+### `GET /admin/sms-logs`
+
+- Query: `limit` 기본 `50` · `1~100`, `offset` 기본 `0` · `0~2147483647`
+- 정렬: `created_at` 내림차순
+- `200` `{ "items": [<sms_log>], "limit": 50, "offset": 0 }`
 
 ```json
-{ "id": 1, "name": "담당자", "phone_number": "01012345678", "is_active": true }
+{
+  "id": 4,
+  "camera_id": 1,
+  "camera_name": "카메라 1",
+  "event_id": 9,
+  "phone_number": "01012345678",
+  "message": "[FireGuard] 화재 탐지: 카메라 1",
+  "status": "sent",
+  "provider": "solapi",
+  "error": null,
+  "created_at": "2026-11-03T01:00:00.000Z"
+}
 ```
+
+- `status`: `sent` 업체가 발송 요청을 수락 | `failed` 발송 실패 | `skipped` 번호 미설정
+- `phone_number`: `skipped`이면 `null`
+
+### 발송 설정
+
+- Backend 환경변수 `SMS_PROVIDER`: `console` 기본, 로그만 출력 | `solapi` 실제 발송
+- `solapi`: `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`, `SOLAPI_SENDER`(등록된 발신번호) 필수, `SOLAPI_API_URL` 선택
+- 솔라피 호출: `POST /messages/v4/send-many/detail`, `Authorization: HMAC-SHA256 apiKey, date, salt, signature`
+- 솔라피는 HTTP 오류, 응답의 `errorCode`, 비어 있지 않은 `failedMessageList` 중 하나라도 있으면 `failed`로 기록
+- 키는 Backend 환경변수에만 저장, Frontend 노출 금지

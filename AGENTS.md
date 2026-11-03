@@ -18,7 +18,7 @@
 - 카메라별 실행 API와 AI의 MJPEG 영상·탐지 JSON 전송 계약은 [API 명세](docs/API_SPEC.md)를 따름
 - Backend가 실행 ID를 만들고 `run_id`, `camera_id`, 영상 경로와 전송 주소를 AI 프로세스 인자로 전달, AI 코드에 실행 ID를 하드코딩하지 않음
 - 구현 상태는 [시스템 아키텍처](docs/System_architecture.md), 요청·응답 계약은 [API 명세](docs/API_SPEC.md)를 기준으로 확인
-- `POST /api/detections`는 AI 탐지 JSON을 검증하고 실행·클래스별 탐지 이벤트를 DB에 저장·갱신, SMS 발송은 미구현
+- `POST /api/detections`는 AI 탐지 JSON을 검증하고 실행·클래스별 탐지 이벤트를 DB에 저장·갱신, `fire` 이벤트가 새로 생기면 카메라별 알림 번호로 SMS 발송
 - AI 실행 API와 탐지 JSON 계약 변경 시 [API 명세](docs/API_SPEC.md)와 실제 검증 규칙을 함께 갱신
 - 실제 영상·`.env`·`frontend/.env.local`은 Git에서 제외
 - 초기 관리자는 루트 `.env`와 `backend/`의 `npm run create-admin`으로 생성, 비밀번호 원문을 SQL이나 Git에 저장하지 않음

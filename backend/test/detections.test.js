@@ -14,6 +14,8 @@ require.cache[dbPath] = {
       queryCalls.push({ sql, params });
       if (/INSERT INTO detection_events/.test(sql)) return { rows: [{ id: 1 }] };
       if (/UPDATE detection_events/.test(sql)) return { rows: [{ id: params[0] }] };
+      // 화재 알림 조회는 카메라가 없는 것으로 처리해 발송과 기록을 건너뜀
+      if (/FROM cameras WHERE id/.test(sql)) return { rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
   },
@@ -149,4 +151,53 @@ test('위치 추정은 null 또는 유효한 좌표 객체를 허용한다', asy
   const noLocationUpdate = queryCalls.filter(call => /UPDATE detection_events/.test(call.sql)).at(-1);
   assert.equal(noLocationUpdate.params[2], null);
   assert.match(noLocationUpdate.sql, /COALESCE\(\$3, estimated_latitude\)/);
+});
+
+test('fire 이벤트가 처음 생성될 때만 화재 알림을 요청한다', async () => {
+  const fireAlert = require('../src/services/fire-alert');
+  const original = fireAlert.notifyFireDetected;
+  const alerts = [];
+  fireAlert.notifyFireDetected = async alert => { alerts.push(alert); };
+  const post = body => fetch(base, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-AI-Token': process.env.AI_CALLBACK_TOKEN },
+    body: JSON.stringify(body),
+  });
+  try {
+    const alertRun = testRuns.createRun({ cameraId: 5, videoId: 8, filePath: '/tmp/alert.mp4' });
+    const fire = { ...payload, run_id: alertRun.id, camera_id: 5 };
+    const smoke = { ...fire, detection: { ...fire.detection, class: 'smoke' } };
+
+    assert.equal((await post(smoke)).status, 202);
+    assert.equal(alerts.length, 0, 'smoke는 화면 표시만 하고 문자를 보내지 않는다');
+
+    assert.equal((await post(fire)).status, 202);
+    assert.equal(alerts.length, 1);
+    assert.deepEqual(alerts[0], { cameraId: 5, eventId: 1, confidence: 0.94 });
+
+    assert.equal((await post(fire)).status, 202);
+    assert.equal(alerts.length, 1, '같은 실행의 반복 탐지는 문자를 다시 보내지 않는다');
+  } finally {
+    fireAlert.notifyFireDetected = original;
+  }
+});
+
+test('화재 알림이 실패해도 탐지 결과는 202로 저장된다', async () => {
+  const fireAlert = require('../src/services/fire-alert');
+  const original = fireAlert.notifyFireDetected;
+  fireAlert.notifyFireDetected = async () => { throw new Error('sms down'); };
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const failRun = testRuns.createRun({ cameraId: 6, videoId: 9, filePath: '/tmp/fail.mp4' });
+    const response = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AI-Token': process.env.AI_CALLBACK_TOKEN },
+      body: JSON.stringify({ ...payload, run_id: failRun.id, camera_id: 6 }),
+    });
+    assert.equal(response.status, 202);
+  } finally {
+    fireAlert.notifyFireDetected = original;
+    console.error = originalError;
+  }
 });

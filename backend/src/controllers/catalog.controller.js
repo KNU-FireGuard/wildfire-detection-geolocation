@@ -141,4 +141,4 @@ async function streamVideo(req, res) {
   stream.pipe(res);
 }
 
-module.exports = { listCameras, listVideos, listEvents, getEvent, streamVideo };
+module.exports = { listCameras, listVideos, listEvents, getEvent, streamVideo, pagination };

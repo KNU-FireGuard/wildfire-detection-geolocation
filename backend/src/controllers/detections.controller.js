@@ -1,6 +1,7 @@
 const { validateDetection } = require('../validators/detections.validator');
 const pool = require('../config/db');
 const testRuns = require('../services/run-manager');
+const fireAlert = require('../services/fire-alert');
 
 async function receiveDetection(req, res) {
   const detection = req.body;
@@ -47,6 +48,12 @@ async function receiveDetection(req, res) {
       RETURNING id
     `, [run.video_id, run.video_id ? null : run.camera_id, className, confidence, ...coordinates]);
     run.eventIdsByClass.set(className, rows[0].id);
+    // fire만 문자 대상, smoke는 화면 표시만. 번호는 이벤트가 아닌 실행의 카메라 ID로 조회
+    if (className === 'fire') {
+      void Promise.resolve()
+        .then(() => fireAlert.notifyFireDetected({ cameraId: run.camera_id, eventId: rows[0].id, confidence }))
+        .catch(error => console.error('화재 알림 요청 오류:', error.message));
+    }
   }
 
   return res.status(202).json({ accepted: true });
