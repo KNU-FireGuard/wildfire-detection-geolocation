@@ -1,5 +1,6 @@
 ﻿<script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
@@ -11,9 +12,11 @@ import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
 import { summarizeOperatingCameras } from '../utils/cameraSummary'
+import { findRequestedCameraId } from '../utils/cameraLink'
 
 // 데이터 공급 모드를 명시적으로 선택합니다. API 실패 시 mock으로 자동 대체하지 않습니다.
 const dataSource = import.meta.env.VITE_DATA_SOURCE ?? 'api'
+const route = useRoute()
 const cameras = ref([])
 const events = ref([])
 const videos = ref([])
@@ -35,6 +38,7 @@ let requestController
 let clockInterval
 let refreshInterval
 let loading = false
+let linkApplied = false
 const clock = computed(() => now.value.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }))
 const selectedEvent = computed(() => events.value.find(event => event.id === selectedEventId.value) ?? null)
 const selectedCamera = computed(() => cameras.value.find(camera => camera.id === selectedCameraId.value)
@@ -108,6 +112,12 @@ async function loadData({ silent = false } = {}) {
     }))
     applyData([...nextCameras.filter(camera => camera.sourceType !== 'live'), ...liveCameras], nextEvents, nextVideos)
     refreshError.value = ''
+    // 카메라 목록에서 넘어온 경우 첫 조회 뒤 한 번만 해당 카메라를 선택
+    if (!linkApplied) {
+      linkApplied = true
+      const requested = findRequestedCameraId(route.query.camera, cameras.value)
+      if (requested !== null) selectCamera(requested)
+    }
   } catch (error) {
     const message = controller.signal.aborted
       ? '조회 시간이 초과되었습니다. Backend 서버 연결을 확인하고 다시 시도해주세요.'
