@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import math
+import unittest
+
+import numpy as np
+
+from ai.camera_model import direction_to_pixel, focal_length_px, pixel_to_direction
+
+W, H, FOV = 1920, 1080, 60.0
+
+
+class TestPinholeRotationModel(unittest.TestCase):
+    """정식 핀홀 회전 모델: 해석해와 비교, 왕복 일관성, Roll 부호 규약"""
+
+    def test_center_pixel_points_along_pan_tilt(self) -> None:
+        az, el = pixel_to_direction(W / 2, H / 2, 123.4, 5.6, 1.5, W, H, FOV)
+        self.assertAlmostEqual(float(az), 123.4, places=9)
+        self.assertAlmostEqual(float(el), 5.6, places=9)
+
+    def test_edge_pixel_elevation_matches_closed_form(self) -> None:
+        """Tilt·Roll 0일 때 가장자리 픽셀 고도각 = atan(dy / sqrt(f^2 + dx^2)), 근사식 atan(dy / f)와 다름"""
+        f = focal_length_px(W, FOV)
+        dx = W / 2  # 화면 오른쪽 끝 (가로 30°)
+        dy = f * math.tan(math.radians(10.0))  # 근사식이라면 고도각 10°
+        az, el = pixel_to_direction(W / 2 + dx, H / 2 - dy, 0.0, 0.0, 0.0, W, H, FOV)
+        self.assertAlmostEqual(float(az), math.degrees(math.atan(dx / f)), places=9)
+        self.assertAlmostEqual(float(el), math.degrees(math.atan(dy / math.hypot(f, dx))), places=9)
+        self.assertLess(float(el), 9.0)  # 실제 약 8.7°: 근사식 10°와 1.3° 차이
+
+    def test_center_column_with_tilt_is_pure_pitch(self) -> None:
+        f = focal_length_px(W, FOV)
+        _, el = pixel_to_direction(W / 2, H / 2 - 200.0, 40.0, 7.0, 0.0, W, H, FOV)
+        self.assertAlmostEqual(float(el), 7.0 + math.degrees(math.atan(200.0 / f)), places=9)
+
+    def test_positive_roll_lowers_right_side_of_horizon(self) -> None:
+        """기존 코드와 같은 규약: Roll이 양수면 화면 오른쪽의 수평선이 아래(y 증가)로 내려감"""
+        x, y, front = direction_to_pixel(20.0, 0.0, 0.0, 0.0, 2.0, W, H, FOV)
+        self.assertTrue(bool(front))
+        self.assertGreater(float(x), W / 2)
+        self.assertGreater(float(y), H / 2)
+
+    def test_round_trip_pixel_direction_pixel(self) -> None:
+        rng = np.random.default_rng(0)
+        xs = rng.uniform(0, W, 200)
+        ys = rng.uniform(0, H, 200)
+        pose = (321.0, -4.0, 2.2)
+        az, el = pixel_to_direction(xs, ys, *pose, W, H, FOV)
+        x2, y2, front = direction_to_pixel(az, el, *pose, W, H, FOV)
+        self.assertTrue(bool(np.all(front)))
+        np.testing.assert_allclose(x2, xs, atol=1e-6)
+        np.testing.assert_allclose(y2, ys, atol=1e-6)
+
+    def test_direction_behind_camera_is_flagged(self) -> None:
+        _, _, front = direction_to_pixel(180.0, 0.0, 0.0, 0.0, 0.0, W, H, FOV)
+        self.assertFalse(bool(front))
+
+
+if __name__ == "__main__":
+    unittest.main()
