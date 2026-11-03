@@ -156,26 +156,74 @@ def _ridge_rms_deg(provider, xs, ys, pose, width, height, fov) -> float:
     return float(np.sqrt(np.mean((el - np.interp(az % 360.0, az_ext, sky_ext)) ** 2)))
 
 
-def _fit_view(provider, ridge: dict, fov: float, seed: tuple[float, float]) -> dict:
-    """화각 fov에서 한 화면의 자세를 정식 회전 모델로 추정 (seed Pan 주변 탐색)"""
+def _landmark_vectors(provider, landmarks: list[dict]):
+    """카메라 눈 위치에서 랜드마크까지의 ENU 벡터 (수 km 이내 평면 근사)"""
     import numpy as np
+
+    m_lat = 111320.0
+    m_lon = 111320.0 * math.cos(math.radians(provider.cam_lat))
+    rows = []
+    for lm in landmarks:
+        dz = float(provider.get_elevation(lm["lat"], lm["lon"])) + lm["height_m"] - provider.eye_alt
+        rows.append(((lm["lon"] - provider.cam_lon) * m_lon, (lm["lat"] - provider.cam_lat) * m_lat, dz))
+    return np.array(rows, dtype=np.float64).reshape(-1, 3)
+
+
+def _landmark_errors_deg(vecs, px, P, T, R, width, height, fov):
+    """후보 자세(K개)마다 랜드마크(L개) 투영 위치와 표시 픽셀의 각도 오차 (L, K), 카메라 뒤쪽은 90°"""
+    import numpy as np
+
+    from ai.camera_model import camera_basis_batch, focal_length_px
+
+    f = focal_length_px(width, fov)
+    fwd, right, up = camera_basis_batch(P, T, R)
+    z = vecs @ fwd.T
+    zs = np.where(z > 1e-6, z, np.nan)
+    x = width / 2.0 + f * (vecs @ right.T) / zs
+    y = height / 2.0 - f * (vecs @ up.T) / zs
+    err_px = np.hypot(x - px[:, 0:1], y - px[:, 1:2])
+    return np.where(np.isfinite(err_px), np.degrees(np.arctan(err_px / f)), 90.0)
+
+
+def _fit_view(provider, ridge: dict, fov: float, seed: tuple[float, float], lm_vecs=None, lm_px=None) -> dict:
+    """
+    화각 fov에서 한 화면의 자세를 정식 회전 모델로 추정 (seed Pan 주변 탐색)
+    보정용 랜드마크가 있으면 후보 점수 = 능선 잔차² + 랜드마크 각도 오차² 평균
+    """
+    import numpy as np
+
+    from ai.camera_model import focal_length_px
 
     xs = ridge["pts"][:, 0]
     ys = provider._clean_ridge_y(ridge["pts"][:, 1])
     w, h = ridge["width"], ridge["height"]
+    f = focal_length_px(w, fov)
+    has_lm = lm_vecs is not None and len(lm_vecs) > 0
+
+    def score(P, T, R, rms):
+        s = np.degrees(np.arctan(rms / f)) ** 2
+        if has_lm:
+            s = s + np.mean(_landmark_errors_deg(lm_vecs, lm_px, P, T, R, w, h, fov) ** 2, axis=0)
+        return s
+
     seed_pan, seed_tilt = seed
     P, T, R, rms = provider._fit_pose_exact(
         xs, ys, seed_pan + np.arange(-10.0, 10.0 + 1e-6, 0.5), np.arange(-2.5, 2.5 + 1e-6, 0.5), seed_tilt, w, h, fov
     )
-    k = int(np.argmin(rms))
+    k = int(np.argmin(score(P, T, R, rms)))
     P, T, R, rms = provider._fit_pose_exact(
         xs, ys, P[k] + np.arange(-0.5, 0.5 + 1e-6, 0.05),
         np.clip(R[k] + np.arange(-0.5, 0.5 + 1e-6, 0.1), -2.5, 2.5), T[k], w, h, fov,
     )
-    k = int(np.argmin(rms))
+    k = int(np.argmin(score(P, T, R, rms)))
     pose = (float(P[k]) % 360.0, float(T[k]), float(R[k]))
-    return {"pan": pose[0], "tilt": pose[1], "roll": pose[2],
-            "rms_deg": _ridge_rms_deg(provider, xs, ys, pose, w, h, fov) if np.isfinite(rms[k]) else 999.0}
+    out = {"pan": pose[0], "tilt": pose[1], "roll": pose[2],
+           "rms_deg": _ridge_rms_deg(provider, xs, ys, pose, w, h, fov) if np.isfinite(rms[k]) else 999.0,
+           "landmark_errors_deg": []}
+    if has_lm:
+        out["landmark_errors_deg"] = [float(e) for e in _landmark_errors_deg(
+            lm_vecs, lm_px, np.array([P[k]]), np.array([T[k]]), np.array([R[k]]), w, h, fov)[:, 0]]
+    return out
 
 
 def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
@@ -212,10 +260,26 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
         return {"status": "FAILED", "fov_h_deg": None, "fov_interval": None, "fov_curve": [],
                 "views": {}, "pan_offset": None, "warnings": warnings}
 
+    # 보정용(fit) 랜드마크만 계산에 사용, 검증용(val)은 여기서 쓰지 않음 (순환 검증 방지)
+    fit_lms = {vid: [lm for lm in job["landmarks"] if lm["use"] == "fit" and lm["view"] == vid] for vid in seeds}
+    for lm in job["landmarks"]:
+        if lm["use"] == "fit" and lm["view"] not in seeds:
+            warnings.append(f"LANDMARK_IGNORED:{lm['name']}:VIEW_FAILED")
+    lm_arrays = {
+        vid: (_landmark_vectors(provider, lms), np.array([lm["px"] for lm in lms], dtype=np.float64).reshape(-1, 2))
+        for vid, lms in fit_lms.items() if lms
+    }
+
     curve, fits = [], {}
     for fov in fovs:
-        per_view = {vid: _fit_view(provider, ridges[vid], float(fov), seed) for vid, seed in seeds.items()}
+        per_view = {
+            vid: _fit_view(provider, ridges[vid], float(fov), seed, *lm_arrays.get(vid, (None, None)))
+            for vid, seed in seeds.items()
+        }
         cost = float(np.mean([v["rms_deg"] ** 2 for v in per_view.values()]))
+        lm_errs = [e for v in per_view.values() for e in v["landmark_errors_deg"]]
+        if lm_errs:
+            cost += float(np.mean(np.square(lm_errs)))
         curve.append((float(fov), cost))
         fits[float(fov)] = per_view
 
@@ -241,5 +305,10 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
         "fov_curve": curve,
         "views": views,
         "pan_offset": pan_offset,
+        "fit_landmarks": [
+            {"name": lm["name"], "view": vid, "error_deg": err}
+            for vid, lms in fit_lms.items() if vid in views
+            for lm, err in zip(lms, views[vid]["landmark_errors_deg"])
+        ],
         "warnings": warnings,
     }

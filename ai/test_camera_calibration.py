@@ -107,6 +107,47 @@ class SyntheticCalibrationCase(unittest.TestCase):
         return load_calibration_job(p, base_dir=self.dir)
 
 
+def make_landmarks(provider, view: str, pose: tuple, fov: float, use: str, offsets=(-15.0, 0.0, 15.0), dist_m=600.0):
+    """카메라에서 (Pan + 오프셋) 방향 dist_m 지점의 지면 점을 주어진 자세·화각으로 투영해 랜드마크 생성"""
+    import math as _m
+
+    from ai.camera_model import direction_to_pixel
+    from ai.dem_skyline_engine import dest_point
+
+    lms = []
+    for i, off in enumerate(offsets):
+        la, lo = dest_point(provider.cam_lat, provider.cam_lon, (pose[0] + off) % 360.0, dist_m)
+        dz = float(provider.get_elevation(la, lo)) - provider.eye_alt
+        el = _m.degrees(_m.atan2(dz, dist_m))
+        x, y, _ = direction_to_pixel((pose[0] + off) % 360.0, el, *pose, 1920, 1080, fov)
+        lms.append({"name": f"{view}-{use}-{i}", "lat": la, "lon": lo, "height_m": 0.0,
+                    "view": view, "px": [float(x), float(y)], "use": use})
+    return lms
+
+
+class TestFitLandmarkConstraint(SyntheticCalibrationCase):
+    """보정용(fit) 랜드마크가 화각·자세 추정에 실제로 반영되어야 함"""
+
+    def test_consistent_landmarks_keep_true_fov_with_small_error(self) -> None:
+        from ai.camera_calibration import calibrate_camera
+
+        lms = make_landmarks(self.provider, "V1", TRUE_POSES["V1"], TRUE_FOV, "fit")
+        res = calibrate_camera(self._job(lms), provider=self.provider)
+        self.assertAlmostEqual(res["fov_h_deg"], TRUE_FOV, delta=1.0)
+        self.assertEqual(len(res["fit_landmarks"]), 3)
+        for lm in res["fit_landmarks"]:
+            self.assertLess(lm["error_deg"], 0.3, lm["name"])
+
+    def test_conflicting_landmarks_pull_fov(self) -> None:
+        """다른 화각(44°)에 맞춘 랜드마크를 넣으면 결과 화각이 능선만 쓸 때보다 44° 쪽으로 이동"""
+        from ai.camera_calibration import calibrate_camera
+
+        ridge_only = calibrate_camera(self._job(), provider=self.provider)["fov_h_deg"]
+        lms = make_landmarks(self.provider, "V1", TRUE_POSES["V1"], 44.0, "fit", offsets=(-20.0, -10.0, 10.0, 20.0))
+        with_lms = calibrate_camera(self._job(lms), provider=self.provider)["fov_h_deg"]
+        self.assertLess(with_lms, ridge_only)
+
+
 class TestFovAndPoseRecovery(SyntheticCalibrationCase):
     def test_recovers_fov_and_view_poses_from_ridges(self) -> None:
         from ai.camera_calibration import calibrate_camera
