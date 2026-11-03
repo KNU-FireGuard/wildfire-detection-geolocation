@@ -15,6 +15,7 @@ from ai.dem_skyline_engine import (
     haversine_distance,
 )
 from ai.fire_location_estimator import FireLocationEstimator
+from ai.ridge_detector import SkylineExtractor, render_synthetic_cctv_frame
 
 
 class TestGeolocationEngine(unittest.TestCase):
@@ -222,6 +223,47 @@ class TestGeolocationEngine(unittest.TestCase):
         self.assertAlmostEqual(res_xyxy["lat"], res_xywh["lat"], places=5)
         self.assertAlmostEqual(res_xyxy["lon"], res_xywh["lon"], places=5)
         self.assertAlmostEqual(res_xyxy["distance_m"], res_xywh["distance_m"], places=2)
+
+    def test_ridge_detector_top_peak_and_smoke_masking(self) -> None:
+        """Issue #51: 역광 하늘, 상단 산봉우리(y<100px), 좌측 상단 OSD, 연기 기둥 마스킹 및 RGB/BGR 불변성 검증"""
+        provider = DEMProvider()
+        extractor = SkylineExtractor()
+        smoke_bbox_px = [890.0, 40.0, 1010.0, 250.0]
+
+        frame_rgb, gt_ridge = render_synthetic_cctv_frame(
+            provider=provider,
+            true_pan=339.0,
+            true_tilt=3.0,
+            true_roll=0.6,
+            backlit_sky=True,
+            add_osd=True,
+            add_foreground_buildings=True,
+            smoke_bbox_px=smoke_bbox_px,
+            channel_order="RGB",
+        )
+        frame_bgr = frame_rgb[:, :, ::-1]
+
+        res_rgb = extractor.extract(frame_rgb, smoke_x_range=(890.0, 1010.0))
+        res_bgr = extractor.extract(frame_bgr, smoke_x_range=(890.0, 1010.0))
+
+        self.assertTrue(res_rgb["is_valid"])
+        self.assertTrue(res_bgr["is_valid"])
+
+        pts_rgb = res_rgb["ridge_pts"]
+        pts_bgr = res_bgr["ridge_pts"]
+        np.testing.assert_allclose(pts_rgb, pts_bgr, atol=1e-4)
+
+        # (1) 연기 바운딩 박스 가로 구간(890~1010px)이 능선 좌표에서 정상 제외되었는지 검증
+        in_smoke = (pts_rgb[:, 0] >= 890.0) & (pts_rgb[:, 0] <= 1010.0)
+        self.assertEqual(int(np.sum(in_smoke)), 0)
+
+        # (2) 상단 산봉우리(y < 100px)가 OSD 마스킹에 잘리지 않고 정상 보존되었는지 검증
+        self.assertLess(float(pts_rgb[:, 1].min()), 100.0)
+
+        # (3) 실제 DEM 능선 대비 픽셀 오차(RMSE) < 2.0px 검증
+        gt_interp_y = np.interp(pts_rgb[:, 0], gt_ridge[:, 0], gt_ridge[:, 1])
+        rmse_px = float(np.sqrt(np.mean((pts_rgb[:, 1] - gt_interp_y) ** 2)))
+        self.assertLess(rmse_px, 2.0)
 
 
 if __name__ == "__main__":

@@ -328,3 +328,92 @@ class SkylineExtractor:
         """Convenience wrapper returning the (N, 2) array of ridge pixels (or empty (0, 2) if invalid)."""
         res = self.extract(frame=frame, smoke_x_range=smoke_x_range, step_px=step_px)
         return res["ridge_pts"]  # type: ignore[return-value]
+
+
+def render_synthetic_cctv_frame(
+    provider: object,
+    true_pan: float,
+    true_tilt: float,
+    true_roll: float = 0.0,
+    width: int = 1920,
+    height: int = 1080,
+    fov_h: float = 60.0,
+    backlit_sky: bool = True,
+    add_osd: bool = True,
+    add_foreground_buildings: bool = True,
+    smoke_bbox_px: list[float] | tuple[float, float, float, float] | None = None,
+    channel_order: str = "RGB",
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Render a realistic 1920x1080 CCTV frame from a DEMProvider 3D skyline for testing and verification:
+      - Supports bright white/yellow backlit sky (simulating Gachang O-ri P023/T03 haze)
+      - High mountain peaks reaching y = 35~95px
+      - Top-left & bottom-left OSD text overlays
+      - Bright foreground buildings/roads in the lower frame
+      - Rising bright smoke plume crossing above the mountain ridge inside smoke_bbox_px
+    Returns (frame_uint8, gt_ridge_pts_all_cols).
+    """
+    import math
+
+    f = (width / 2.0) / math.tan(math.radians(fov_h / 2.0))
+    cx, cy = width / 2.0, height / 2.0
+    xs_all = np.arange(width, dtype=np.float64)
+    r_off_deg = np.degrees(np.arctan((xs_all - cx) / f))
+    query_az = (true_pan + r_off_deg) % 360.0
+
+    az_ext = np.append(provider.az_grid, 360.0)  # type: ignore[attr-defined]
+    sky_ext = np.append(provider.skyline_el_deg, provider.skyline_el_deg[0])  # type: ignore[attr-defined]
+    hor_deg = np.interp(query_az, az_ext, sky_ext)
+
+    rel_el_rad = np.radians(hor_deg - true_tilt)
+    roll_rad = math.radians(true_roll)
+    ridge_y_full = cy - f * np.tan(rel_el_rad) + math.tan(roll_rad) * (xs_all - cx)
+
+    yy = np.arange(height, dtype=np.float32)[:, None]
+    xx = np.arange(width, dtype=np.float32)[None, :]
+    sky_mask = yy < ridge_y_full[None, :]
+
+    img = np.zeros((height, width, 3), dtype=np.float32)
+
+    if backlit_sky:
+        # Bright white/warm-yellow backlit hazy sky (R=238, G=232, B=210)
+        img[:, :, 0] = np.where(sky_mask, 238.0 - 0.03 * yy, 58.0 + 0.02 * yy)
+        img[:, :, 1] = np.where(sky_mask, 232.0 - 0.03 * yy, 68.0 + 0.02 * yy)
+        img[:, :, 2] = np.where(sky_mask, 210.0 - 0.02 * yy, 52.0 + 0.01 * yy)
+    else:
+        # Clear daytime sky
+        img[:, :, 0] = np.where(sky_mask, 185.0, 52.0)
+        img[:, :, 1] = np.where(sky_mask, 212.0, 66.0)
+        img[:, :, 2] = np.where(sky_mask, 242.0, 48.0)
+
+    if add_foreground_buildings:
+        # Bright warehouse roofs and roads in lower valley (y > 760)
+        bldg_mask = (yy > 760) & (yy < 840) & ((xx > 300) & (xx < 1500))
+        img[bldg_mask] = np.array([215.0, 215.0, 220.0], dtype=np.float32)
+
+    if smoke_bbox_px is not None:
+        bx0, by0, bx1, by1 = [int(round(v)) for v in smoke_bbox_px]
+        bx0, bx1 = max(0, bx0), min(width, bx1)
+        by0, by1 = max(0, by0), min(height, by1)
+        # Bright gray-white smoke plume rising above the ridge
+        img[by0:by1, bx0:bx1, :] = 225.0
+
+    if add_osd:
+        # Top-left corner status badge (x < 75, y < 38) & Bottom-left camera label OSD
+        img[10:36, 12:74, :] = 250.0
+        img[960:1015, 25:380, :] = 245.0
+
+    if channel_order.upper() == "BGR":
+        img = img[:, :, ::-1]
+
+    gt_sampled = provider.synthesize_observed_skyline(  # type: ignore[attr-defined]
+        true_pan=true_pan,
+        true_tilt=true_tilt,
+        true_roll=true_roll,
+        width=width,
+        height=height,
+        fov_h=fov_h,
+        step_px=20,
+        noise_std_px=0.0,
+    )
+    return np.clip(img, 0, 255).astype(np.uint8), gt_sampled
