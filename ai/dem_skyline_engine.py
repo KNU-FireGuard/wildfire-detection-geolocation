@@ -584,6 +584,165 @@ class DEMProvider:
             "rms_deg": float(rms[best_k]),
         }
 
+    def estimate_blind_ptz(
+        self,
+        ridge_pts: np.ndarray | list[tuple[float, float]],
+        width: int = 1920,
+        height: int = 1080,
+        fov_h: float = 60.0,
+        coarse_step_deg: float = 0.5,
+        fine_window_deg: float = 2.0,
+        fine_step_deg: float = 0.05,
+        roll_max_deg: float = 2.5,
+        min_relief_std_deg: float = 0.12,
+        min_ncc: float = 0.65,
+        max_rms_deg: float = 1.5,
+        min_tilt_deg: float = -15.0,
+        max_tilt_deg: float = 25.0,
+    ) -> dict[str, float | bool | str | None]:
+        """
+        360° Blind Camera Pose (Pan, Tilt, Roll) Estimation for live CCTVs without PTZ metadata.
+        Executes a Coarse-to-Fine global search across 0°..360° with a 3-way fail-safe check:
+          1. Ridge relief standard deviation >= min_relief_std_deg (0.12°)
+          2. Roll-compensated Normalized Cross-Correlation (NCC) >= min_ncc (0.65)
+          3. Residual rms_deg <= max_rms_deg (1.5°) and physical tilt within [-15°, +25°]
+        """
+        assert self.az_grid is not None and self.skyline_el_deg is not None
+        pts = np.asarray(ridge_pts, dtype=np.float64)
+        if len(pts) < 15:
+            return {
+                "calibrated": False,
+                "status": "CALIBRATION_FAILED",
+                "pan": None,
+                "tilt": None,
+                "roll": None,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": 999.0,
+                "ncc": 0.0,
+                "obs_std_deg": 0.0,
+            }
+
+        xs, ys = pts[:, 0], pts[:, 1]
+        med_y = np.array(
+            [np.median(ys[max(0, i - 2) : min(len(ys), i + 3)]) for i in range(len(ys))]
+        )
+        mad = max(1.0, float(np.median(np.abs(ys - med_y))) * 1.4826)
+        clean_y = np.where(np.abs(ys - med_y) <= 2.5 * mad, ys, med_y)
+
+        f = (width / 2.0) / math.tan(math.radians(fov_h / 2.0))
+        cx, cy = width / 2.0, height / 2.0
+
+        r_off = np.degrees(np.arctan((xs - cx) / f))
+        r_el_zero = np.degrees(np.arctan((cy - clean_y) / f))
+
+        raw_obs_std = float(np.std(r_el_zero))
+        if raw_obs_std < min_relief_std_deg * 0.8:
+            return {
+                "calibrated": False,
+                "status": "CALIBRATION_FAILED",
+                "pan": None,
+                "tilt": None,
+                "roll": None,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": 999.0,
+                "ncc": 0.0,
+                "obs_std_deg": raw_obs_std,
+            }
+
+        az_ext = np.append(self.az_grid, 360.0)
+        sky_ext = np.append(self.skyline_el_deg, self.skyline_el_deg[0])
+        oc = r_off - r_off.mean()
+        oc_denom = max(float((oc ** 2).sum()), 1e-6)
+        roll_max_tan = math.tan(math.radians(roll_max_deg))
+
+        def _eval_candidates(cand_pans: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            query_az = (cand_pans[:, None] + r_off[None, :]) % 360.0
+            hor_mat = np.interp(query_az, az_ext, sky_ext)
+
+            diff = hor_mat - r_el_zero[None, :]
+            dmean = diff.mean(axis=1)
+            rr = np.clip(
+                ((diff - dmean[:, None]) * oc[None, :]).sum(axis=1) / oc_denom,
+                -roll_max_tan,
+                roll_max_tan,
+            )
+            cc = np.clip(dmean - rr * r_off.mean(), min_tilt_deg, max_tilt_deg)
+            res = diff - cc[:, None] - rr[:, None] * r_off[None, :]
+            rms = np.sqrt(np.mean(res ** 2, axis=1))
+
+            # Roll-compensated observed elevation profile: r_el_zero + rr * r_off
+            obs_unrolled = r_el_zero[None, :] + rr[:, None] * r_off[None, :]
+            h_cent = hor_mat - hor_mat.mean(axis=1, keepdims=True)
+            o_cent = obs_unrolled - obs_unrolled.mean(axis=1, keepdims=True)
+            h_std = np.std(hor_mat, axis=1)
+            o_std = np.std(obs_unrolled, axis=1)
+            ncc = np.mean(h_cent * o_cent, axis=1) / np.maximum(h_std * o_std, 1e-6)
+            return cc, rr, rms, ncc, h_std, o_std
+
+        # Stage 1: Coarse 360° scan
+        coarse_pans = np.arange(0.0, 360.0, coarse_step_deg)
+        c_cc, c_rr, c_rms, c_ncc, c_hstd, _ = _eval_candidates(coarse_pans)
+
+        # Penalize candidates that lack terrain relief or shape correlation
+        valid_mask = (c_hstd >= min_relief_std_deg) & (c_ncc >= 0.4)
+        score_rms = np.where(valid_mask, c_rms, c_rms + 50.0)
+        top_indices = np.argsort(score_rms)[:5]
+
+        # Stage 2: Fine scan around top coarse candidates
+        fine_offsets = np.arange(-fine_window_deg, fine_window_deg + 1e-6, fine_step_deg)
+        fine_pans = np.unique(
+            ((coarse_pans[top_indices, None] + fine_offsets[None, :]) % 360.0).ravel()
+        )
+        f_cc, f_rr, f_rms, f_ncc, f_hstd, f_ostd = _eval_candidates(fine_pans)
+
+        f_valid = (f_hstd >= min_relief_std_deg) & (f_ostd >= min_relief_std_deg)
+        f_score = np.where(f_valid, f_rms, f_rms + 50.0)
+        best_k = int(np.argmin(f_score))
+
+        best_pan = float(fine_pans[best_k]) % 360.0
+        best_tilt = float(f_cc[best_k])
+        best_roll = math.degrees(math.atan(float(f_rr[best_k])))
+        best_rms = float(f_rms[best_k])
+        best_ncc = float(f_ncc[best_k])
+        best_hstd = float(f_hstd[best_k])
+        best_ostd = float(f_ostd[best_k])
+
+        is_valid_pose = (
+            best_ostd >= min_relief_std_deg
+            and best_hstd >= min_relief_std_deg
+            and best_ncc >= min_ncc
+            and best_rms <= max_rms_deg
+            and (min_tilt_deg <= best_tilt <= max_tilt_deg)
+        )
+
+        if not is_valid_pose:
+            return {
+                "calibrated": False,
+                "status": "CALIBRATION_FAILED",
+                "pan": None,
+                "tilt": None,
+                "roll": None,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": best_rms,
+                "ncc": best_ncc,
+                "obs_std_deg": best_ostd,
+            }
+
+        return {
+            "calibrated": True,
+            "status": "OK",
+            "pan": best_pan,
+            "tilt": best_tilt,
+            "roll": best_roll,
+            "d_pan": 0.0,
+            "d_tilt": 0.0,
+            "rms_deg": best_rms,
+            "ncc": best_ncc,
+            "obs_std_deg": best_ostd,
+        }
 
 
 if __name__ == "__main__":
