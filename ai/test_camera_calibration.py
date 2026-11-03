@@ -276,6 +276,50 @@ class TestConfigCandidate(SyntheticCalibrationCase):
             build_config_entry(self._job(), {"status": "FAILED", "views": {}, "warnings": []})
 
 
+class TestCalibrationCli(SyntheticCalibrationCase):
+    """python3 -m ai.calibrate_camera: 리포트·후보 저장, --apply일 때만 설정 반영"""
+
+    def _run(self, *extra: str):
+        import subprocess
+        import sys
+
+        self._job()  # job.json 생성
+        return subprocess.run(
+            [sys.executable, "-m", "ai.calibrate_camera", str(self.dir / "job.json"),
+             "--base-dir", str(self.dir), "--out-dir", str(self.dir / "out"), *extra],
+            cwd=Path(__file__).resolve().parent.parent, capture_output=True, text=True,
+        )
+
+    def test_cli_writes_report_and_candidate_without_touching_config(self) -> None:
+        cfg = self.dir / "cfg.json"
+        cfg.write_text(json.dumps({"version": 1, "cameras": []}), encoding="utf-8")
+        proc = self._run("--config", str(cfg))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for name in ("report.json", "report.md", "candidate.json"):
+            self.assertTrue((self.dir / "out" / name).exists(), name)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["cameras"], [])
+        self.assertIn("화각", proc.stdout)
+
+    def test_cli_apply_updates_config(self) -> None:
+        cfg = self.dir / "cfg_apply.json"
+        cfg.write_text(json.dumps({"version": 1, "cameras": []}), encoding="utf-8")
+        proc = self._run("--config", str(cfg), "--apply")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        cams = json.loads(cfg.read_text(encoding="utf-8"))["cameras"]
+        self.assertEqual([c["key"] for c in cams], ["syn"])
+
+    def test_cli_rejects_invalid_job_with_nonzero_exit(self) -> None:
+        import subprocess
+        import sys
+
+        bad = self.dir / "bad.json"
+        bad.write_text(json.dumps({"camera": {}}), encoding="utf-8")
+        proc = subprocess.run([sys.executable, "-m", "ai.calibrate_camera", str(bad)],
+                              cwd=Path(__file__).resolve().parent.parent, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("보정 작업 파일 오류", proc.stderr)
+
+
 class TestFovAndPoseRecovery(SyntheticCalibrationCase):
     def test_recovers_fov_and_view_poses_from_ridges(self) -> None:
         from ai.camera_calibration import calibrate_camera
