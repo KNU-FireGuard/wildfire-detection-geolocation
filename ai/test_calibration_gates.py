@@ -41,6 +41,18 @@ class TestBlindPoseFailureReasons(unittest.TestCase):
         self.assertIsNone(res["reason"])
 
 
+class TestRidgeCoverage(unittest.TestCase):
+    """능선 점의 가로 범위가 15° 미만이면 형상 비교 근거 부족"""
+
+    def test_narrow_ridge_reports_insufficient_coverage(self) -> None:
+        provider = DEMProvider()
+        xs = np.linspace(860.0, 1060.0, 20)  # 약 7° 범위에 20점
+        ys = provider.skyline_y_at(xs, *TRUE, W, H, FOV)
+        res = provider.estimate_blind_ptz(np.column_stack([xs, ys]), W, H, FOV)
+        self.assertEqual(res["status"], "CALIBRATION_FAILED")
+        self.assertEqual(res["reason"], "INSUFFICIENT_COVERAGE")
+
+
 class TestBlindPoseUniqueness(unittest.TestCase):
     """1순위에서 Pan 5° 이상 떨어진 최적 후보 잔차 / 1순위 잔차 >= 1.3 이어야 OK"""
 

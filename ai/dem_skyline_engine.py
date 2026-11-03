@@ -701,6 +701,7 @@ class DEMProvider:
         max_tilt_deg: float = 25.0,
         min_uniqueness_ratio: float = 1.3,
         uniqueness_sep_deg: float = 5.0,
+        min_coverage_deg: float = 15.0,
     ) -> dict[str, float | bool | str | None]:
         """
         360° Blind Camera Pose (Pan, Tilt, Roll) Estimation for live CCTVs without PTZ metadata,
@@ -737,6 +738,13 @@ class DEMProvider:
         xs = pts[:, 0]
         clean_y = self._clean_ridge_y(pts[:, 1])
         f = focal_length_px(width, fov_h)
+
+        # Horizontal angular coverage of the ridge (independent of the unknown pose)
+        coverage_deg = float(
+            np.degrees(np.arctan((xs.max() - width / 2.0) / f) - np.arctan((xs.min() - width / 2.0) / f))
+        )
+        if coverage_deg < min_coverage_deg:
+            return _fail("INSUFFICIENT_COVERAGE")
         raw_obs_std = float(np.std(np.degrees(np.arctan((height / 2.0 - clean_y) / f))))
         if raw_obs_std < min_relief_std_deg * 0.8:
             return _fail("LOW_RELIEF", obs_std_deg=raw_obs_std)
