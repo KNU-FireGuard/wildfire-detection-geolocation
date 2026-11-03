@@ -116,5 +116,35 @@ class TestSyntheticSkylineUsesRotationModel(unittest.TestCase):
         self._assert_on_skyline(provider, gt)
 
 
+class TestCalibrationUsesRotationModel(unittest.TestCase):
+    """영점 보정이 정식 모델로 만든 능선에서 자세를 정확히 복원해야 함"""
+
+    TRUE = (99.2, 2.0, 2.0)
+
+    def test_zero_point_calibration_recovers_pose(self) -> None:
+        from ai.dem_skyline_engine import DEMProvider
+
+        provider = DEMProvider()
+        ridge = provider.synthesize_observed_skyline(*self.TRUE, width=W, height=H, fov_h=FOV, noise_std_px=0.0)
+        res = provider.calibrate_ptz_zero_point(
+            init_pan=self.TRUE[0] - 1.0, init_tilt=self.TRUE[1] - 1.0, ridge_pts=ridge, width=W, height=H, fov_h=FOV
+        )
+        self.assertAlmostEqual(res["pan"], self.TRUE[0], delta=0.1)
+        self.assertAlmostEqual(res["tilt"], self.TRUE[1], delta=0.1)
+        self.assertAlmostEqual(res["roll"], self.TRUE[2], delta=0.2)
+        self.assertLess(res["rms_deg"], 0.05)
+
+    def test_zero_point_calibration_is_fast_enough(self) -> None:
+        import time
+
+        from ai.dem_skyline_engine import DEMProvider
+
+        provider = DEMProvider()
+        ridge = provider.synthesize_observed_skyline(*self.TRUE, width=W, height=H, fov_h=FOV, noise_std_px=0.0)
+        t0 = time.perf_counter()
+        provider.calibrate_ptz_zero_point(self.TRUE[0] - 1.0, self.TRUE[1] - 1.0, ridge, W, H, FOV)
+        self.assertLess(time.perf_counter() - t0, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

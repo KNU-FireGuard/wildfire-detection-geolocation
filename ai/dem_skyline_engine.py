@@ -636,8 +636,9 @@ class DEMProvider:
         roll_max_deg: float = 2.5,
     ) -> dict[str, float]:
         """
-        Zero-point PTZ Self-Calibration: matches observed frame skyline pixels against
-        the pre-computed 360° Synthetic Skyline Geo-LUT via Least Squares.
+        Zero-point PTZ Self-Calibration: matches observed frame skyline pixels against the
+        360° synthetic skyline with the exact pinhole rotation model (coarse-to-fine pan/roll search,
+        tilt solved per candidate). d_tilt stays bounded by ±search_window_deg as before.
         """
         assert self.az_grid is not None and self.skyline_el_deg is not None
         pts = np.asarray(ridge_pts, dtype=np.float64)
@@ -651,55 +652,36 @@ class DEMProvider:
                 "rms_deg": 0.0,
             }
 
-        # Moving median filter to reject tree branches / utility poles
-        xs, ys = pts[:, 0], pts[:, 1]
-        med_y = np.array(
-            [np.median(ys[max(0, i - 2) : min(len(ys), i + 3)]) for i in range(len(ys))]
+        xs = pts[:, 0]
+        clean_y = self._clean_ridge_y(pts[:, 1])
+        f = focal_length_px(width, fov_h)
+
+        # Stage 1: coarse pan (0.25°) x roll (0.5°) grid inside the search window
+        coarse_pans = init_pan + np.arange(-search_window_deg, search_window_deg + 1e-6, 0.25)
+        coarse_rolls = np.arange(-roll_max_deg, roll_max_deg + 1e-6, 0.5)
+        P, T, R, rms = self._fit_pose_exact(xs, clean_y, coarse_pans, coarse_rolls, init_tilt, width, height, fov_h)
+        k = int(np.argmin(rms))
+
+        # Stage 2: fine pan (step_deg) x roll (0.1°) around the best coarse candidate
+        d_best = ((P[k] - init_pan + 180.0) % 360.0) - 180.0
+        fine_pans = init_pan + np.clip(
+            d_best + np.arange(-0.3, 0.3 + 1e-6, step_deg), -search_window_deg, search_window_deg
         )
-        mad = max(1.0, float(np.median(np.abs(ys - med_y))) * 1.4826)
-        clean_y = np.where(np.abs(ys - med_y) <= 2.5 * mad, ys, med_y)
-
-        f = (width / 2.0) / math.tan(math.radians(fov_h / 2.0))
-        cx, cy = width / 2.0, height / 2.0
-
-        r_off = np.degrees(np.arctan((xs - cx) / f))
-        r_el = init_tilt + np.degrees(np.arctan((cy - clean_y) / f))
-
-        cand_dpans = np.arange(-search_window_deg, search_window_deg + 1e-6, step_deg)
-        query_az = (init_pan + cand_dpans[:, None] + r_off[None, :]) % 360.0
-
-        az_ext = np.append(self.az_grid, 360.0)
-        sky_ext = np.append(self.skyline_el_deg, self.skyline_el_deg[0])
-        hor_mat = np.interp(query_az, az_ext, sky_ext)
-
-        diff = hor_mat - r_el[None, :]
-        oc = r_off - r_off.mean()
-        oc_denom = max(float((oc ** 2).sum()), 1e-6)
-        roll_max_tan = math.tan(math.radians(roll_max_deg))
-
-        dmean = diff.mean(axis=1)
-        rr = np.clip(
-            ((diff - dmean[:, None]) * oc[None, :]).sum(axis=1) / oc_denom,
-            -roll_max_tan,
-            roll_max_tan,
+        fine_rolls = np.clip(R[k] + np.arange(-0.5, 0.5 + 1e-6, 0.1), -roll_max_deg, roll_max_deg)
+        P, T, R, rms = self._fit_pose_exact(
+            xs, clean_y, np.unique(fine_pans), np.unique(fine_rolls), T[k], width, height, fov_h
         )
-        cc = np.clip(dmean - rr * r_off.mean(), -search_window_deg, search_window_deg)
+        k = int(np.argmin(rms))
 
-        res = diff - cc[:, None] - rr[:, None] * r_off[None, :]
-        rms = np.sqrt(np.mean(res ** 2, axis=1))
-
-        best_k = int(np.argmin(rms))
-        best_dpan = float(cand_dpans[best_k])
-        best_dtilt = float(cc[best_k])
-        best_roll = math.degrees(math.atan(float(rr[best_k])))
-
+        best_dpan = float(((P[k] - init_pan + 180.0) % 360.0) - 180.0)
+        best_dtilt = float(np.clip(T[k] - init_tilt, -search_window_deg, search_window_deg))
         return {
             "pan": (init_pan + best_dpan) % 360.0,
             "tilt": init_tilt + best_dtilt,
-            "roll": best_roll,
+            "roll": float(R[k]),
             "d_pan": best_dpan,
             "d_tilt": best_dtilt,
-            "rms_deg": float(rms[best_k]),
+            "rms_deg": float(math.degrees(math.atan(float(rms[k]) / f))) if np.isfinite(rms[k]) else 999.0,
         }
 
     def estimate_blind_ptz(
