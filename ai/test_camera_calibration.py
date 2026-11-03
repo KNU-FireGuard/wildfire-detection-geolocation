@@ -148,6 +148,37 @@ class TestFitLandmarkConstraint(SyntheticCalibrationCase):
         self.assertLess(with_lms, ridge_only)
 
 
+class TestValidationLandmarkReport(SyntheticCalibrationCase):
+    """검증용(val) 랜드마크: 보정에 쓰지 않고 오차만 보고"""
+
+    def test_validation_errors_are_reported(self) -> None:
+        from ai.camera_calibration import calibrate_camera
+
+        vals = make_landmarks(self.provider, "V2", TRUE_POSES["V2"], TRUE_FOV, "val", offsets=(-12.0, 12.0))
+        res = calibrate_camera(self._job(vals), provider=self.provider)
+        self.assertEqual(len(res["validation"]), 2)
+        for v in res["validation"]:
+            self.assertLess(v["error_deg"], 0.3, v["name"])
+            self.assertLess(abs(v["lateral_m"]), 5.0, v["name"])
+            self.assertGreater(v["distance_m"], 500.0)
+
+    def test_validation_landmarks_do_not_affect_calibration(self) -> None:
+        """검증용 랜드마크 좌표를 크게 틀리게 바꿔도 화각·자세는 같고 보고 오차만 커짐 (순환 검증 방지)"""
+        from ai.camera_calibration import calibrate_camera
+
+        vals = make_landmarks(self.provider, "V2", TRUE_POSES["V2"], TRUE_FOV, "val", offsets=(-12.0, 12.0))
+        good = calibrate_camera(self._job(vals), provider=self.provider)
+        moved = copy.deepcopy(vals)
+        for lm in moved:
+            lm["lon"] += 0.003  # 약 270m 동쪽으로 이동
+        bad = calibrate_camera(self._job(moved), provider=self.provider)
+        self.assertEqual(good["fov_h_deg"], bad["fov_h_deg"])
+        for vid in TRUE_POSES:
+            self.assertEqual(good["views"][vid]["pan"], bad["views"][vid]["pan"])
+            self.assertEqual(good["views"][vid]["tilt"], bad["views"][vid]["tilt"])
+        self.assertGreater(max(v["error_deg"] for v in bad["validation"]), 5.0)
+
+
 class TestFovAndPoseRecovery(SyntheticCalibrationCase):
     def test_recovers_fov_and_view_poses_from_ridges(self) -> None:
         from ai.camera_calibration import calibrate_camera

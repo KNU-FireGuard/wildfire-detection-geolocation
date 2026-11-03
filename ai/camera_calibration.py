@@ -226,6 +226,37 @@ def _fit_view(provider, ridge: dict, fov: float, seed: tuple[float, float], lm_v
     return out
 
 
+def _validation_report(provider, job: dict, views: dict, ridges: dict, fov: float) -> list[dict]:
+    """검증용(val) 랜드마크: 최종 자세에서 표시 픽셀 광선과 실제 방향의 각도 오차, 옆 방향 거리 오차(m)"""
+    import numpy as np
+
+    from ai.camera_model import pixel_to_direction
+
+    out = []
+    for lm in job["landmarks"]:
+        if lm["use"] != "val" or lm["view"] not in views:
+            continue
+        v, r = views[lm["view"]], ridges[lm["view"]]
+        vec = _landmark_vectors(provider, [lm])[0]
+        dist_h = float(math.hypot(vec[0], vec[1]))
+        az_true = math.degrees(math.atan2(vec[0], vec[1])) % 360.0
+        el_true = math.degrees(math.atan2(vec[2], dist_h))
+        az_px, el_px = pixel_to_direction(lm["px"][0], lm["px"][1], v["pan"], v["tilt"], v["roll"],
+                                          r["width"], r["height"], fov)
+        d_az = (float(az_px) - az_true + 180.0) % 360.0 - 180.0
+        d_el = float(el_px) - el_true
+        out.append({
+            "name": lm["name"],
+            "view": lm["view"],
+            "error_deg": float(np.hypot(d_az * math.cos(math.radians(el_true)), d_el)),
+            "azimuth_error_deg": d_az,
+            "elevation_error_deg": d_el,
+            "distance_m": dist_h,
+            "lateral_m": dist_h * math.radians(d_az),
+        })
+    return out
+
+
 def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
     """
     보정 작업으로 화각과 화면별 자세를 추정 (docs/Camera_Calibration.md 절차)
@@ -310,5 +341,6 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
             for vid, lms in fit_lms.items() if vid in views
             for lm, err in zip(lms, views[vid]["landmark_errors_deg"])
         ],
+        "validation": _validation_report(provider, job, views, ridges, best_fov),
         "warnings": warnings,
     }
