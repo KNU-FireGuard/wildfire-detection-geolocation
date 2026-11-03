@@ -125,6 +125,36 @@ class TestEstimatorUsesCameraConfig(unittest.TestCase):
         self.assertIsNone(res["location_estimation"])
 
 
+class TestUncalibratedCameraIsFlagged(unittest.TestCase):
+    """보정 설정도 명시 화각도 없으면 기본 화각 사용을 결과에 경고로 표시"""
+
+    def _estimate(self, cam_extra: dict, configs: list[dict]) -> dict:
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        cam = {"lat": 35.791037, "lon": 128.591184, "tower_height": 15.0, "near_m": 30.0, **cam_extra}
+        return FireLocationEstimator(camera_configs=configs).estimate_location(
+            [1000.0, 640.0, 1080.0, 740.0],
+            {"camera": cam, "ptz": {"pan": 99.0, "tilt": 0.5, "roll": 0.0}},
+            use_skyline_calibration=False,
+            bbox_normalized=False,
+        )
+
+    def test_unknown_camera_without_fov_is_flagged(self) -> None:
+        res = self._estimate({"name": "미등록카메라"}, [])
+        self.assertFalse(res["camera_config"]["calibrated"])
+        self.assertIn("FOV_DEFAULT_USED", res["camera_config"]["warnings"])
+
+    def test_configured_camera_is_not_flagged(self) -> None:
+        res = self._estimate({"name": "가창오리"}, [dict(VALID["cameras"][0])])
+        self.assertTrue(res["camera_config"]["calibrated"])
+        self.assertEqual(res["camera_config"]["warnings"], [])
+
+    def test_explicit_fov_without_config_is_not_a_default_warning(self) -> None:
+        res = self._estimate({"name": "미등록카메라", "fov_h": 50.0}, [])
+        self.assertFalse(res["camera_config"]["calibrated"])
+        self.assertNotIn("FOV_DEFAULT_USED", res["camera_config"]["warnings"])
+
+
 class TestShippedCameraConfig(unittest.TestCase):
     """저장소에 포함된 ai/config/cameras.json이 유효하고 가창오리 보정값을 담고 있어야 함"""
 

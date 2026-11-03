@@ -265,8 +265,11 @@ class FireLocationEstimator:
             cam["tower_height"] = cfg["tower_height_m"]
         info = {
             "key": cfg["key"] if cfg is not None else None,
+            "calibrated": cfg is not None,
             "fov_h_deg": float(cam.get("fov_h", 60.0)),
             "fov_source": fov_source,
+            # FOV_DEFAULT_USED: no calibration and no explicit FOV, the 60° code default may be far from the real lens
+            "warnings": ["FOV_DEFAULT_USED"] if fov_source == "default" else [],
         }
 
         ptz = metadata.get("ptz")
