@@ -42,6 +42,7 @@ erDiagram
         double_precision estimated_latitude
         double_precision estimated_longitude
         double_precision error_range_m
+        timestamptz acknowledged_at
         timestamptz created_at
         timestamptz updated_at
     }
