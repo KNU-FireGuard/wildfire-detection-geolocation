@@ -265,6 +265,95 @@ class TestGeolocationEngine(unittest.TestCase):
         rmse_px = float(np.sqrt(np.mean((pts_rgb[:, 1] - gt_interp_y) ** 2)))
         self.assertLess(rmse_px, 2.0)
 
+    def test_blind_ptz_360_recovery_with_roll(self) -> None:
+        """Issue #51: PTZ 미제공(ptz=None) 및 카메라 Roll(0.8°) 상태에서 360° Blind 역산 및 발화점 위치 추정 검증"""
+        estimator = FireLocationEstimator()
+        provider = estimator._get_provider(GACHANG_CAM_LAT, GACHANG_CAM_LON, 15.0)
+
+        # 정규화 바운딩 박스(0~1)와 연기 기둥이 포함된 실제 영상 프레임 생성
+        bbox_norm = [0.4650, 0.0550, 0.5250, 0.1480]
+        x0_px, y0_px, x1_px, y1_px = estimator.resolve_bbox_pixel_bounds(bbox_norm, 1920, 1080)
+        frame, _ = render_synthetic_cctv_frame(
+            provider=provider,
+            true_pan=339.0,
+            true_tilt=3.0,
+            true_roll=0.8,
+            backlit_sky=True,
+            add_osd=True,
+            add_foreground_buildings=True,
+            smoke_bbox_px=[x0_px, y0_px, x1_px, y1_px],
+        )
+
+        # ptz 필드를 아예 생략(ptz=None)하고 frame만 전달
+        blind_meta = {
+            "camera": {
+                "lat": GACHANG_CAM_LAT,
+                "lon": GACHANG_CAM_LON,
+                "tower_height": 15.0,
+                "fov_h": 60.0,
+                "resolution_w": 1920,
+                "resolution_h": 1080,
+                "near_m": 30.0,
+                "max_range_m": 5000.0,
+            },
+            "frame": frame,
+        }
+        res = estimator.estimate_location(bbox_norm, blind_meta, use_skyline_calibration=True)
+
+        self.assertTrue(res["intersected"])
+        self.assertEqual(res["status"], "OK")
+        cal = res["calibration"]
+        self.assertTrue(cal["calibrated"])
+        self.assertEqual(cal["mode"], "blind_360")
+        self.assertGreaterEqual(cal["ncc"], 0.90)
+        self.assertAlmostEqual(cal["pan"], 339.0, delta=0.25)
+        self.assertAlmostEqual(cal["tilt"], 3.0, delta=0.25)
+        self.assertAlmostEqual(cal["roll"], 0.8, delta=0.35)
+
+        # 오리 416-3 독립 필지 대표 좌표(35.7938, 128.5899) 반경 25m 이내 안착 확인
+        err_m = haversine_distance(35.7938, 128.5899, res["lat"], res["lon"])
+        self.assertLessEqual(err_m, 25.0)
+
+    def test_blind_ptz_failsafe_on_fog_or_featureless_frame(self) -> None:
+        """Issue #51: 안개/야간 프레임 또는 평탄한 직선 능선에서 ptz=None 역산 시 CALIBRATION_FAILED 안전 반환 검증"""
+        estimator = FireLocationEstimator()
+        bbox = [0.45, 0.30, 0.55, 0.50]
+
+        # 1. 짙은 안개/야간으로 능선 대비가 없는 프레임
+        fog_frame = np.full((1080, 1920, 3), 128, dtype=np.uint8)
+        fog_meta = {
+            "camera": {
+                "lat": GACHANG_CAM_LAT,
+                "lon": GACHANG_CAM_LON,
+                "tower_height": 15.0,
+                "fov_h": 60.0,
+            },
+            "frame": fog_frame,
+        }
+        res_fog = estimator.estimate_location(bbox, fog_meta)
+        self.assertFalse(res_fog["intersected"])
+        self.assertEqual(res_fog["status"], "CALIBRATION_FAILED")
+        self.assertIsNone(res_fog["lat"])
+        self.assertIsNone(res_fog["lon"])
+
+        # 2. 기복이 전혀 없는 수평 직선(도로 연석/건물 지붕, std < 0.35°)이 입력된 경우
+        flat_xs = np.arange(100, 1820, 20, dtype=np.float64)
+        flat_ys = np.full_like(flat_xs, 540.0)
+        flat_ridge = np.column_stack([flat_xs, flat_ys])
+        flat_meta = {
+            "camera": {
+                "lat": GACHANG_CAM_LAT,
+                "lon": GACHANG_CAM_LON,
+                "tower_height": 15.0,
+                "fov_h": 60.0,
+            },
+            "ridge_pts": flat_ridge,
+        }
+        res_flat = estimator.estimate_location(bbox, flat_meta)
+        self.assertFalse(res_flat["intersected"])
+        self.assertEqual(res_flat["status"], "CALIBRATION_FAILED")
+        self.assertIsNone(res_flat["lat"])
+
 
 class TestBBoxAdapter(unittest.TestCase):
     """bbox 입력 계약: 명시적 포맷·정규화 지정, 모호하거나 잘못된 입력은 조용히 보정하지 않고 실패"""

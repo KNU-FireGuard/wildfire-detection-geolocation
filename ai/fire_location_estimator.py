@@ -13,6 +13,7 @@ try:
         dest_point,
         haversine_distance,
     )
+    from ai.ridge_detector import SkylineExtractor
 except ImportError:
     from dem_skyline_engine import (
         DEMProvider,
@@ -23,18 +24,25 @@ except ImportError:
         dest_point,
         haversine_distance,
     )
+    from ridge_detector import SkylineExtractor
 
 
 class FireLocationEstimator:
     """
     Single-Track 3D Ray-DEM Wildfire Geolocation Engine (Track 2 Heuristic ROI Removed):
-      1. Synthetic Skyline Zero-Point PTZ Calibration (dPan, dTilt, Roll)
-      2. YOLO Bounding Box Normalization Auto-Detection & Bottom-Center Ignition Targeting
-      3. 3D Unit Direction Vector + 50m Ray Marching + 10-step Binary Search on DEMProvider
+      1. Automatic Frame Skyline Extraction (SkylineExtractor) & Smoke BBox Masking
+      2. Synthetic Skyline Zero-Point PTZ Calibration & 360° Blind Pose Estimation (ptz=None)
+      3. YOLO Bounding Box (xyxy / xywh / API dict) Auto-Detection & Bottom-Center Targeting
+      4. 3D Unit Direction Vector + 50m Ray Marching + 10-step Binary Search on DEMProvider
     """
 
-    def __init__(self, dem_provider: DEMProvider | None = None):
+    def __init__(
+        self,
+        dem_provider: DEMProvider | None = None,
+        skyline_extractor: SkylineExtractor | None = None,
+    ):
         self.dem_provider = dem_provider
+        self.skyline_extractor = skyline_extractor or SkylineExtractor()
 
     def _get_provider(
         self,
@@ -238,15 +246,17 @@ class FireLocationEstimator:
         """
         Estimate wildfire ignition coordinates (lat, lon, altitude_m, distance_m)
         using 50m Ray Marching + 10-step Binary Search on DEMProvider.
-        Note: Supports upward rays (dz >= 0) intersecting high mountainsides above camera level.
-        bbox: "xyxy", "xywh", "cxcyhw" list or Backend API dict {"x1", "y1", "x2", "y2"};
-        bbox_normalized declares 0~1 normalized (True) or pixel (False) values explicitly.
+        Supports:
+          - Upward rays (dz >= 0) intersecting high mountainsides above camera level
+          - Automatic skyline extraction from metadata["frame"] with smoke bbox horizontal masking
+          - Missing PTZ (ptz=None) via default_pan/default_tilt or 360° Blind Pose Estimation
+          - bbox as "xyxy", "xywh", or Backend API dict {"x1", "y1", "x2", "y2"}
         """
-        if "camera" not in metadata or "ptz" not in metadata:
-            raise ValueError("메타데이터에 'camera' 및 'ptz' 필드가 필요합니다.")
+        if "camera" not in metadata:
+            raise ValueError("메타데이터에 'camera' 필드가 필요합니다.")
 
         cam = metadata["camera"]
-        ptz = metadata["ptz"]
+        ptz = metadata.get("ptz")
 
         cam_lat = float(cam.get("lat", GACHANG_CAM_LAT))
         cam_lon = float(cam.get("lon", GACHANG_CAM_LON))
@@ -289,40 +299,148 @@ class FireLocationEstimator:
         fire_x = (x_min_px + x_max_px) / 2.0
         fire_y = (y_min_px + y_max_px) / 2.0 if target_mode == "center" else y_max_px
 
-        init_pan = float(ptz["pan"])
-        init_tilt = float(ptz["tilt"])
-        init_roll = float(ptz.get("roll", 0.0))
-
-        # 1. Optional Synthetic Skyline Zero-Point Calibration
-        cal_info = {
-            "pan": init_pan,
-            "tilt": init_tilt,
-            "roll": init_roll,
-            "d_pan": 0.0,
-            "d_tilt": 0.0,
-            "rms_deg": 0.0,
-            "calibrated": False,
-        }
+        # 0. Automatic Frame Skyline Extraction (when ridge_pts is not explicitly passed)
         ridge_pts = metadata.get("ridge_pts")
-        if use_skyline_calibration and ridge_pts is not None and len(ridge_pts) >= 3:
-            cal_res = provider.calibrate_ptz_zero_point(
-                init_pan=init_pan,
-                init_tilt=init_tilt,
+        frame = metadata.get("frame")
+        has_ptz = (
+            isinstance(ptz, dict)
+            and ptz.get("pan") is not None
+            and ptz.get("tilt") is not None
+        )
+        has_default_ptz = (
+            cam.get("default_pan") is not None and cam.get("default_tilt") is not None
+        )
+
+        ridge_extraction_info: dict | None = None
+        if ridge_pts is None and frame is not None and (use_skyline_calibration or not has_ptz):
+            ext_res = self.skyline_extractor.extract(
+                frame=frame,
+                smoke_x_range=(x_min_px, x_max_px),
+            )
+            ridge_extraction_info = {
+                "is_valid": bool(ext_res["is_valid"]),
+                "confidence": float(ext_res["confidence"]),
+                "mean_drop": float(ext_res["mean_drop"]),
+                "num_points": int(len(ext_res["ridge_pts"])),  # type: ignore[arg-type]
+            }
+            if ext_res["is_valid"]:
+                ridge_pts = ext_res["ridge_pts"]
+
+        # 1. Camera Pose Resolution: Known PTZ vs Default PTZ vs 360° Blind Pose Estimation
+        if has_ptz:
+            init_pan = float(ptz["pan"])  # type: ignore[index]
+            init_tilt = float(ptz["tilt"])  # type: ignore[index]
+            init_roll = float(ptz.get("roll", 0.0))  # type: ignore[union-attr]
+            cal_info: dict = {
+                "pan": init_pan,
+                "tilt": init_tilt,
+                "roll": init_roll,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": 0.0,
+                "calibrated": False,
+                "mode": "ptz_known",
+            }
+            if use_skyline_calibration and ridge_pts is not None and len(ridge_pts) >= 3:
+                cal_res = provider.calibrate_ptz_zero_point(
+                    init_pan=init_pan,
+                    init_tilt=init_tilt,
+                    ridge_pts=ridge_pts,
+                    width=width,
+                    height=height,
+                    fov_h=fov_h,
+                )
+                cal_info.update(cal_res)
+                cal_info["calibrated"] = True
+        elif has_default_ptz:
+            init_pan = float(cam["default_pan"])
+            init_tilt = float(cam["default_tilt"])
+            init_roll = float(cam.get("default_roll", 0.0))
+            cal_info = {
+                "pan": init_pan,
+                "tilt": init_tilt,
+                "roll": init_roll,
+                "d_pan": 0.0,
+                "d_tilt": 0.0,
+                "rms_deg": 0.0,
+                "calibrated": False,
+                "mode": "default_ptz",
+            }
+            if use_skyline_calibration and ridge_pts is not None and len(ridge_pts) >= 3:
+                cal_res = provider.calibrate_ptz_zero_point(
+                    init_pan=init_pan,
+                    init_tilt=init_tilt,
+                    ridge_pts=ridge_pts,
+                    width=width,
+                    height=height,
+                    fov_h=fov_h,
+                )
+                cal_info.update(cal_res)
+                cal_info["calibrated"] = True
+        else:
+            # Blind Pose Estimation (360° Coarse-to-Fine Skyline Matching with 3-way Fail-Safe)
+            if ridge_pts is None or len(ridge_pts) < 15:
+                cal_info = {
+                    "pan": None,
+                    "tilt": None,
+                    "roll": None,
+                    "d_pan": 0.0,
+                    "d_tilt": 0.0,
+                    "rms_deg": 999.0,
+                    "calibrated": False,
+                    "status": "CALIBRATION_FAILED",
+                    "mode": "blind_360",
+                }
+                if ridge_extraction_info is not None:
+                    cal_info["ridge_extraction"] = ridge_extraction_info
+                return {
+                    "intersected": False,
+                    "status": "CALIBRATION_FAILED",
+                    "lat": None,
+                    "lon": None,
+                    "altitude_m": None,
+                    "distance_m": None,
+                    "bearing_deg": None,
+                    "elevation_angle_deg": None,
+                    "ray_vector": None,
+                    "calibration": cal_info,
+                }
+
+            blind_res = provider.estimate_blind_ptz(
                 ridge_pts=ridge_pts,
                 width=width,
                 height=height,
                 fov_h=fov_h,
             )
-            cal_info.update(cal_res)
-            cal_info["calibrated"] = True
+            cal_info = dict(blind_res)
+            cal_info["mode"] = "blind_360"
+            if ridge_extraction_info is not None:
+                cal_info["ridge_extraction"] = ridge_extraction_info
+
+            if not blind_res.get("calibrated", False):
+                return {
+                    "intersected": False,
+                    "status": "CALIBRATION_FAILED",
+                    "lat": None,
+                    "lon": None,
+                    "altitude_m": None,
+                    "distance_m": None,
+                    "bearing_deg": None,
+                    "elevation_angle_deg": None,
+                    "ray_vector": None,
+                    "calibration": cal_info,
+                }
+
+        if ridge_extraction_info is not None:
+            cal_info["ridge_extraction"] = ridge_extraction_info
 
         # 2. 3D Unit Direction Vector (dz >= 0 upward rays are allowed!)
         (dx, dy, dz), ray_bearing, ray_el_deg = self.compute_3d_ray_vector(
             fire_x=fire_x,
             fire_y=fire_y,
-            pan_deg=cal_info["pan"],
-            tilt_deg=cal_info["tilt"],
-            roll_deg=cal_info["roll"],
+            pan_deg=float(cal_info["pan"]),
+            tilt_deg=float(cal_info["tilt"]),
+            roll_deg=float(cal_info["roll"]),
             width=width,
             height=height,
             fov_h_deg=fov_h,
