@@ -18,7 +18,8 @@ function normalizeItsResponse(body) {
     const name = String(item.cctvname || '').trim();
     if (!name) return [];
     return [{
-      providerKey: createHash('md5').update(`${item.roadsectionid || ''}|${name}|${longitude}|${latitude}`).digest('hex'),
+      // 좌표는 갱신 때마다 자릿수가 달라질 수 있어 식별 키에 넣지 않음
+      providerKey: createHash('md5').update(`${item.roadsectionid || ''}|${name}`).digest('hex'),
       name, latitude, longitude, streamUrl: url.href,
     }];
   });

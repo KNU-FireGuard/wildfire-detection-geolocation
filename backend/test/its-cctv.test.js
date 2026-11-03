@@ -132,3 +132,13 @@ test('ITS 응답 후 DB 저장 실패는 보관한 목록으로 재개해 제공
     assert.equal(result.items.length, 6);
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+test('같은 CCTV는 좌표가 조금 달라져도 같은 식별 키를 갖고 이름이나 도로구간이 다르면 다른 키를 갖는다', () => {
+  const key = overrides => normalizeItsResponse({ response: { data: [{ ...entries[0], ...overrides }] } })[0].providerKey;
+  const original = key({});
+  // 갱신할 때 ITS가 좌표를 더 짧게 반올림해 돌려주는 경우(38.54174 -> 38.5417)
+  assert.equal(key({ coordx: '126.9801', coordy: '37.5701' }), original);
+  assert.equal(key({ coordx: '127', coordy: '38' }), original);
+  assert.notEqual(key({ cctvname: '서울 다른 지점' }), original);
+  assert.notEqual(key({ roadsectionid: 'other-road' }), original);
+});

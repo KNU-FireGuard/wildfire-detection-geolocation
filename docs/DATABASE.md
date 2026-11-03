@@ -87,12 +87,13 @@ erDiagram
 | `id` | 자동 | 기본 키 |
 | `name` | 필수 | 공백 불가, 고유 제약 없음 |
 | `source_type` | 필수 | `test`는 로컬 테스트 영상, `live`는 실시간 CCTV, 기존 카메라는 `test` |
-| `provider_key` | 선택 | ITS CCTV의 안정 식별자, 고유, 기존 카메라는 `NULL` |
+| `provider_key` | 선택 | ITS CCTV 식별 키, 도로구간 ID와 이름으로 생성하며 좌표는 제외, 고유, 기존 카메라는 `NULL` |
 | `latitude`, `longitude` | 선택 | 설치 위도 -90~90, 경도 -180~180, 둘 다 값이 있거나 둘 다 `NULL` |
 | `alert_phone` | 선택 | 화재 탐지 문자 수신 번호, 하이픈 없는 `010` 휴대전화 11자리, `NULL`이면 발송 안 함 |
 | `created_at` | 자동 | 등록 시각 |
 
 - Frontend는 `source_type`으로 Test 버튼 표시 여부 결정
+- 실시간 카메라는 갱신할 때 같은 키 또는 이름이 같고 좌표가 약 1km 안인 기존 행을 재사용하고 새 행은 해당하는 행이 없을 때만 추가
 - `alert_phone`은 관리자 API에서만 조회·수정, 공개 카메라 목록에는 미포함
 
 ### `videos` · 로컬 영상 메타데이터
