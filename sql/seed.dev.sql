@@ -26,6 +26,17 @@ FROM (VALUES
 ) AS source(name, latitude, longitude)
 WHERE camera.name = source.name AND camera.source_type = 'test';
 
+-- 이전 시드의 영상 경로를 실제 파일명으로 옮김 (행 ID 유지, 새 경로 행이 이미 있으면 건너뜀)
+UPDATE videos AS video
+SET file_path = source.new_path,
+    original_filename = source.new_filename
+FROM (VALUES
+    ('data/videos/경북의성.mp4', 'data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4', '경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4'),
+    ('data/videos/단촌4터널.mp4', 'data/videos/단촌4터널(청주외부1).mp4', '단촌4터널(청주외부1).mp4')
+) AS source(old_path, new_path, new_filename)
+WHERE video.file_path = source.old_path
+  AND NOT EXISTS (SELECT 1 FROM videos AS existing WHERE existing.file_path = source.new_path);
+
 INSERT INTO videos (camera_id, original_filename, file_path)
 SELECT
     (SELECT camera.id FROM cameras AS camera
@@ -34,10 +45,10 @@ SELECT
     source.original_filename,
     source.file_path
 FROM (VALUES
-    ('경북의성', '경북의성.mp4', 'data/videos/경북의성.mp4'),
+    ('경북의성', '경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4', 'data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4'),
     ('청성', '청성.mp4', 'data/videos/청성.mp4'),
     ('기도4교', '기도4교.mp4', 'data/videos/기도4교.mp4'),
-    ('단촌4터널', '단촌4터널.mp4', 'data/videos/단촌4터널.mp4')
+    ('단촌4터널', '단촌4터널(청주외부1).mp4', 'data/videos/단촌4터널(청주외부1).mp4')
 ) AS source(camera_name, original_filename, file_path)
 WHERE NOT EXISTS (
     SELECT 1 FROM videos AS existing WHERE existing.file_path = source.file_path
@@ -51,10 +62,10 @@ SET camera_id = (
     ),
     original_filename = source.original_filename
 FROM (VALUES
-    ('경북의성', '경북의성.mp4', 'data/videos/경북의성.mp4'),
+    ('경북의성', '경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4', 'data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4'),
     ('청성', '청성.mp4', 'data/videos/청성.mp4'),
     ('기도4교', '기도4교.mp4', 'data/videos/기도4교.mp4'),
-    ('단촌4터널', '단촌4터널.mp4', 'data/videos/단촌4터널.mp4')
+    ('단촌4터널', '단촌4터널(청주외부1).mp4', 'data/videos/단촌4터널(청주외부1).mp4')
 ) AS source(camera_name, original_filename, file_path)
 WHERE video.file_path = source.file_path;
 
