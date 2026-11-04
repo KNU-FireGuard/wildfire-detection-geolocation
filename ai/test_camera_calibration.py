@@ -229,6 +229,16 @@ class TestCalibrationWarnings(SyntheticCalibrationCase):
         self.assertNotIn("LANDMARK_RESIDUAL_HIGH", calibrate_camera(self._job(good), provider=self.provider)["warnings"])
         self.assertIn("LANDMARK_RESIDUAL_HIGH", calibrate_camera(self._job(bad), provider=self.provider)["warnings"])
 
+    def test_best_fov_at_search_boundary_warns(self) -> None:
+        """정답 50°인데 52~58°만 탐색하면 최적이 하한 52°에 붙음 → 범위 밖에 진짜 최적이 있을 수 있음"""
+        from ai.camera_calibration import calibrate_camera
+
+        edge = calibrate_camera(self._job(fov=(52.0, 58.0)), provider=self.provider)
+        self.assertEqual(edge["fov_h_deg"], 52.0)
+        self.assertIn("FOV_AT_SEARCH_BOUNDARY", edge["warnings"])
+        inside = calibrate_camera(self._job(fov=(44.0, 56.0)), provider=self.provider)
+        self.assertNotIn("FOV_AT_SEARCH_BOUNDARY", inside["warnings"])
+
     def test_flat_fov_curve_is_ill_constrained(self) -> None:
         from ai.camera_calibration import fov_interval
 

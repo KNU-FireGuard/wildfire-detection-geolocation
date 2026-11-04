@@ -339,6 +339,9 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
     interval, ill_constrained = fov_interval(curve)
     if ill_constrained:
         warnings.append("FOV_ILL_CONSTRAINED")
+    if best_fov in (float(fovs[0]), float(fovs[-1])):
+        # 최적 화각이 탐색 범위 끝에 붙으면 진짜 최적이 범위 밖에 있을 수 있음
+        warnings.append("FOV_AT_SEARCH_BOUNDARY")
 
     views = {}
     for view in job["views"]:

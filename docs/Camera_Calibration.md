@@ -50,6 +50,7 @@
 | `NO_LANDMARKS` | 보정용 랜드마크 없음 | 능선만으로 화각을 정함, 독립 검증 없음 |
 | `NO_VALIDATION_LANDMARKS` | 검증용 랜드마크 없음 | 결과 정확도를 독립적으로 확인할 수 없음 |
 | `FOV_ILL_CONSTRAINED` | 최소 오차 10% 이내 화각 구간이 6° 이상 | 화각이 정해지지 않음, 등록 비권장 |
+| `FOV_AT_SEARCH_BOUNDARY` | 최적 화각이 탐색 범위의 최소·최대 | 진짜 최적이 범위 밖일 수 있음, 범위를 넓혀 재실행 |
 | `POSITION_UNCONSTRAINED` | 보정용 랜드마크 방위 분포가 60° 미만 | 위치·높이 오차를 구분할 수 없음 (#51 가창 사례) |
 | `PAN_OFFSET_INCONSISTENT` | 프리셋별 Pan 오프셋 범위 3° 초과 | 라벨 변환 신뢰 낮음 |
 | `LANDMARK_RESIDUAL_HIGH` | 보정용 랜드마크 평균 각도 오차 1° 초과 | 랜드마크와 능선이 함께 맞지 않음, 카메라 위치 오차 가능성 (가까운 랜드마크일수록 민감) |
