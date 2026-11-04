@@ -164,14 +164,18 @@ def _ridge_rms_deg(provider, xs, ys, pose, width, height, fov) -> float:
 
 
 def _landmark_vectors(provider, landmarks: list[dict]):
-    """카메라 눈 위치에서 랜드마크까지의 ENU 벡터 (수 km 이내 평면 근사)"""
+    """카메라 눈 위치에서 랜드마크까지의 ENU 벡터 (수 km 이내 평면 근사), 해발고도가 있으면 DEM 대신 사용"""
     import numpy as np
 
     m_lat = 111320.0
     m_lon = 111320.0 * math.cos(math.radians(provider.cam_lat))
     rows = []
     for lm in landmarks:
-        dz = float(provider.get_elevation(lm["lat"], lm["lon"])) + lm["height_m"] - provider.eye_alt
+        if lm.get("elevation_m") is not None:
+            alt = float(lm["elevation_m"])
+        else:
+            alt = float(provider.get_elevation(lm["lat"], lm["lon"])) + lm["height_m"]
+        dz = alt - provider.eye_alt
         rows.append(((lm["lon"] - provider.cam_lon) * m_lon, (lm["lat"] - provider.cam_lat) * m_lat, dz))
     return np.array(rows, dtype=np.float64).reshape(-1, 3)
 
