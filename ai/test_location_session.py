@@ -125,5 +125,57 @@ class TestBlindPoseOnce(LocationSessionCase):
         self.assertIn("FOV_DEFAULT_USED", status["warnings"])
 
 
+class RaisingEstimator:
+    camera_configs = [config_entry()]
+
+    def estimate_location(self, *args, **kwargs):
+        raise RuntimeError("DEM 다운로드 실패")
+
+
+class TestFailuresKeepNull(LocationSessionCase):
+    """위치를 구할 수 없으면 예외 없이 None (탐지 전송·영상 스트림은 계속)"""
+
+    def _estimator(self, configs):
+        from ai.fire_location_estimator import FireLocationEstimator
+
+        return FireLocationEstimator(dem_provider=self.provider, camera_configs=configs)
+
+    def test_camera_without_coordinates_is_not_located(self) -> None:
+        from ai.location_session import LocationSession
+
+        session = LocationSession({**self.camera, "lat": None, "lon": None}, estimator=self._estimator([config_entry()]))
+        status = session.prepare(frame=None, frame_size=(W, H))
+        self.assertFalse(status["ready"])
+        self.assertEqual(status["reason"], "NO_CAMERA_COORDINATES")
+        self.assertIsNone(session.locate([900, 500, 950, 560]))
+
+    def test_failed_blind_calibration_returns_none_for_every_detection(self) -> None:
+        import numpy as np
+
+        from ai.location_session import LocationSession
+
+        flat = np.full((H, W, 3), 128, dtype=np.uint8)  # 능선이 없는 화면
+        session = LocationSession(self.camera, estimator=self._estimator([config_entry(fixed_pose=False)]))
+        status = session.prepare(frame=flat, frame_size=(W, H))
+        self.assertFalse(status["ready"])
+        self.assertEqual(status["reason"], "RIDGE_NOT_DETECTED")
+        self.assertIsNone(session.locate([900, 500, 950, 560]))
+
+    def test_estimation_error_returns_none(self) -> None:
+        from ai.location_session import LocationSession
+
+        session = LocationSession(self.camera, estimator=RaisingEstimator())
+        session.prepare(frame=None, frame_size=(W, H))
+        self.assertIsNone(session.locate([900, 500, 950, 560]))
+        self.assertEqual(session.last_error, "RuntimeError: DEM 다운로드 실패")
+
+    def test_ray_into_sky_returns_none(self) -> None:
+        from ai.location_session import LocationSession
+
+        session = LocationSession(self.camera, estimator=self._estimator([config_entry()]))
+        session.prepare(frame=None, frame_size=(W, H))
+        self.assertIsNone(session.locate([900, 0, 950, 5]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -29,10 +29,15 @@ class LocationSession:
         self.config = find_camera_config(estimator.camera_configs, camera_id=camera.get("id"), name=camera.get("name"))
         self.status: dict = {"ready": False, "reason": "NOT_PREPARED"}
         self.frame_size: tuple[int, int] | None = None
+        self.last_error: str | None = None
 
     def prepare(self, frame=None, frame_size: tuple[int, int] | None = None) -> dict:
         """실행 시작 시 1회 호출, 자세·화각을 정해 status에 기록"""
         self.frame_size = tuple(frame_size) if frame_size is not None else None
+        if self.camera.get("lat") is None or self.camera.get("lon") is None:
+            # DB에 위경도가 없는 카메라: 광선의 출발점을 알 수 없음
+            self.status = {"ready": False, "reason": "NO_CAMERA_COORDINATES", "warnings": []}
+            return self.status
         cfg = self.config
         if cfg is not None and cfg.get("fixed_pose"):
             pose = cfg["fixed_pose"]
@@ -89,7 +94,16 @@ class LocationSession:
         return self.status
 
     def locate(self, bbox_xyxy) -> dict | None:
-        """탐지 bbox(원본 픽셀 xyxy) → location_estimation, 계산할 수 없으면 None"""
+        """탐지 bbox(원본 픽셀 xyxy) → location_estimation, 계산할 수 없으면 None (예외를 밖으로 내지 않음)"""
+        if not self.status.get("ready") or self.frame_size is None:
+            return None
+        try:
+            return self._locate(bbox_xyxy)
+        except Exception as exc:  # 위치 추정 실패가 탐지 전송·영상 스트림을 멈추면 안 됨
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return None
+
+    def _locate(self, bbox_xyxy) -> dict | None:
         st = self.status
         w, h = self.frame_size
         cam = {
