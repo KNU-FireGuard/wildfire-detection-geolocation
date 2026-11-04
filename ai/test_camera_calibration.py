@@ -213,6 +213,22 @@ class TestCalibrationWarnings(SyntheticCalibrationCase):
         res = calibrate_camera(job, provider=self.provider)
         self.assertIn("PAN_OFFSET_INCONSISTENT", res["warnings"])
 
+    def test_unsatisfiable_fit_landmarks_warn_residual_high(self) -> None:
+        """
+        능선과 맞지 않는 보정용 랜드마크는 오차가 커서 경고, 일관된 랜드마크는 경고 없음
+        카메라 위치 오차처럼 방향마다 다르게 어긋나도록 좌우 랜드마크를 ±150px 엇갈려 밀림
+        (모두 같은 방향으로 밀면 Pan 회전으로 흡수되어 이 경고로는 구분 불가)
+        """
+        from ai.camera_calibration import calibrate_camera
+
+        good = make_landmarks(self.provider, "V1", TRUE_POSES["V1"], TRUE_FOV, "fit", offsets=(-20.0, 20.0))
+        good += make_landmarks(self.provider, "V2", TRUE_POSES["V2"], TRUE_FOV, "fit", offsets=(-20.0, 20.0))
+        bad = copy.deepcopy(good)
+        for i, lm in enumerate(bad):
+            lm["px"][0] += 150.0 if i % 2 == 0 else -150.0
+        self.assertNotIn("LANDMARK_RESIDUAL_HIGH", calibrate_camera(self._job(good), provider=self.provider)["warnings"])
+        self.assertIn("LANDMARK_RESIDUAL_HIGH", calibrate_camera(self._job(bad), provider=self.provider)["warnings"])
+
     def test_flat_fov_curve_is_ill_constrained(self) -> None:
         from ai.camera_calibration import fov_interval
 

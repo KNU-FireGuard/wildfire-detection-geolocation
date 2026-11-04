@@ -258,6 +258,7 @@ def _validation_report(provider, job: dict, views: dict, ridges: dict, fov: floa
 
 
 POSITION_SPREAD_LIMIT_DEG = 60.0
+LANDMARK_RESIDUAL_LIMIT_DEG = 1.0  # 보정용 랜드마크 평균 각도 오차가 이보다 크면 모델(특히 카메라 위치)과 불일치
 
 
 def fov_interval(curve: list[tuple[float, float]]) -> tuple[tuple[float, float], bool]:
@@ -360,6 +361,9 @@ def calibrate_camera(job: dict, provider=None, extractor=None) -> dict:
         azimuths = [math.degrees(math.atan2(v[0], v[1])) for v in vecs]
         if _azimuth_spread_deg(azimuths) < POSITION_SPREAD_LIMIT_DEG:
             warnings.append("POSITION_UNCONSTRAINED")
+        fit_errs = [e for v in views.values() for e in v["landmark_errors_deg"]]
+        if fit_errs and float(np.mean(fit_errs)) > LANDMARK_RESIDUAL_LIMIT_DEG:
+            warnings.append("LANDMARK_RESIDUAL_HIGH")
     if not any(lm["use"] == "val" for lm in job["landmarks"]):
         warnings.append("NO_VALIDATION_LANDMARKS")
 
