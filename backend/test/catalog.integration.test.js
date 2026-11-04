@@ -91,6 +91,12 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     assert.equal(liveDetail.item.video_id, null);
 
     await client.query("INSERT INTO cameras (name, source_type) VALUES ('경북의성', 'live')");
+    // 이전 시드로 만든 영상 행은 새 경로로 옮겨져야 하며 중복 행이 생기면 안 됨
+    const oldDemo = await client.query(`
+      WITH camera AS (INSERT INTO cameras (name, source_type) VALUES ('단촌4터널', 'test') RETURNING id)
+      INSERT INTO videos (camera_id, original_filename, file_path)
+      SELECT id, '단촌4터널.mp4', 'data/videos/단촌4터널.mp4' FROM camera RETURNING id
+    `);
     const seed = readFileSync(path.join(__dirname, '../../sql/seed.dev.sql'), 'utf8')
       .replace(/^--[^\n]*\n(?:--[^\n]*\n)*BEGIN;\s*/, '')
       .replace(/COMMIT;\s*$/, '');
@@ -99,6 +105,20 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     assert.deepEqual(seeded.rows.map(row => row.source_type), ['live', 'test']);
     const demoCameras = await client.query("SELECT COUNT(*)::int AS count FROM cameras WHERE source_type = 'test' AND name IN ('경북의성', '청성', '기도4교', '단촌4터널')");
     assert.equal(demoCameras.rows[0].count, 4);
+    // 단촌4터널은 영상(청주외부1) 위치, 이전 값은 약 2.6km 떨어진 청주외부2 좌표
+    const danchon = await client.query("SELECT latitude, longitude FROM cameras WHERE source_type = 'test' AND name = '단촌4터널'");
+    assert.deepEqual(danchon.rows, [{ latitude: 36.421821, longitude: 128.724045 }]);
+    const demoVideos = await client.query(`
+      SELECT video.id, video.original_filename, video.file_path FROM videos AS video
+      JOIN cameras AS camera ON camera.id = video.camera_id
+      WHERE camera.source_type = 'test' AND camera.name IN ('경북의성', '단촌4터널') ORDER BY camera.name
+    `);
+    assert.deepEqual(demoVideos.rows.map(row => row.file_path), [
+      'data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4',
+      'data/videos/단촌4터널(청주외부1).mp4',
+    ]);
+    assert.equal(demoVideos.rows[1].id, oldDemo.rows[0].id);
+    assert.equal(demoVideos.rows[1].original_filename, '단촌4터널(청주외부1).mp4');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     if (client) {
