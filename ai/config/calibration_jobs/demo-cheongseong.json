@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "camera": {
+    "key": "demo-cheongseong",
+    "name": "청성",
+    "camera_id": null,
+    "lat": 36.270014,
+    "lon": 127.749227,
+    "tower_height_m": 15.0
+  },
+  "fov_search_deg": [
+    35.0,
+    75.0
+  ],
+  "fov_step_deg": 1.0,
+  "views": [
+    {
+      "id": "fixed",
+      "frame": "data/frames/demo-cheongseong/f050.png"
+    }
+  ],
+  "landmarks": [],
+  "notes": "영상 data/videos/청성.mp4 50% 시점 프레임(ffmpeg 추출), 위경도는 sql/seed.dev.sql, 랜드마크 미측정"
+}

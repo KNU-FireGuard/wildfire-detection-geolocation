@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "camera": {
+    "key": "gachang-ori",
+    "name": "가창오리",
+    "camera_id": null,
+    "lat": 35.791037,
+    "lon": 128.591184,
+    "tower_height_m": 15.0
+  },
+  "fov_search_deg": [
+    40.0,
+    60.0
+  ],
+  "fov_step_deg": 1.0,
+  "views": [
+    {
+      "id": "P269/T13",
+      "frame": "data/frames/check/t270.png",
+      "preset": "P269/T13",
+      "label_pan": 269.0
+    },
+    {
+      "id": "P339/T03",
+      "frame": "data/frames/check/t195.png",
+      "preset": "P339/T03",
+      "label_pan": 339.0
+    },
+    {
+      "id": "P023/T03",
+      "frame": "data/frames/check/t210.png",
+      "preset": "P023/T03",
+      "label_pan": 23.0
+    },
+    {
+      "id": "P070/T03",
+      "frame": "data/frames/check/t225.png",
+      "preset": "P070/T03",
+      "label_pan": 70.0
+    },
+    {
+      "id": "P107/T03",
+      "frame": "data/frames/check/t240.png",
+      "preset": "P107/T03",
+      "label_pan": 107.0
+    },
+    {
+      "id": "P133/T03",
+      "frame": "data/frames/check/t255.png",
+      "preset": "P133/T03",
+      "label_pan": 133.0
+    }
+  ],
+  "landmarks": [
+    {
+      "name": "A 빨간 지붕 집",
+      "lat": 35.7911244,
+      "lon": 128.5919924,
+      "height_m": 6.0,
+      "view": "P339/T03",
+      "px": [
+        600,
+        875
+      ],
+      "use": "fit"
+    },
+    {
+      "name": "R 붉은 기와 집",
+      "lat": 35.7907263,
+      "lon": 128.5926074,
+      "height_m": 4.0,
+      "view": "P339/T03",
+      "px": [
+        1110,
+        1005
+      ],
+      "use": "fit"
+    },
+    {
+      "name": "D 어두운 반원 지붕",
+      "lat": 35.7897718,
+      "lon": 128.5940912,
+      "height_m": 4.0,
+      "view": "P339/T03",
+      "px": [
+        1595,
+        945
+      ],
+      "use": "fit"
+    },
+    {
+      "name": "G 주황 지붕 4층 건물",
+      "lat": 35.7879682,
+      "lon": 128.592642,
+      "height_m": 13.0,
+      "view": "P023/T03",
+      "px": [
+        1365,
+        900
+      ],
+      "use": "fit"
+    },
+    {
+      "name": "E 흰 2층 건물",
+      "lat": 35.7904666,
+      "lon": 128.5937884,
+      "height_m": 7.0,
+      "view": "P339/T03",
+      "px": [
+        1200,
+        905
+      ],
+      "use": "val"
+    },
+    {
+      "name": "K 청록 반원 지붕",
+      "lat": 35.7896069,
+      "lon": 128.593637,
+      "height_m": 4.0,
+      "view": "P339/T03",
+      "px": [
+        1840,
+        968
+      ],
+      "use": "val"
+    },
+    {
+      "name": "P 동제미술관",
+      "lat": 35.7891297,
+      "lon": 128.5936802,
+      "height_m": 7.0,
+      "view": "P023/T03",
+      "px": [
+        470,
+        918
+      ],
+      "use": "val"
+    }
+  ],
+  "notes": "랜드마크 좌표: 네이버 위성지도 캡처(위성지도3, 50m=128px, 기준점 오리교 북단) 측정, A는 사용자 제공 좌표, 카메라 위경도는 위치 미확정(#51)"
+}
