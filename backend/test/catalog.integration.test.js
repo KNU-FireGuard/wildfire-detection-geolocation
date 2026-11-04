@@ -105,6 +105,9 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     assert.deepEqual(seeded.rows.map(row => row.source_type), ['live', 'test']);
     const demoCameras = await client.query("SELECT COUNT(*)::int AS count FROM cameras WHERE source_type = 'test' AND name IN ('경북의성', '청성', '기도4교', '단촌4터널')");
     assert.equal(demoCameras.rows[0].count, 4);
+    // 단촌4터널은 영상(청주외부1) 위치, 이전 값은 약 2.6km 떨어진 청주외부2 좌표
+    const danchon = await client.query("SELECT latitude, longitude FROM cameras WHERE source_type = 'test' AND name = '단촌4터널'");
+    assert.deepEqual(danchon.rows, [{ latitude: 36.421821, longitude: 128.724045 }]);
     const demoVideos = await client.query(`
       SELECT video.id, video.original_filename, video.file_path FROM videos AS video
       JOIN cameras AS camera ON camera.id = video.camera_id
