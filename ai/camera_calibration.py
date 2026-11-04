@@ -96,11 +96,18 @@ def load_calibration_job(path: Path | str, base_dir: Path | str | None = None) -
         px = lm["px"]
         if not isinstance(px, list) or len(px) != 2:
             raise CalibrationJobError(f"{where}.px: [x, y] 형식이어야 합니다")
+        # 지표보다 낮거나 지표와 무관한 점(터널 입구, 깎은 비탈)은 해발고도로 입력, 지표 기준 높이와 함께 쓰면 모호
+        elevation = None
+        if lm.get("elevation_m") is not None:
+            if lm.get("height_m") is not None:
+                raise CalibrationJobError(f"{where}: height_m과 elevation_m은 함께 쓸 수 없습니다")
+            elevation = _num(lm["elevation_m"], f"{where}.elevation_m", -500.0, 9000.0)
         landmarks.append({
             "name": str(lm["name"]),
             "lat": _num(lm["lat"], f"{where}.lat", -90.0, 90.0),
             "lon": _num(lm["lon"], f"{where}.lon", -180.0, 180.0),
             "height_m": _num(lm.get("height_m", 0.0), f"{where}.height_m", 0.0, 500.0),
+            "elevation_m": elevation,
             "view": str(lm["view"]),
             "px": (_num(px[0], f"{where}.px[0]"), _num(px[1], f"{where}.px[1]")),
             "use": lm["use"],

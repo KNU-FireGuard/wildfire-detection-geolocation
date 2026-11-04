@@ -67,6 +67,20 @@ class TestCalibrationJobLoader(unittest.TestCase):
     def test_empty_views_are_rejected(self) -> None:
         self._assert_rejected(lambda j: j.update(views=[], landmarks=[]))
 
+    def test_landmark_elevation_is_loaded(self) -> None:
+        """지표보다 낮은 점(터널 입구 등)은 해발고도(elevation_m)로 입력, 없으면 None"""
+        data = copy.deepcopy(JOB)
+        data["landmarks"][1]["elevation_m"] = 188.5
+        job = load_calibration_job(self._write(data), base_dir=self.dir)
+        self.assertIsNone(job["landmarks"][0]["elevation_m"])
+        self.assertEqual(job["landmarks"][1]["elevation_m"], 188.5)
+
+    def test_landmark_with_both_height_and_elevation_is_rejected(self) -> None:
+        self._assert_rejected(lambda j: j["landmarks"][0].update(elevation_m=120.0))
+
+    def test_non_numeric_landmark_elevation_is_rejected(self) -> None:
+        self._assert_rejected(lambda j: j["landmarks"][1].update(elevation_m="높음"))
+
 
 TRUE_FOV = 50.0
 TRUE_POSES = {"V1": (99.2, 1.3, 0.8), "V2": (141.8, 2.6, 1.5)}
