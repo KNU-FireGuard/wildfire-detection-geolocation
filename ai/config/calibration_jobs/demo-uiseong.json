@@ -19,6 +19,67 @@
       "frame": "data/frames/demo-uiseong/f050.png"
     }
   ],
-  "landmarks": [],
-  "notes": "영상 data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4 50% 시점 프레임(ffmpeg 추출), 위경도는 sql/seed.dev.sql, 랜드마크 미측정"
+  "landmarks": [
+    {
+      "name": "U2 파란 지붕 건물 (사용자 좌표)",
+      "lat": 36.369062,
+      "lon": 128.577562,
+      "height_m": 4.0,
+      "view": "fixed",
+      "px": [
+        645,
+        655
+      ],
+      "use": "fit"
+    },
+    {
+      "name": "J S자 농로와 봉호로 교차점",
+      "lat": 36.367279,
+      "lon": 128.577808,
+      "height_m": 0.0,
+      "view": "fixed",
+      "px": [
+        1478,
+        685
+      ],
+      "use": "fit"
+    },
+    {
+      "name": "U6 마을 파란 지붕",
+      "lat": 36.366328,
+      "lon": 128.578038,
+      "height_m": 4.0,
+      "view": "fixed",
+      "px": [
+        1865,
+        688
+      ],
+      "use": "fit"
+    },
+    {
+      "name": "U5 마을 하늘색 건물",
+      "lat": 36.366869,
+      "lon": 128.578012,
+      "height_m": 4.0,
+      "view": "fixed",
+      "px": [
+        1640,
+        678
+      ],
+      "use": "val"
+    },
+    {
+      "name": "W S자 농로 서쪽 끝 (제방길 교차)",
+      "lat": 36.36745,
+      "lon": 128.576397,
+      "height_m": 0.0,
+      "view": "fixed",
+      "px": [
+        1600,
+        738
+      ],
+      "use": "val"
+    }
+  ],
+  "notes": "영상 data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4 50% 시점 프레임(ffmpeg 추출), 위경도는 sql/seed.dev.sql. 랜드마크: 네이버 위성지도 캡처(0.294 m/px)를 U2 좌표(사용자 측정)로 맞추고 지도 픽셀로 측정, DB 카메라 위치가 고속도로 갓길에 떨어지는 것 확인"
 }
