@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "camera": {
+    "key": "demo-uiseong",
+    "name": "경북의성",
+    "camera_id": null,
+    "lat": 36.368431,
+    "lon": 128.572611,
+    "tower_height_m": 15.0
+  },
+  "fov_search_deg": [
+    20.0,
+    75.0
+  ],
+  "fov_step_deg": 1.0,
+  "views": [
+    {
+      "id": "fixed",
+      "frame": "data/frames/demo-uiseong/f050.png"
+    }
+  ],
+  "landmarks": [],
+  "notes": "영상 data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4 50% 시점 프레임(ffmpeg 추출), 위경도는 sql/seed.dev.sql, 랜드마크 미측정"
+}

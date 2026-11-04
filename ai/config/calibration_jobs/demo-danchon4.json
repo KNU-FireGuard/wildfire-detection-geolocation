@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "camera": {
+    "key": "demo-danchon4",
+    "name": "단촌4터널",
+    "camera_id": null,
+    "lat": 36.416183,
+    "lon": 128.752453,
+    "tower_height_m": 15.0
+  },
+  "fov_search_deg": [
+    20.0,
+    75.0
+  ],
+  "fov_step_deg": 1.0,
+  "views": [
+    {
+      "id": "fixed",
+      "frame": "data/frames/demo-danchon4/f050.png"
+    }
+  ],
+  "landmarks": [],
+  "notes": "영상 data/videos/단촌4터널(청주외부1).mp4 50% 시점 프레임(ffmpeg 추출), 위경도는 sql/seed.dev.sql, 랜드마크 미측정"
+}
