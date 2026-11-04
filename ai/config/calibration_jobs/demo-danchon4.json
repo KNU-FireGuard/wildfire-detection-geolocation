@@ -4,12 +4,12 @@
     "key": "demo-danchon4",
     "name": "단촌4터널",
     "camera_id": null,
-    "lat": 36.416183,
-    "lon": 128.752453,
+    "lat": 36.421821,
+    "lon": 128.724045,
     "tower_height_m": 15.0
   },
   "fov_search_deg": [
-    20.0,
+    25.0,
     75.0
   ],
   "fov_step_deg": 1.0,
@@ -19,6 +19,31 @@
       "frame": "data/frames/demo-danchon4/f050.png"
     }
   ],
-  "landmarks": [],
-  "notes": "영상 data/videos/단촌4터널(청주외부1).mp4 50% 시점 프레임(ffmpeg 추출), 위경도는 sql/seed.dev.sql, 랜드마크 미측정"
+  "landmarks": [
+    {
+      "name": "D1 왼쪽 터널 입구 (단촌4터널 북쪽 굴 서쪽 입구)",
+      "lat": 36.421623,
+      "lon": 128.726789,
+      "view": "fixed",
+      "px": [
+        285,
+        345
+      ],
+      "use": "fit",
+      "elevation_m": 188.6
+    },
+    {
+      "name": "D2 오른쪽 터널 입구 (단촌4터널 남쪽 굴 서쪽 입구)",
+      "lat": 36.421374,
+      "lon": 128.726531,
+      "view": "fixed",
+      "px": [
+        378,
+        345
+      ],
+      "use": "fit",
+      "elevation_m": 188.6
+    }
+  ],
+  "notes": "영상 data/videos/단촌4터널(청주외부1).mp4 50% 시점 프레임(ffmpeg 추출). 위경도는 실측값(DB sql/seed.dev.sql 36.416183, 128.752453은 약 2.6km 차이, #78에서 수정 예정): 네이버 위성지도에서 중앙분리대 안 기둥과 지번 좌표 핀(36.421437, 128.724938)을 같은 축척(0.185 m/px)으로 찍어 핀 간 거리로 계산. 랜드마크: 단촌4터널 서쪽 입구 2곳(카메라 동쪽 230~250m), 입구 도로면이 DEM 지표(약 209m)보다 낮아 카메라 지점 DEM 186.6m + 2m를 elevation_m으로 사용. 검증용 랜드마크 없음"
 }
