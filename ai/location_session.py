@@ -5,6 +5,7 @@
   - 탐지마다 능선 추출·360° 역산을 반복하지 않음 (프레임마다 결과가 흔들리고 느림)
 - 자세 결정 순서
   1. ai/config/cameras.json의 고정 자세(fixed_pose) + 화각
+  2. 고정 자세가 없으면 첫 프레임 능선으로 360° 역산 1회 (화각은 설정값, 없으면 기본 60° + FOV_DEFAULT_USED)
 - bbox는 YOLO 원본 픽셀 xyxy, 목표점은 bbox 아래 중앙 (연기 발생 지점)
 - 반환은 Backend 탐지 JSON의 location_estimation 형식 {latitude, longitude, error_range_m}
 - 이동하는 PTZ 카메라는 실행 중 자세가 바뀌므로 대상 아님 (고정 카메라·고정 프리셋 전제)
@@ -12,6 +13,8 @@
 from __future__ import annotations
 
 from ai.camera_config import find_camera_config
+
+DEFAULT_FOV_H_DEG = 60.0  # FireLocationEstimator 코드 기본값과 동일
 
 
 class LocationSession:
@@ -42,7 +45,47 @@ class LocationSession:
                 "tilt": float(pose["tilt"]),
                 "roll": float(pose["roll"]),
                 "tower_height_m": cfg.get("tower_height_m"),
+                "warnings": [],
             }
+            return self.status
+        return self._prepare_blind(frame, cfg)
+
+    def _prepare_blind(self, frame, cfg: dict | None) -> dict:
+        """고정 자세가 없으면 첫 프레임 능선으로 360° 역산 1회 (#56 게이트 통과 시에만 사용)"""
+        fov = float(cfg["fov_h_deg"]) if cfg is not None else DEFAULT_FOV_H_DEG
+        tower_h = cfg.get("tower_height_m") if cfg is not None else None
+        base = {
+            "ready": False,
+            "mode": "blind_360_once",
+            "config_key": cfg["key"] if cfg is not None else None,
+            "fov_h_deg": fov,
+            "tower_height_m": tower_h,
+            # 보정 설정이 없으면 코드 기본 화각 사용, 실제 렌즈와 크게 다를 수 있음
+            "warnings": [] if cfg is not None else ["FOV_DEFAULT_USED"],
+        }
+        if frame is None or self.frame_size is None:
+            self.status = {**base, "reason": "NO_FRAME_FOR_CALIBRATION"}
+            return self.status
+        ext = self.estimator.skyline_extractor.extract(frame=frame)
+        if not ext["is_valid"]:
+            self.status = {**base, "reason": "RIDGE_NOT_DETECTED"}
+            return self.status
+        provider = self.estimator._get_provider(
+            float(self.camera["lat"]), float(self.camera["lon"]), float(tower_h) if tower_h is not None else 15.0
+        )
+        w, h = self.frame_size
+        blind = provider.estimate_blind_ptz(ridge_pts=ext["ridge_pts"], width=w, height=h, fov_h=fov)
+        if not blind.get("calibrated", False):
+            self.status = {**base, "reason": blind.get("reason") or "CALIBRATION_FAILED"}
+            return self.status
+        self.status = {
+            **base,
+            "ready": True,
+            "pan": float(blind["pan"]),
+            "tilt": float(blind["tilt"]),
+            "roll": float(blind["roll"]),
+            "uniqueness_ratio": blind.get("uniqueness_ratio"),
+        }
         return self.status
 
     def locate(self, bbox_xyxy) -> dict | None:

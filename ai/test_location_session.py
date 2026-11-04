@@ -71,5 +71,59 @@ class TestFixedPoseSession(LocationSessionCase):
             self.assertLess(haversine_distance(loc["latitude"], loc["longitude"], la, lo), 30.0)
 
 
+class CountingProvider:
+    """DEMProvider를 감싸 360° 역산 호출 횟수를 셈"""
+
+    def __init__(self, provider):
+        self._p = provider
+        self.blind_calls = 0
+
+    def __getattr__(self, name):
+        return getattr(self._p, name)
+
+    def estimate_blind_ptz(self, *args, **kwargs):
+        self.blind_calls += 1
+        return self._p.estimate_blind_ptz(*args, **kwargs)
+
+
+class TestBlindPoseOnce(LocationSessionCase):
+    """고정 자세가 없는 카메라: 첫 프레임 능선으로 360° 역산 1회, 이후 탐지는 같은 자세 재사용"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        from ai.ridge_detector import render_synthetic_cctv_frame
+
+        cls.frame, _ = render_synthetic_cctv_frame(cls.provider, *TRUE_POSE, fov_h=TRUE_FOV, add_osd=True)
+
+    def _session(self, configs):
+        from ai.fire_location_estimator import FireLocationEstimator
+        from ai.location_session import LocationSession
+
+        counter = CountingProvider(self.provider)
+        est = FireLocationEstimator(dem_provider=counter, camera_configs=configs)
+        return LocationSession(self.camera, estimator=est), counter
+
+    def test_configured_fov_without_pose_estimates_pose_once(self) -> None:
+        session, counter = self._session([config_entry(fixed_pose=False)])
+        status = session.prepare(frame=self.frame, frame_size=(W, H))
+        self.assertTrue(status["ready"], status)
+        self.assertEqual(status["mode"], "blind_360_once")
+        self.assertEqual(status["fov_h_deg"], TRUE_FOV)
+        self.assertLess(abs((status["pan"] - TRUE_POSE[0] + 180.0) % 360.0 - 180.0), 1.0)
+        for off, dist in ((-8.0, 900.0), (6.0, 1300.0)):
+            bbox, (la, lo) = self.ground_bbox(off, dist)
+            loc = session.locate(bbox)
+            self.assertIsNotNone(loc)
+            self.assertLess(haversine_distance(loc["latitude"], loc["longitude"], la, lo), 100.0)
+        self.assertEqual(counter.blind_calls, 1)
+
+    def test_unconfigured_camera_uses_default_fov_with_warning(self) -> None:
+        session, _ = self._session([])
+        status = session.prepare(frame=self.frame, frame_size=(W, H))
+        self.assertEqual(status["fov_h_deg"], 60.0)
+        self.assertIn("FOV_DEFAULT_USED", status["warnings"])
+
+
 if __name__ == "__main__":
     unittest.main()
