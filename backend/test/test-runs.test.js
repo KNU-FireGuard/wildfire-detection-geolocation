@@ -16,7 +16,7 @@ delete process.env.AI_MODEL_PATH;
 
 const fixtureFilename = `test-run-${randomUUID()}.mp4`;
 const fixturePath = path.resolve(__dirname, '../../data/videos', fixtureFilename);
-const expectedModelPath = path.resolve(__dirname, '../../ai/weights/yolo26n_fire_50/weights/best.pt');
+const expectedModelPath = path.resolve(__dirname, '../../ai/weights/yolo26s_final/weights/best.pt');
 const originalAccess = fs.access;
 fs.access = (file, ...args) => file === expectedModelPath
   ? Promise.resolve()

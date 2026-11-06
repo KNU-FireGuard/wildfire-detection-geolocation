@@ -124,6 +124,7 @@ class ParseArgsTests(unittest.TestCase):
         self.base = [
             "--run-id", "1", "--camera-id", "2", "--source-path", str(self.video),
             "--video-url", "http://x/video", "--result-url", "http://x/det", "--model-path", str(self.model),
+            "--device", "cpu",  # 장치 자동 선택(torch import)을 건너뜀
         ]
 
     def tearDown(self):

@@ -31,7 +31,8 @@
 
 | 파일 | 용도 |
 | --- | --- |
-| `yolo26n_fire_50/weights/best.pt` | 성능 기준 최적 가중치, 추론에 사용 |
+| `weights/yolo26s_final/weights/best.pt` | Backend 분석의 기본 가중치, `AI_MODEL_PATH`로 변경 가능 |
+| `yolo26n_fire_50/weights/best.pt` | 초기 실험 모델의 최적 가중치 |
 | `yolo26n_fire_50/weights/last.pt` | 마지막 epoch 가중치, 학습 재개용 |
 | `inference/test.py` | 고정된 `ai/test.mp4`를 추론하는 독립 테스트 코드, Backend 연동용 CLI 아님 |
 | `inference/backend_connect.py` | Backend가 실행하는 CLI, MJPEG 영상과 탐지 JSON 전송 |

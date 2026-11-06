@@ -9,6 +9,7 @@
 - Node.js `^20.19.0 || >=22.12.0`과 npm
 - Python과 pip
 - Docker와 Docker Compose
+- [Git LFS](https://git-lfs.com): 저장소를 내려받기 전에 `git lfs install` 실행, 설치하지 않으면 모델 가중치(`.pt`)가 포인터 파일로 받아져 분석이 실패
 
 ## 1 환경 파일과 DB
 
@@ -30,6 +31,7 @@ if not exist ".env" copy ".env.example" ".env"
 - `JWT_SECRET`은 32바이트 이상의 임의 문자열로 설정
 - `AI_CALLBACK_TOKEN`은 32바이트 이상의 임의 문자열로 설정
 - 초기 관리자 비밀번호는 12자 이상으로 설정
+- AI 모델은 기본값 `ai/weights/yolo26s_final/weights/best.pt`를 사용, 다른 가중치를 쓰려면 `.env`에 `AI_MODEL_PATH`(저장소 루트 기준 경로) 설정
 
 카메라 Test 기능을 사용하려면 AI 패키지 설치
 
@@ -65,8 +67,14 @@ docker compose exec -T db sh -c "psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $P
 
 ## 2 영상 등록
 
-- 조장에게 받은 `경북의성.mp4`, `청성.mp4`, `기도4교.mp4`, `단촌4터널.mp4`를 `data/videos/`에 배치
-- 카메라와 영상 정보를 DB에 등록
+- 조장에게 받은 영상을 아래 파일명으로 `data/videos/`에 배치
+
+| 카메라 | 파일명 |
+| --- | --- |
+| 경북의성 | `경북의성.mp4` |
+| 청성 | `청성.mp4` |
+| 기도4교 | `기도4교.mp4` |
+| 단촌4터널 | `단촌4터널.mp4` |
 
 ### Bash
 

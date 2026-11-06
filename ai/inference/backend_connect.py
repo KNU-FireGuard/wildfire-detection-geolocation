@@ -1,13 +1,27 @@
 import argparse
 import os
+import queue
 import sys
+import threading
 from pathlib import Path
 
 import requests
 
+
 AI_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL_PATH = AI_DIR / "yolo26n_fire_50" / "weights" / "best.pt"
+DEFAULT_MODEL_PATH = AI_DIR / "weights" / "yolo26s_final" / "weights" / "best.pt"
 BOUNDARY = "frame"
+FRAME_QUEUE_SIZE = 2
+
+
+def pick_device():
+    import torch  # YOLO 없이 테스트할 수 있도록 실행 시점에 import
+
+    if torch.cuda.is_available():
+        return "cuda:0"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def parse_args(argv=None):
@@ -21,16 +35,15 @@ def parse_args(argv=None):
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--iou", type=float, default=0.45)
     parser.add_argument("--image-size", type=int, default=640)
+    parser.add_argument("--vid-stride", type=int, default=6, help="Analyze every Nth frame")
+    parser.add_argument("--stream-width", type=int, default=960, help="Max width of streamed frames (0 = original)")
+    parser.add_argument("--jpeg-quality", type=int, default=80)
+    parser.add_argument("--device", default=None, help="cuda:0, mps, cpu (default: auto)")
     # 위치 추정용 (#60): 이름은 ai/config/cameras.json 보정 설정 조회, 위경도는 광선 출발점
     parser.add_argument("--camera-name")
     parser.add_argument("--camera-lat", type=float)
     parser.add_argument("--camera-lon", type=float)
     args = parser.parse_args(argv)
-
-    if (args.camera_lat is None) != (args.camera_lon is None):
-        parser.error("--camera-lat and --camera-lon must be given together")
-    if args.camera_lat is not None and not (-90 <= args.camera_lat <= 90 and -180 <= args.camera_lon <= 180):
-        parser.error("--camera-lat/--camera-lon out of range")
 
     if args.run_id <= 0 or args.camera_id <= 0:
         parser.error("--run-id and --camera-id must be positive integers")
@@ -42,6 +55,18 @@ def parse_args(argv=None):
         parser.error("--confidence and --iou must be between 0 and 1")
     if args.image_size <= 0:
         parser.error("--image-size must be positive")
+    if args.vid_stride <= 0:
+        parser.error("--vid-stride must be positive")
+    if args.stream_width < 0:
+        parser.error("--stream-width must be zero or positive")
+    if not 1 <= args.jpeg_quality <= 100:
+        parser.error("--jpeg-quality must be between 1 and 100")
+    if (args.camera_lat is None) != (args.camera_lon is None):
+        parser.error("--camera-lat and --camera-lon must be given together")
+    if args.camera_lat is not None and not (-90 <= args.camera_lat <= 90 and -180 <= args.camera_lon <= 180):
+        parser.error("--camera-lat/--camera-lon out of range")
+    if args.device is None:
+        args.device = pick_device()
     return args
 
 
@@ -125,50 +150,105 @@ def frame_detections(result, names, run_id, camera_id, session):
     return payloads
 
 
-def iter_annotated_frames(model, args, headers, detection_count, session=None):
+def send_detections(model, result, args, headers, detection_count, session=None):
+    for payload in frame_detections(result, model.names, args.run_id, args.camera_id, session):
+        response = requests.post(
+            args.result_url,
+            headers=headers,
+            json=payload,
+            timeout=(5, 30),
+        )
+        response.raise_for_status()
+        detection_count[0] += 1
+
+
+def infer_frames(model, args, headers, detection_count, frames, stop, session=None):
+    # Producer thread: decode and inference run here while the consumer encodes and uploads.
+    def put(item):
+        while not stop.is_set():
+            try:
+                frames.put(item, timeout=0.5)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    try:
+        results = model.predict(
+            source=str(args.source_path),
+            conf=args.confidence,
+            iou=args.iou,
+            imgsz=args.image_size,
+            vid_stride=args.vid_stride,
+            device=args.device,
+            stream=True,
+            save=False,
+            show=False,
+            verbose=False,
+        )
+        prepared = False
+        for result in results:
+            if not prepared:
+                # 위치 추정 자세는 첫 분석 프레임에서 1회 결정, 실패하면 이후 위치는 null
+                prepared = True
+                status = prepare_location(session, result)
+                if status is None or not status.get("ready"):
+                    session = None
+            send_detections(model, result, args, headers, detection_count, session)
+            if not put(result):
+                return
+        put(None)
+    except BaseException as error:
+        put(error)
+
+
+def encode_frame(result, stream_width, jpeg_quality):
     import cv2
 
-    results = model.predict(
-        source=str(args.source_path),
-        conf=args.confidence,
-        iou=args.iou,
-        imgsz=args.image_size,
-        stream=True,
-        save=False,
-        show=False,
-        verbose=False,
+    annotated_frame = result.plot()
+    height, width = annotated_frame.shape[:2]
+    if stream_width > 0 and width > stream_width:
+        annotated_frame = cv2.resize(
+            annotated_frame,
+            (stream_width, round(height * stream_width / width)),
+            interpolation=cv2.INTER_AREA,
+        )
+    encoded, jpeg = cv2.imencode(
+        ".jpg", annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
     )
+    if not encoded:
+        raise RuntimeError("Failed to encode an annotated frame")
+    return jpeg.tobytes()
 
-    prepared = False
-    for result in results:
-        if not prepared:
-            prepared = True
-            status = prepare_location(session, result)
-            if status is None or not status.get("ready"):
-                session = None
-        for payload in frame_detections(result, model.names, args.run_id, args.camera_id, session):
-            response = requests.post(
-                args.result_url,
-                headers=headers,
-                json=payload,
-                timeout=(5, 30),
-            )
-            response.raise_for_status()
-            detection_count[0] += 1
 
-        annotated_frame = result.plot()
-        encoded, jpeg = cv2.imencode(".jpg", annotated_frame)
-        if not encoded:
-            raise RuntimeError("Failed to encode an annotated frame")
+def iter_annotated_frames(model, args, headers, detection_count, session=None):
+    frames = queue.Queue(maxsize=FRAME_QUEUE_SIZE)
+    stop = threading.Event()
+    worker = threading.Thread(
+        target=infer_frames,
+        args=(model, args, headers, detection_count, frames, stop, session),
+        daemon=True,
+    )
+    worker.start()
 
-        jpeg_bytes = jpeg.tobytes()
-        part_header = (
-            f"--{BOUNDARY}\r\n"
-            "Content-Type: image/jpeg\r\n"
-            f"Content-Length: {len(jpeg_bytes)}\r\n"
-            "\r\n"
-        ).encode("ascii")
-        yield part_header + jpeg_bytes + b"\r\n"
+    try:
+        while True:
+            item = frames.get()
+            if item is None:
+                break
+            if isinstance(item, BaseException):
+                raise item
+
+            jpeg_bytes = encode_frame(item, args.stream_width, args.jpeg_quality)
+            part_header = (
+                f"--{BOUNDARY}\r\n"
+                "Content-Type: image/jpeg\r\n"
+                f"Content-Length: {len(jpeg_bytes)}\r\n"
+                "\r\n"
+            ).encode("ascii")
+            yield part_header + jpeg_bytes + b"\r\n"
+    finally:
+        stop.set()
 
     yield f"--{BOUNDARY}--\r\n".encode("ascii")
 
@@ -179,7 +259,7 @@ def main():
     if not token:
         raise RuntimeError("AI_CALLBACK_TOKEN environment variable is required")
 
-    from ultralytics import YOLO
+    from ultralytics import YOLO  # YOLO 없이 테스트할 수 있도록 실행 시점에 import
 
     headers = {"X-AI-Token": token}
     model = YOLO(str(args.model_path))
