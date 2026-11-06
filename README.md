@@ -74,8 +74,6 @@ docker compose exec -T db sh -c "psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $P
 | 기도4교 | `기도4교.mp4` |
 | 단촌4터널 | `단촌4터널.mp4` |
 
-- 아래 명령으로 카메라와 영상 정보를 DB에 등록, 실제 영상 파일명은 자동 변경되지 않음
-
 ### Bash
 
 ```bash
