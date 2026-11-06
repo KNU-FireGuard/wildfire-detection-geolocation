@@ -16,14 +16,14 @@ const playing = ref(false)
 const retrying = ref(0)
 let player
 let retryTimer
-let awaitingNetworkRecovery = false
+let networkRecoveryKind = null
 const attempts = { network: 0, media: 0 }
 let lastTime = 0
 
 function dispose() {
   clearTimeout(retryTimer)
   retryTimer = null
-  awaitingNetworkRecovery = false
+  networkRecoveryKind = null
   lastTime = 0
   attempts.network = 0
   attempts.media = 0
@@ -41,7 +41,7 @@ function dispose() {
 // 버퍼에 남은 영상만 재생될 수 있으므로 네트워크 복구 중에는 재시도를 유지합니다.
 function onPlaying() {
   playing.value = true
-  if (awaitingNetworkRecovery) return
+  if (networkRecoveryKind) return
   clearTimeout(retryTimer)
   retryTimer = null
   error.value = ''
@@ -50,13 +50,17 @@ function onPlaying() {
   attempts.media = 0
 }
 
-function onFragmentLoaded() {
-  if (!awaitingNetworkRecovery) return
-  awaitingNetworkRecovery = false
+function confirmNetworkRecovery(kind) {
+  if (networkRecoveryKind !== kind) return
+  networkRecoveryKind = null
   clearTimeout(retryTimer)
   retryTimer = null
   if (playing.value) onPlaying()
 }
+
+function onManifestLoaded() { confirmNetworkRecovery('manifest') }
+function onLevelLoaded() { confirmNetworkRecovery('level') }
+function onFragmentLoaded() { confirmNetworkRecovery('fragment') }
 
 // playing 이벤트가 오지 않아도 재생 시각이 앞으로 가면 영상이 실제로 흐르는 중이므로 연결 중·재연결 문구를 지웁니다.
 function onTimeUpdate() {
@@ -71,8 +75,9 @@ function handleHlsError(detail) {
   // 영상 주소 토큰이 남지 않도록 오류 종류와 상태 코드만, 치명적 오류에서만 기록합니다.
   console.warn('[LiveVideo]', { cameraId: props.cameraId, type: detail.type, details: detail.details, fatal: detail.fatal, status: detail.response?.code })
   const next = decideRecovery(detail, attempts)
+  const recoveryKind = /^manifest/.test(detail.details ?? '') ? 'manifest' : /^level/.test(detail.details ?? '') ? 'level' : 'fragment'
   if (next.action === 'retry') {
-    awaitingNetworkRecovery = true
+    networkRecoveryKind = recoveryKind
     attempts.network += 1
     retrying.value = attempts.network
     clearTimeout(retryTimer)
@@ -86,7 +91,7 @@ function handleHlsError(detail) {
     attempts.media += 1
     player?.recoverMediaError()
   } else {
-    if (detail.type === 'networkError') awaitingNetworkRecovery = true
+    if (detail.type === 'networkError') networkRecoveryKind = recoveryKind
     retrying.value = 0
     const guidance = detail.type === 'networkError' ? ' 계속 실패하면 CCTV 주소 갱신을 시도하세요.' : ''
     error.value = `영상 연결에 실패했습니다. (${describeHlsError(detail)})${guidance}`
@@ -101,6 +106,8 @@ watch(() => [props.url, video.value], ([url, element]) => {
   if (Hls.isSupported()) {
     player = new Hls({ enableWorker: true, liveSyncDurationCount: 2 })
     player.on(Hls.Events.ERROR, (_event, detail) => handleHlsError(detail))
+    player.on(Hls.Events.MANIFEST_LOADED, onManifestLoaded)
+    player.on(Hls.Events.LEVEL_LOADED, onLevelLoaded)
     player.on(Hls.Events.FRAG_LOADED, onFragmentLoaded)
     player.loadSource(url)
     player.attachMedia(element)
