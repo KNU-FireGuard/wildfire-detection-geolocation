@@ -27,6 +27,7 @@ FROM (VALUES
 WHERE camera.name = source.name AND camera.source_type = 'test';
 
 -- 이전에 긴 파일명으로 등록한 경로를 배포 영상의 원래 파일명으로 정정 (ID 유지, 현재 경로 행이 있으면 건너뜀)
+-- old_path의 긴 이름은 기존 레코드를 찾는 조건이며, 실제 등록 경로는 new_path의 짧은 이름을 사용
 UPDATE videos AS video
 SET file_path = source.new_path,
     original_filename = source.new_filename

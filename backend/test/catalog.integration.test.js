@@ -92,6 +92,7 @@ test('PostgreSQL: catalog queries and initial admin insert', {
 
     await client.query("INSERT INTO cameras (name, source_type) VALUES ('경북의성', 'live')");
     // 긴 파일명으로 등록된 영상도 원래 배포 파일명으로 복구하며 ID와 이벤트 참조를 유지
+    // 아래 긴 이름은 잘못된 기존 DB 상태를 재현하는 입력이며 정상 기대값은 경북의성.mp4·단촌4터널.mp4
     const oldDemo = await client.query(`
       WITH camera AS (INSERT INTO cameras (name, source_type) VALUES ('단촌4터널', 'test') RETURNING id)
       INSERT INTO videos (camera_id, original_filename, file_path)
