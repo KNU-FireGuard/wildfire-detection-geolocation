@@ -71,6 +71,32 @@ class TestFixedPoseSession(LocationSessionCase):
             self.assertLess(haversine_distance(loc["latitude"], loc["longitude"], la, lo), 30.0)
 
 
+class TestDemUnavailable(LocationSessionCase):
+    """DEM 캐시가 없고 다운로드도 실패하는 PC: 시작 시 1회만 시도하고 위치 추정을 끔"""
+
+    def test_fixed_pose_session_is_not_ready_and_does_not_retry(self) -> None:
+        from ai.fire_location_estimator import FireLocationEstimator
+        from ai.location_session import LocationSession
+
+        class OfflineEstimator(FireLocationEstimator):
+            provider_calls = 0
+
+            def _get_provider(self, *args, **kwargs):
+                OfflineEstimator.provider_calls += 1
+                raise RuntimeError("DEM 데이터를 다운로드할 수 없습니다.")
+
+        est = OfflineEstimator(skyline_extractor=NoCalibrationExtractor(), camera_configs=[config_entry()])
+        session = LocationSession(self.camera, estimator=est)
+        status = session.prepare(frame=None, frame_size=(W, H))
+        self.assertFalse(status["ready"])
+        self.assertEqual(status["reason"], "DEM_UNAVAILABLE")
+        bbox, _ = self.ground_bbox(0.0, 900.0)
+        for _ in range(3):
+            self.assertIsNone(session.locate(bbox))
+        # 탐지마다 다운로드를 다시 시도하면 추론 스레드와 영상 전송이 멈춤
+        self.assertEqual(OfflineEstimator.provider_calls, 1)
+
+
 class CountingProvider:
     """DEMProvider를 감싸 360° 역산 호출 횟수를 셈"""
 
@@ -126,7 +152,12 @@ class TestBlindPoseOnce(LocationSessionCase):
 
 
 class RaisingEstimator:
+    """시작 시 DEM 준비는 성공하고, 탐지별 위치 계산에서 예외가 나는 경우"""
+
     camera_configs = [config_entry()]
+
+    def _get_provider(self, *args, **kwargs):
+        return None
 
     def estimate_location(self, *args, **kwargs):
         raise RuntimeError("DEM 다운로드 실패")

@@ -41,6 +41,22 @@ class LocationSession:
         cfg = self.config
         if cfg is not None and cfg.get("fixed_pose"):
             pose = cfg["fixed_pose"]
+            tower_h = cfg.get("tower_height_m")
+            try:
+                # DEM을 시작 시 1회 준비, 실패하면 위치 추정을 끔 (탐지마다 다운로드를 재시도하면 추론이 멈춤)
+                self.estimator._get_provider(
+                    float(self.camera["lat"]), float(self.camera["lon"]), float(tower_h) if tower_h is not None else 15.0
+                )
+            except Exception as exc:
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                self.status = {
+                    "ready": False,
+                    "mode": "config_fixed_pose",
+                    "config_key": cfg["key"],
+                    "reason": "DEM_UNAVAILABLE",
+                    "warnings": [],
+                }
+                return self.status
             self.status = {
                 "ready": True,
                 "mode": "config_fixed_pose",
