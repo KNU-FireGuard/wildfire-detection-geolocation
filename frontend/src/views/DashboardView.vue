@@ -239,7 +239,7 @@ onBeforeUnmount(() => {
           <span class="user-profile"><span class="avatar"><DashboardIcon name="user" :size="20" /></span>admin</span>
         </div>
       </header>
-      <div class="workspace-heading"><span>실시간 관제 현황</span><div class="workspace-actions"><button type="button" class="cctv-refresh-button" :aria-expanded="mapVisible" aria-controls="monitoring-map" @click="mapVisible = !mapVisible">{{ mapVisible ? '지도 닫기' : '지도 열기' }}</button><button v-if="dataSource === 'api'" type="button" class="cctv-refresh-button" :aria-expanded="showCctvRefreshForm" aria-controls="cctv-refresh-form" @click="showCctvRefreshForm = !showCctvRefreshForm">CCTV 주소 갱신</button><span class="mode-badge">{{ dataSource === 'mock' ? '데모 데이터' : 'Backend 데이터' }}</span></div></div>
+      <div class="workspace-heading"><span>실시간 관제 현황</span><div class="workspace-actions"><button type="button" class="cctv-refresh-button" :aria-expanded="mapVisible" aria-controls="monitoring-map" @click="mapVisible = !mapVisible">{{ mapVisible ? '지도 닫기' : '지도 열기' }}</button><button v-if="dataSource === 'api'" type="button" class="cctv-refresh-button" :aria-expanded="showCctvRefreshForm" aria-controls="cctv-refresh-form" @click="showCctvRefreshForm = !showCctvRefreshForm">CCTV 주소 갱신</button><span v-if="dataSource === 'mock'" class="mode-badge">데모 데이터</span></div></div>
       <form v-if="showCctvRefreshForm && dataSource === 'api'" id="cctv-refresh-form" class="cctv-refresh-form" @submit.prevent="refreshCctv">
         <p>영상이 나오지 않을 때 관리자 계정으로 ITS CCTV 주소를 다시 조회합니다.</p>
         <template v-if="!isLoggedIn">
