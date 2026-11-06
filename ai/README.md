@@ -43,7 +43,9 @@
 
 ## Backend 연동
 
-- Backend는 `inference/backend_connect.py`를 실행해 `run_id`, `camera_id`, 원본 영상 경로, 영상 업로드 URL, 탐지 결과 URL 전달
+- Backend는 `inference/backend_connect.py`를 실행해 `run_id`, `camera_id`, 원본 영상 경로, 영상 업로드 URL, 탐지 결과 URL, 카메라 이름·위경도 전달
+- 위치 추정: 첫 프레임에서 `location_session.py`로 자세를 1회 결정(`config/cameras.json` 고정 자세 우선, 없으면 능선 360° 역산), 이후 탐지마다 위경도 계산
+- 위치 추정 준비 결과는 표준 출력에 `Location status: …` 1줄로 기록, 실패해도 탐지·영상 전송은 계속하고 위치는 `null`
 - AI 콜백 인증은 Backend와 같은 `AI_CALLBACK_TOKEN` 환경변수 사용
 - Python 패키지: `ultralytics`, `opencv-python`, `requests`, 위치 추정용 `numpy`, `scipy`, `Pillow`
 - 설치 명령은 프로젝트 [README](../README.md) 참고
