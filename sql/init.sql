@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL CHECK (btrim(name) <> ''),
     source_type TEXT NOT NULL DEFAULT 'test' CHECK (source_type IN ('test', 'live')),
-    provider_key TEXT UNIQUE,
+    provider_key TEXT,
     latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
     longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
     -- 화재 탐지 문자를 받을 번호, 카메라당 1개이며 NULL이면 발송하지 않습니다.
