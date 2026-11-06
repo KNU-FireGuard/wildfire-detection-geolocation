@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import Hls from 'hls.js'
 import { registerLiveVideo, unregisterLiveVideo } from '../composables/liveVideoRegistry'
 import { MAX_NETWORK_RETRIES, decideRecovery, describeHlsError } from '../utils/hlsRecovery'
+import { trackPlaybackProgress } from '../utils/playbackProgress'
 
 // cameraId를 주면 지도 아래 실시간 CCTV 영상의 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
 const props = defineProps({
@@ -46,10 +47,9 @@ function onPlaying() {
 // playing 이벤트가 오지 않아도 재생 시각이 앞으로 가면 영상이 실제로 흐르는 중이므로 연결 중·재연결 문구를 지웁니다.
 function onTimeUpdate() {
   const time = video.value?.currentTime ?? 0
-  if (time > lastTime) {
-    lastTime = time
-    if (!playing.value) onPlaying()
-  }
+  const progress = trackPlaybackProgress(lastTime, time)
+  lastTime = progress.lastTime
+  if (progress.progressed && !playing.value) onPlaying()
 }
 
 function handleHlsError(detail) {
