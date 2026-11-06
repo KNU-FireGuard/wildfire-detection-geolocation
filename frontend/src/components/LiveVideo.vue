@@ -16,9 +16,11 @@ const retrying = ref(0)
 let player
 let retryTimer
 const attempts = { network: 0, media: 0 }
+let lastTime = 0
 
 function dispose() {
   clearTimeout(retryTimer)
+  lastTime = 0
   attempts.network = 0
   attempts.media = 0
   retrying.value = 0
@@ -39,6 +41,15 @@ function onPlaying() {
   retrying.value = 0
   attempts.network = 0
   attempts.media = 0
+}
+
+// playing 이벤트가 오지 않아도 재생 시각이 앞으로 가면 영상이 실제로 흐르는 중이므로 연결 중·재연결 문구를 지웁니다.
+function onTimeUpdate() {
+  const time = video.value?.currentTime ?? 0
+  if (time > lastTime) {
+    lastTime = time
+    if (!playing.value) onPlaying()
+  }
 }
 
 function handleHlsError(detail) {
@@ -89,7 +100,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <video ref="video" autoplay muted playsinline preload="auto" @playing="onPlaying" @waiting="playing = false" @error="playing = false; error = '영상 연결에 실패했습니다. (재생 오류)'">이 브라우저는 영상을 재생할 수 없습니다.</video>
+    <video ref="video" autoplay muted playsinline preload="auto" @playing="onPlaying" @timeupdate="onTimeUpdate" @waiting="playing = false" @error="playing = false; error = '영상 연결에 실패했습니다. (재생 오류)'">이 브라우저는 영상을 재생할 수 없습니다.</video>
     <p v-if="!playing && !error" class="stream-status" role="status">{{ retrying ? `CCTV 영상 재연결 중… (${retrying}/${MAX_NETWORK_RETRIES})` : 'CCTV 영상 연결 중…' }}</p>
     <p v-if="error && !playing" class="stream-error" role="alert">{{ error }}</p>
     <p v-if="playing && (retrying || error)" class="stream-badge" role="status">{{ retrying ? `연결 끊김 · 재연결 중 (${retrying}/${MAX_NETWORK_RETRIES})` : '연결 끊김 · 영상이 곧 멈출 수 있습니다' }}</p>
