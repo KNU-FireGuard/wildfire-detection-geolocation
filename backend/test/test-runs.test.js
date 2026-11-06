@@ -31,7 +31,10 @@ require.cache[poolPath] = {
     async query(sql, params = []) {
       queryCalls.push({ sql, params });
       if (/SELECT c\.id AS camera_id, c\.source_type/.test(sql)) {
-        return { rows: [{ camera_id: 1, source_type: 'test', video_id: 7, file_path: `data/videos/${fixtureFilename}` }] };
+        const base = { source_type: 'test', video_id: 7, file_path: `data/videos/${fixtureFilename}` };
+        // 카메라 2는 DB에 위경도가 없는 테스트 카메라
+        if (params[0] === 2) return { rows: [{ ...base, camera_id: 2, name: '좌표 없음', latitude: null, longitude: null }] };
+        return { rows: [{ ...base, camera_id: 1, name: '경북의성', latitude: 36.382, longitude: 128.5779 }] };
       }
       if (/INSERT INTO detection_events/.test(sql)) return { rows: [{ id: 91 }] };
       if (/UPDATE detection_events/.test(sql)) return { rows: [{ id: params[0] }] };
@@ -120,6 +123,10 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
   assert.ok(child.args.includes(`http://127.0.0.1:3000/api/test-runs/${run.id}/video`));
   assert.ok(child.args.includes(path.resolve(__dirname, '../../data/videos', fixtureFilename)));
   assert.equal(child.args[child.args.indexOf('--model-path') + 1], expectedModelPath);
+  // 위치 추정용: 카메라 이름(보정 설정 조회)과 DB 위경도(광선 출발점)
+  assert.equal(child.args[child.args.indexOf('--camera-name') + 1], '경북의성');
+  assert.equal(child.args[child.args.indexOf('--camera-lat') + 1], '36.382');
+  assert.equal(child.args[child.args.indexOf('--camera-lon') + 1], '128.5779');
   assert.equal(child.options.env.AI_CALLBACK_TOKEN, process.env.AI_CALLBACK_TOKEN);
   assert.equal(child.options.env.PATH, process.env.PATH);
   assert.equal(Object.hasOwn(child.options.env, 'DB_PASSWORD'), false);
@@ -202,4 +209,16 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
     && /ended_at = GREATEST\(started_at, updated_at\)/.test(call.sql)
     && /id = ANY\(\$1::INTEGER\[\]\)/.test(call.sql)
   )));
+});
+
+test('DB에 위경도가 없는 카메라는 위치 인자를 넘기지 않는다', async () => {
+  const started = await fetch(`${base}/cameras/2/test-runs`, { method: 'POST', headers: adminHeaders });
+  assert.equal(started.status, 202);
+  await new Promise(resolve => setImmediate(resolve));
+  const child = spawned.at(-1);
+  assert.equal(child.args[child.args.indexOf('--camera-id') + 1], '2');
+  assert.equal(child.args[child.args.indexOf('--camera-name') + 1], '좌표 없음');
+  assert.equal(child.args.includes('--camera-lat'), false);
+  assert.equal(child.args.includes('--camera-lon'), false);
+  child.child.emit('close', 0);
 });
