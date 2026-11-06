@@ -85,7 +85,16 @@ function attachProcess(run, child) {
   child.stderr?.on('data', chunk => process.stderr.write(`[AI run=${run.id}] ${chunk}`));
 }
 
-function launchAi(run, sourcePath) {
+// 위치 추정용 카메라 정보: 이름은 AI 보정 설정 조회, 위경도는 광선 출발점이며 없으면 생략해 AI가 위치를 null로 둠
+function cameraArgs(camera) {
+  const args = ['--camera-name', camera.name];
+  if (camera.latitude !== null && camera.longitude !== null) {
+    args.push('--camera-lat', String(camera.latitude), '--camera-lon', String(camera.longitude));
+  }
+  return args;
+}
+
+function launchAi(run, sourcePath, camera) {
   const port = Number(process.env.PORT || 3000);
   const baseUrl = `http://127.0.0.1:${port}/api`;
   const python = process.env.PYTHON_EXECUTABLE || (process.platform === 'win32' ? 'python' : 'python3');
@@ -98,6 +107,7 @@ function launchAi(run, sourcePath) {
     '--video-url', `${baseUrl}/test-runs/${run.id}/video`,
     '--result-url', `${baseUrl}/detections`,
     '--model-path', modelPath,
+    ...cameraArgs(camera),
   ];
 
   try {
@@ -113,7 +123,7 @@ async function startTestRun(req, res) {
   if (parsedCameraId.error) return res.status(400).json({ error: parsedCameraId.error });
 
   const { rows } = await pool.query(`
-    SELECT c.id AS camera_id, c.source_type, v.id AS video_id, v.file_path
+    SELECT c.id AS camera_id, c.source_type, c.name, c.latitude, c.longitude, v.id AS video_id, v.file_path
     FROM cameras c
     LEFT JOIN videos v ON v.camera_id = c.id
     WHERE c.id = $1
@@ -143,7 +153,7 @@ async function startTestRun(req, res) {
     videoId: rows[0].video_id,
     filePath: sourcePath,
   });
-  launchAi(run, sourcePath);
+  launchAi(run, sourcePath, rows[0]);
 
   return res.status(202).json({
     id: run.id,

@@ -28,6 +28,56 @@
         "roll_note": "P023·P070은 Roll 탐색 한계 2.5°에 붙음, 받침대 기울어짐 가능성",
         "position_note": "카메라 위치·높이는 랜드마크 분포 한계로 분리 추정 불가, 눈높이 해발 약 196m는 참고값으로만 기록하고 미적용"
       }
+    },
+    {
+      "key": "demo-uiseong",
+      "name": "경북의성",
+      "camera_id": null,
+      "fov_h_deg": 51.0,
+      "fixed_pose": {
+        "pan": 90.75,
+        "tilt": 1.01,
+        "roll": 2.5
+      },
+      "provenance": "카메라 보정 도구(#58·#79), 작업 파일 demo-uiseong.json, 2026-11-04. 네이버 위성지도 랜드마크 보정용 3개·검증용 2개(357~550m), 검증 방향 오차 0.78°·1.16°(옆 방향 4.6m·1.9m), 능선만으로는 화각 20~31° 결정 불가",
+      "uncertainty": {
+        "fov_interval_deg": [
+          50.0,
+          52.0
+        ],
+        "pan_offset_range_deg": null,
+        "validation_max_error_deg": 1.163,
+        "warnings": [
+          "POSITION_UNCONSTRAINED",
+          "LANDMARK_RESIDUAL_HIGH"
+        ],
+        "notes": "보정용 랜드마크 오차 1.0~1.9°, Roll이 탐색 한계 2.5°에 붙음, 카메라 위치(DB) 수십 m 오차 가능"
+      }
+    },
+    {
+      "key": "demo-danchon4",
+      "name": "단촌4터널",
+      "camera_id": null,
+      "fov_h_deg": 47.0,
+      "fixed_pose": {
+        "pan": 100.85,
+        "tilt": 3.94,
+        "roll": -1.0
+      },
+      "provenance": "카메라 보정 도구(#58·#79), 작업 파일 demo-danchon4.json, 2026-11-04. 단촌4터널 서쪽 입구 2곳(230~250m, 도로면 해발고도 elevation_m) 보정용, 보정용 오차 0.49°·0.64°, 카메라 위치는 위성지도 실측(#78)",
+      "uncertainty": {
+        "fov_interval_deg": [
+          47.0,
+          47.0
+        ],
+        "pan_offset_range_deg": null,
+        "validation_max_error_deg": null,
+        "warnings": [
+          "POSITION_UNCONSTRAINED",
+          "NO_VALIDATION_LANDMARKS"
+        ],
+        "notes": "보정용 랜드마크 2개뿐이라 화각 구간(47~47°)은 과소평가 가능, 검증용 랜드마크 없음, 터널 입구 해발고도는 카메라 지점 DEM + 2m 근사"
+      }
     }
   ]
 }

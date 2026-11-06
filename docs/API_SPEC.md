@@ -163,6 +163,9 @@
 }
 ```
 
+- AI 프로세스 인자: `--run-id`, `--camera-id`, `--source-path`, `--video-url`, `--result-url`, `--model-path`, `--camera-name`
+- 카메라 DB 위경도가 있으면 `--camera-lat`, `--camera-lon` 추가, 없으면 생략하고 AI는 `location_estimation`을 `null`로 전송
+
 ### `GET /test-runs/:run_id/stream`
 
 - 응답 형식: `multipart/x-mixed-replace; boundary=frame`
@@ -210,6 +213,8 @@
 - `confidence`: `0~1`
 - `bbox`: 원본 프레임 픽셀 좌표
 - `location_estimation`: `null` 또는 `{ "latitude": 숫자, "longitude": 숫자, "error_range_m": 숫자 또는 null }`
+- 위치는 실행 시작 시 1회 정한 카메라 자세로 bbox 아래 중앙을 광선 추적한 추정 발화 위치, 자세를 정하지 못했거나 광선이 지형과 만나지 않으면 `null`
+- `error_range_m`은 오차 범위 모델 도입 전까지 `null`
 
 ## 관리자 인증
 
