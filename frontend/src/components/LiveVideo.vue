@@ -91,6 +91,8 @@ function handleHlsError(detail) {
     attempts.media += 1
     player?.recoverMediaError()
   } else {
+    clearTimeout(retryTimer)
+    retryTimer = null
     if (detail.type === 'networkError') networkRecoveryKind = recoveryKind
     retrying.value = 0
     const guidance = detail.type === 'networkError' ? ' 계속 실패하면 CCTV 주소 갱신을 시도하세요.' : ''

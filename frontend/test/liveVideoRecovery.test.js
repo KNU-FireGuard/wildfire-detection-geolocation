@@ -95,6 +95,18 @@ test('네트워크 재시도 소진 시 CCTV 주소 갱신 안내를 보여 준�
   assert.match(context.error.value, /CCTV 주소 갱신/)
 })
 
+test('재시도 소진 후에는 이전에 예약된 재연결을 실행하지 않는다', () => {
+  const { context, pending, player } = setup()
+  const detail = { fatal: true, type: 'networkError', details: 'manifestLoadError' }
+  for (let attempt = 0; attempt < 3; attempt++) context.handleHlsError(detail)
+  assert.equal(pending.size, 1)
+
+  context.handleHlsError(detail)
+  assert.match(context.error.value, /CCTV 주소 갱신/)
+  assert.equal(pending.size, 0)
+  assert.equal(player.loadSourceCalls, 0)
+})
+
 test('재생 오류에는 CCTV 주소 갱신을 안내하지 않는다', () => {
   const { context } = setup({ network: 0, media: 2 })
   context.handleHlsError({ fatal: true, type: 'mediaError', details: 'bufferAppendError' })
