@@ -91,7 +91,7 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     assert.equal(liveDetail.item.video_id, null);
 
     await client.query("INSERT INTO cameras (name, source_type) VALUES ('경북의성', 'live')");
-    // 이전 시드로 만든 영상 행은 새 경로로 옮겨져야 하며 중복 행이 생기면 안 됨
+    // 이미 등록된 영상 행은 재사용되어야 하며 중복 행이 생기면 안 됨
     const oldDemo = await client.query(`
       WITH camera AS (INSERT INTO cameras (name, source_type) VALUES ('단촌4터널', 'test') RETURNING id)
       INSERT INTO videos (camera_id, original_filename, file_path)
@@ -114,11 +114,11 @@ test('PostgreSQL: catalog queries and initial admin insert', {
       WHERE camera.source_type = 'test' AND camera.name IN ('경북의성', '단촌4터널') ORDER BY camera.name
     `);
     assert.deepEqual(demoVideos.rows.map(row => row.file_path), [
-      'data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4',
-      'data/videos/단촌4터널(청주외부1).mp4',
+      'data/videos/경북의성.mp4',
+      'data/videos/단촌4터널.mp4',
     ]);
     assert.equal(demoVideos.rows[1].id, oldDemo.rows[0].id);
-    assert.equal(demoVideos.rows[1].original_filename, '단촌4터널(청주외부1).mp4');
+    assert.equal(demoVideos.rows[1].original_filename, '단촌4터널.mp4');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     if (client) {
