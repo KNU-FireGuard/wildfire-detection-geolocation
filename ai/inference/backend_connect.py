@@ -10,7 +10,7 @@ from ultralytics import YOLO
 
 
 AI_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL_PATH = AI_DIR / "yolo26n_fire_50" / "weights" / "best.pt"
+DEFAULT_MODEL_PATH = AI_DIR / "weights" / "yolo26s_final" / "weights" / "best.pt"
 BOUNDARY = "frame"
 FRAME_QUEUE_SIZE = 2
 

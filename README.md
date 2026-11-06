@@ -9,6 +9,7 @@
 - Node.js `^20.19.0 || >=22.12.0`과 npm
 - Python과 pip
 - Docker와 Docker Compose
+- [Git LFS](https://git-lfs.com): 저장소를 내려받기 전에 `git lfs install` 실행, 설치하지 않으면 모델 가중치(`.pt`)가 포인터 파일로 받아져 분석이 실패
 
 ## 1 환경 파일과 DB
 
@@ -30,6 +31,7 @@ if not exist ".env" copy ".env.example" ".env"
 - `JWT_SECRET`은 32바이트 이상의 임의 문자열로 설정
 - `AI_CALLBACK_TOKEN`은 32바이트 이상의 임의 문자열로 설정
 - 초기 관리자 비밀번호는 12자 이상으로 설정
+- AI 모델은 기본값 `ai/weights/yolo26s_final/weights/best.pt`를 사용, 다른 가중치를 쓰려면 `.env`에 `AI_MODEL_PATH`(저장소 루트 기준 경로) 설정
 
 카메라 Test 기능을 사용하려면 AI 패키지 설치
 
