@@ -91,12 +91,23 @@ test('PostgreSQL: catalog queries and initial admin insert', {
     assert.equal(liveDetail.item.video_id, null);
 
     await client.query("INSERT INTO cameras (name, source_type) VALUES ('경북의성', 'live')");
-    // 이전 시드로 만든 영상 행은 새 경로로 옮겨져야 하며 중복 행이 생기면 안 됨
+    // 긴 파일명으로 등록된 영상도 원래 배포 파일명으로 복구하며 ID와 이벤트 참조를 유지
     const oldDemo = await client.query(`
       WITH camera AS (INSERT INTO cameras (name, source_type) VALUES ('단촌4터널', 'test') RETURNING id)
       INSERT INTO videos (camera_id, original_filename, file_path)
-      SELECT id, '단촌4터널.mp4', 'data/videos/단촌4터널.mp4' FROM camera RETURNING id
+      SELECT id, '단촌4터널(청주외부1).mp4', 'data/videos/단촌4터널(청주외부1).mp4' FROM camera RETURNING id
     `);
+    const oldUiseong = await client.query(`
+      WITH camera AS (INSERT INTO cameras (name, source_type) VALUES ('경북의성', 'test') RETURNING id)
+      INSERT INTO videos (camera_id, original_filename, file_path)
+      SELECT id, '경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4',
+        'data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4'
+      FROM camera RETURNING id
+    `);
+    const previousEvent = await client.query(`
+      INSERT INTO detection_events (video_id, class, started_at, max_confidence)
+      VALUES ($1, 'smoke', CURRENT_TIMESTAMP, 0.7) RETURNING id
+    `, [oldDemo.rows[0].id]);
     const seed = readFileSync(path.join(__dirname, '../../sql/seed.dev.sql'), 'utf8')
       .replace(/^--[^\n]*\n(?:--[^\n]*\n)*BEGIN;\s*/, '')
       .replace(/COMMIT;\s*$/, '');
@@ -114,11 +125,41 @@ test('PostgreSQL: catalog queries and initial admin insert', {
       WHERE camera.source_type = 'test' AND camera.name IN ('경북의성', '단촌4터널') ORDER BY camera.name
     `);
     assert.deepEqual(demoVideos.rows.map(row => row.file_path), [
-      'data/videos/경북_의성_안평면_마전리_국토교통부_CCTV_사용자녹화편집전송_sub_HQ_20250322V23087.mp4',
-      'data/videos/단촌4터널(청주외부1).mp4',
+      'data/videos/경북의성.mp4',
+      'data/videos/단촌4터널.mp4',
     ]);
+    assert.equal(demoVideos.rows[0].id, oldUiseong.rows[0].id);
     assert.equal(demoVideos.rows[1].id, oldDemo.rows[0].id);
-    assert.equal(demoVideos.rows[1].original_filename, '단촌4터널(청주외부1).mp4');
+    assert.equal(demoVideos.rows[0].original_filename, '경북의성.mp4');
+    assert.equal(demoVideos.rows[1].original_filename, '단촌4터널.mp4');
+    const retainedEvent = await client.query('SELECT video_id FROM detection_events WHERE id = $1', [previousEvent.rows[0].id]);
+    assert.equal(retainedEvent.rows[0].video_id, oldDemo.rows[0].id);
+
+    const demoVideoSql = `SELECT c.name, v.id, v.original_filename, v.file_path FROM videos v
+      JOIN cameras c ON c.id = v.camera_id
+      WHERE c.source_type = 'test' AND c.name IN ('경북의성', '청성', '기도4교', '단촌4터널')
+      ORDER BY c.name`;
+    const firstSeed = await client.query(demoVideoSql);
+    assert.equal(firstSeed.rows.length, 4);
+    for (const row of firstSeed.rows) {
+      assert.equal(row.original_filename, `${row.name}.mp4`);
+      assert.equal(row.file_path, `data/videos/${row.name}.mp4`);
+    }
+    await client.query(seed);
+    const repeatedSeed = await client.query(demoVideoSql);
+    assert.deepEqual(repeatedSeed.rows, firstSeed.rows, '재실행해도 영상 ID·파일명·등록 수 유지');
+
+    // 짧은 경로가 이미 있으면 기존 긴 경로의 행을 덮어쓰거나 삭제하지 않음
+    const duplicateLegacy = await client.query(`
+      INSERT INTO videos (camera_id, original_filename, file_path)
+      SELECT camera_id, '단촌4터널(청주외부1).mp4', 'data/videos/단촌4터널(청주외부1).mp4'
+      FROM videos WHERE id = $1 RETURNING id
+    `, [oldDemo.rows[0].id]);
+    await client.query(seed);
+    const unchangedLegacy = await client.query('SELECT file_path FROM videos WHERE id = $1', [duplicateLegacy.rows[0].id]);
+    assert.equal(unchangedLegacy.rows[0].file_path, 'data/videos/단촌4터널(청주외부1).mp4');
+    const canonical = await client.query('SELECT id FROM videos WHERE file_path = $1', ['data/videos/단촌4터널.mp4']);
+    assert.deepEqual(canonical.rows, [{ id: oldDemo.rows[0].id }]);
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     if (client) {
