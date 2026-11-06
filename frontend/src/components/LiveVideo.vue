@@ -35,8 +35,10 @@ function dispose() {
   }
 }
 
-// 재생이 시작되면 이전 오류와 재시도 상태를 지웁니다.
+// 재생이 회복되면 예약된 재시도를 취소해 정상 영상을 다시 불러오지 않도록 합니다.
 function onPlaying() {
+  clearTimeout(retryTimer)
+  retryTimer = null
   playing.value = true
   error.value = ''
   retrying.value = 0
@@ -69,7 +71,8 @@ function handleHlsError(detail) {
     player?.recoverMediaError()
   } else {
     retrying.value = 0
-    error.value = `영상 연결에 실패했습니다. (${describeHlsError(detail)})`
+    const guidance = detail.type === 'networkError' ? ' 계속 실패하면 CCTV 주소 갱신을 시도하세요.' : ''
+    error.value = `영상 연결에 실패했습니다. (${describeHlsError(detail)})${guidance}`
   }
 }
 
