@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { parse } from '@vue/compiler-sfc'
 import { decideRecovery, describeHlsError } from '../src/utils/hlsRecovery.js'
+import { trackPlaybackProgress } from '../src/utils/playbackProgress.js'
 
 const source = readFileSync(new URL('../src/components/LiveVideo.vue', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
@@ -17,24 +18,45 @@ function setup(attempts = { network: 0, media: 0 }) {
   const context = {
     attempts, player, props: { url: 'https://example.test/live.m3u8', cameraId: 1 },
     playing: { value: false }, error: { value: '' }, retrying: { value: 0 },
-    video: { value: { currentTime: 0 } }, lastTime: 0, retryTimer: null,
-    decideRecovery, describeHlsError, trackPlaybackProgress: () => ({ lastTime: 0, progressed: false }),
+    video: { value: { currentTime: 0 } }, lastTime: 0, retryTimer: null, awaitingNetworkRecovery: false,
+    decideRecovery, describeHlsError, trackPlaybackProgress,
     console: { warn() {} },
     setTimeout(callback) { const id = ++nextId; pending.set(id, callback); return id },
     clearTimeout(id) { pending.delete(id) },
   }
-  runInNewContext(`${handlers}\nthis.handleHlsError = handleHlsError; this.onPlaying = onPlaying`, context)
+  runInNewContext(`${handlers}\nthis.handleHlsError = handleHlsError; this.onPlaying = onPlaying; this.onTimeUpdate = onTimeUpdate; this.onFragmentLoaded = onFragmentLoaded`, context)
   return { context, pending, player }
 }
 
-test('영상이 다시 재생되면 예약된 재연결을 취소한다', () => {
+test('네트워크 오류 후 버퍼 영상만 진행되면 예약된 재연결을 유지한다', () => {
   const { context, pending, player } = setup()
   context.handleHlsError({ fatal: true, type: 'networkError', details: 'manifestLoadError' })
   assert.equal(pending.size, 1)
 
+  context.video.value.currentTime = 1
+  context.onTimeUpdate()
+  assert.equal(context.playing.value, true)
+  assert.equal(pending.size, 1)
+  assert.equal(context.retrying.value, 1)
+  assert.equal(context.attempts.network, 1)
+
   context.onPlaying()
+  assert.equal(pending.size, 1)
+  assert.equal(context.attempts.network, 1)
+  assert.equal(player.loadSourceCalls, 0)
+
+  pending.values().next().value()
+  assert.equal(player.loadSourceCalls, 1)
+})
+
+test('새 영상 조각을 받으면 예약된 재연결을 취소한다', () => {
+  const { context, pending, player } = setup()
+  context.handleHlsError({ fatal: true, type: 'networkError', details: 'manifestLoadError' })
+  context.onPlaying()
+  context.onFragmentLoaded()
   assert.equal(pending.size, 0)
   assert.equal(context.retrying.value, 0)
+  assert.equal(context.attempts.network, 0)
   assert.equal(player.loadSourceCalls, 0)
 })
 

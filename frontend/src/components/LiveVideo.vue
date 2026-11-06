@@ -16,11 +16,14 @@ const playing = ref(false)
 const retrying = ref(0)
 let player
 let retryTimer
+let awaitingNetworkRecovery = false
 const attempts = { network: 0, media: 0 }
 let lastTime = 0
 
 function dispose() {
   clearTimeout(retryTimer)
+  retryTimer = null
+  awaitingNetworkRecovery = false
   lastTime = 0
   attempts.network = 0
   attempts.media = 0
@@ -35,15 +38,24 @@ function dispose() {
   }
 }
 
-// 재생이 회복되면 예약된 재시도를 취소해 정상 영상을 다시 불러오지 않도록 합니다.
+// 버퍼에 남은 영상만 재생될 수 있으므로 네트워크 복구 중에는 재시도를 유지합니다.
 function onPlaying() {
+  playing.value = true
+  if (awaitingNetworkRecovery) return
   clearTimeout(retryTimer)
   retryTimer = null
-  playing.value = true
   error.value = ''
   retrying.value = 0
   attempts.network = 0
   attempts.media = 0
+}
+
+function onFragmentLoaded() {
+  if (!awaitingNetworkRecovery) return
+  awaitingNetworkRecovery = false
+  clearTimeout(retryTimer)
+  retryTimer = null
+  if (playing.value) onPlaying()
 }
 
 // playing 이벤트가 오지 않아도 재생 시각이 앞으로 가면 영상이 실제로 흐르는 중이므로 연결 중·재연결 문구를 지웁니다.
@@ -60,16 +72,21 @@ function handleHlsError(detail) {
   console.warn('[LiveVideo]', { cameraId: props.cameraId, type: detail.type, details: detail.details, fatal: detail.fatal, status: detail.response?.code })
   const next = decideRecovery(detail, attempts)
   if (next.action === 'retry') {
+    awaitingNetworkRecovery = true
     attempts.network += 1
     retrying.value = attempts.network
     clearTimeout(retryTimer)
     // 재생목록 자체를 못 받은 경우에는 startLoad만으로 다시 받지 못하므로 주소를 다시 불러옵니다.
     const reload = /^manifest/.test(detail.details ?? '') ? () => player?.loadSource(props.url) : () => player?.startLoad()
-    retryTimer = setTimeout(reload, next.delayMs)
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      reload()
+    }, next.delayMs)
   } else if (next.action === 'recover') {
     attempts.media += 1
     player?.recoverMediaError()
   } else {
+    if (detail.type === 'networkError') awaitingNetworkRecovery = true
     retrying.value = 0
     const guidance = detail.type === 'networkError' ? ' 계속 실패하면 CCTV 주소 갱신을 시도하세요.' : ''
     error.value = `영상 연결에 실패했습니다. (${describeHlsError(detail)})${guidance}`
@@ -84,6 +101,7 @@ watch(() => [props.url, video.value], ([url, element]) => {
   if (Hls.isSupported()) {
     player = new Hls({ enableWorker: true, liveSyncDurationCount: 2 })
     player.on(Hls.Events.ERROR, (_event, detail) => handleHlsError(detail))
+    player.on(Hls.Events.FRAG_LOADED, onFragmentLoaded)
     player.loadSource(url)
     player.attachMedia(element)
   } else if (element.canPlayType('application/vnd.apple.mpegurl')) element.src = url
