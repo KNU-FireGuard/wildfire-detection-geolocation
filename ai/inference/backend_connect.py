@@ -1,17 +1,16 @@
 import argparse
 import os
+import sys
 from pathlib import Path
 
 import requests
-from ultralytics import YOLO
-
 
 AI_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = AI_DIR / "yolo26n_fire_50" / "weights" / "best.pt"
 BOUNDARY = "frame"
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="FireGuard YOLO inference callback runner")
     parser.add_argument("--run-id", type=int, required=True)
     parser.add_argument("--camera-id", type=int, required=True)
@@ -22,7 +21,16 @@ def parse_args():
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--iou", type=float, default=0.45)
     parser.add_argument("--image-size", type=int, default=640)
-    args = parser.parse_args()
+    # 위치 추정용 (#60): 이름은 ai/config/cameras.json 보정 설정 조회, 위경도는 광선 출발점
+    parser.add_argument("--camera-name")
+    parser.add_argument("--camera-lat", type=float)
+    parser.add_argument("--camera-lon", type=float)
+    args = parser.parse_args(argv)
+
+    if (args.camera_lat is None) != (args.camera_lon is None):
+        parser.error("--camera-lat and --camera-lon must be given together")
+    if args.camera_lat is not None and not (-90 <= args.camera_lat <= 90 and -180 <= args.camera_lon <= 180):
+        parser.error("--camera-lat/--camera-lon out of range")
 
     if args.run_id <= 0 or args.camera_id <= 0:
         parser.error("--run-id and --camera-id must be positive integers")
@@ -37,7 +45,7 @@ def parse_args():
     return args
 
 
-def detection_payload(run_id, camera_id, class_name, confidence, coordinates):
+def detection_payload(run_id, camera_id, class_name, confidence, coordinates, location=None):
     x1, y1, x2, y2 = coordinates
     return {
         "run_id": run_id,
@@ -52,11 +60,72 @@ def detection_payload(run_id, camera_id, class_name, confidence, coordinates):
                 "y2": round(float(y2), 2),
             },
         },
-        "location_estimation": None,
+        "location_estimation": location,
     }
 
 
-def iter_annotated_frames(model, args, headers, detection_count):
+def create_location_session(args):
+    """실행 단위 위치 추정 세션, 만들 수 없으면 None (위치 없이 탐지만 전송)"""
+    try:
+        if str(AI_DIR.parent) not in sys.path:
+            sys.path.insert(0, str(AI_DIR.parent))
+        from ai.location_session import LocationSession
+
+        return LocationSession(
+            {"id": args.camera_id, "name": args.camera_name, "lat": args.camera_lat, "lon": args.camera_lon}
+        )
+    except Exception as exc:  # 위치 추정 준비 실패가 탐지·영상 전송을 막으면 안 됨
+        print(f"Location session unavailable: {type(exc).__name__}: {exc}", flush=True)
+        return None
+
+
+def prepare_location(session, result):
+    """첫 프레임에서 자세를 1회 결정, 실패 시 None을 돌려 이후 위치는 null"""
+    if session is None:
+        return None
+    try:
+        height, width = result.orig_img.shape[:2]
+        status = session.prepare(frame=result.orig_img, frame_size=(width, height))
+    except Exception as exc:
+        print(f"Location prepare failed: {type(exc).__name__}: {exc}", flush=True)
+        return None
+    print(
+        "Location status: ready={ready} mode={mode} reason={reason} warnings={warnings}".format(
+            ready=status.get("ready"),
+            mode=status.get("mode"),
+            reason=status.get("reason"),
+            warnings=status.get("warnings"),
+        ),
+        flush=True,
+    )
+    return status
+
+
+def frame_detections(result, names, run_id, camera_id, session):
+    """한 프레임의 fire·smoke box를 탐지 JSON 목록으로 변환, 세션이 있으면 위치 포함"""
+    payloads = []
+    if result.boxes is None:
+        return payloads
+    for box in result.boxes:
+        class_name = str(names[int(box.cls.item())]).lower()
+        if class_name not in {"fire", "smoke"}:
+            continue
+        coordinates = box.xyxy[0].tolist()
+        location = session.locate(coordinates) if session is not None else None
+        payloads.append(
+            detection_payload(
+                run_id=run_id,
+                camera_id=camera_id,
+                class_name=class_name,
+                confidence=box.conf.item(),
+                coordinates=coordinates,
+                location=location,
+            )
+        )
+    return payloads
+
+
+def iter_annotated_frames(model, args, headers, detection_count, session=None):
     import cv2
 
     results = model.predict(
@@ -70,29 +139,22 @@ def iter_annotated_frames(model, args, headers, detection_count):
         verbose=False,
     )
 
+    prepared = False
     for result in results:
-        if result.boxes is not None:
-            for box in result.boxes:
-                class_id = int(box.cls.item())
-                class_name = str(model.names[class_id]).lower()
-                if class_name not in {"fire", "smoke"}:
-                    continue
-
-                payload = detection_payload(
-                    run_id=args.run_id,
-                    camera_id=args.camera_id,
-                    class_name=class_name,
-                    confidence=box.conf.item(),
-                    coordinates=box.xyxy[0].tolist(),
-                )
-                response = requests.post(
-                    args.result_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=(5, 30),
-                )
-                response.raise_for_status()
-                detection_count[0] += 1
+        if not prepared:
+            prepared = True
+            status = prepare_location(session, result)
+            if status is None or not status.get("ready"):
+                session = None
+        for payload in frame_detections(result, model.names, args.run_id, args.camera_id, session):
+            response = requests.post(
+                args.result_url,
+                headers=headers,
+                json=payload,
+                timeout=(5, 30),
+            )
+            response.raise_for_status()
+            detection_count[0] += 1
 
         annotated_frame = result.plot()
         encoded, jpeg = cv2.imencode(".jpg", annotated_frame)
@@ -117,8 +179,11 @@ def main():
     if not token:
         raise RuntimeError("AI_CALLBACK_TOKEN environment variable is required")
 
+    from ultralytics import YOLO
+
     headers = {"X-AI-Token": token}
     model = YOLO(str(args.model_path))
+    session = create_location_session(args)
     detection_count = [0]
 
     response = requests.post(
@@ -127,7 +192,7 @@ def main():
             **headers,
             "Content-Type": f"multipart/x-mixed-replace; boundary={BOUNDARY}",
         },
-        data=iter_annotated_frames(model, args, headers, detection_count),
+        data=iter_annotated_frames(model, args, headers, detection_count, session),
         timeout=(10, None),
     )
     response.raise_for_status()
