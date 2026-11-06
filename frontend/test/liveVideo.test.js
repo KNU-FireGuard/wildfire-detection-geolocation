@@ -60,3 +60,14 @@ test('오류 기록은 치명적 오류에서만 남겨 일시적 경고로 콘�
   assert.match(script, /if \(!detail\.fatal\) return[\s\S]*console\.warn\('\[LiveVideo\]'/)
 })
 
+
+test('영상 프레임이 실제로 진행되면 재생 중으로 보고 연결 중 문구를 지운다', () => {
+  const { descriptor } = parse(readFileSync(new URL('../src/components/LiveVideo.vue', import.meta.url), 'utf8'))
+  const script = descriptor.scriptSetup.content
+  // playing 이벤트가 오지 않아도 재생 시각이 앞으로 가면 재생 중
+  assert.match(descriptor.template.content, /@timeupdate="onTimeUpdate"/)
+  assert.match(script, /function onTimeUpdate\(\) \{[\s\S]*currentTime[\s\S]*onPlaying\(\)/)
+  // 주소가 바뀌면 이전 재생 시각을 버려야 새 영상의 첫 프레임을 인식함
+  const dispose = script.slice(script.indexOf('function dispose'), script.indexOf('function onPlaying'))
+  assert.match(dispose, /lastTime\s*=\s*0/)
+})
