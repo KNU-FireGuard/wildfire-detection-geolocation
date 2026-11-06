@@ -5,6 +5,7 @@ import { ensureAdminToken, useAdminSession } from '../composables/useAdminSessio
 import { createMjpegParser } from '../utils/mjpeg'
 
 const props = defineProps({ cameraId: { type: Number, required: true } })
+const emit = defineEmits(['frame'])
 const { isLoggedIn, signOut } = useAdminSession()
 const showLogin = ref(false)
 const username = ref('')
@@ -30,8 +31,9 @@ function cleanup() {
   busy.value = false
 }
 
+watch(frameUrl, url => emit('frame', url))
 watch(() => props.cameraId, () => { cleanup(); showLogin.value = false })
-onBeforeUnmount(cleanup)
+onBeforeUnmount(() => { cleanup(); emit('frame', '') })
 
 async function readStream(url, token, current) {
   const controller = new AbortController()
@@ -115,7 +117,6 @@ async function beginTest() {
     </form>
     <p v-if="status" role="status">분석 상태: {{ ({ ready: '준비 중', running: '진행 중', completed: '완료', failed: '실패' })[status] }}</p>
     <p v-if="error" class="test-error" role="alert">{{ error }}</p>
-    <img v-if="frameUrl" class="test-frame" :src="frameUrl" alt="AI 분석 중인 영상 프레임">
   </section>
 </template>
 

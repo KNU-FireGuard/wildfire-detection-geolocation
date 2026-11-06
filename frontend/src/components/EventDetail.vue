@@ -13,6 +13,7 @@ const props = defineProps({
   mirror: { type: Boolean, default: false },
 })
 const showDetails = ref(false)
+const testFrameUrl = ref('')
 const selectedVideo = computed(() => props.videos.find(video => video.id === props.event?.videoId)
   ?? props.videos.find(video => video.camera_id === props.camera?.id)
   ?? null)
@@ -38,13 +39,11 @@ const cameraStatusLabel = computed(() => {
         <LiveVideo v-else :key="camera.id" :url="camera.streamUrl" />
       </template>
       <div v-else-if="camera?.sourceType === 'live'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>실시간 영상 주소가 없습니다.</strong><p>CCTV 목록을 갱신한 뒤 다시 확인하세요.</p></div>
-      <video v-else-if="selectedVideo" :key="selectedVideo.id" controls preload="metadata" :src="`/api/videos/${selectedVideo.id}/stream`">
-        이 브라우저는 영상 재생을 지원하지 않습니다.
-      </video>
-      <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong><p>영상 파일을 data/videos/에 두고 DB에 영상 정보를 등록하세요.</p></div>
-      <span v-if="selectedVideo && camera?.sourceType !== 'live'" class="preview-footnote">{{ selectedVideo.original_filename }}</span>
+      <img v-else-if="camera?.sourceType === 'test' && testFrameUrl" class="test-frame" :src="testFrameUrl" alt="AI 탐지 분석 영상">
+      <div v-else-if="camera?.sourceType === 'test'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>Test 분석을 시작하면 탐지 영상이 표시됩니다.</strong></div>
+      <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong></div>
     </div>
-    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" />
+    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" @frame="testFrameUrl = $event" />
     <div class="event-info" aria-live="polite">
       <div class="info-heading"><h3>탐지 이벤트 정보</h3><span v-if="event" class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span></div>
       <p v-if="!event" class="empty-message">이벤트를 선택하면 상세 정보를 확인할 수 있습니다.</p>
@@ -84,7 +83,7 @@ const cameraStatusLabel = computed(() => {
 .video-heading { margin-bottom: 15px; }.title-caption { font-size: 13px; font-weight: 400; color: var(--text-3); margin-left: 6px; }
 .camera-status { display: flex; align-items: center; gap: 7px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); font-size: 11px; color: var(--text-2); white-space: nowrap; }.camera-status i { width: 7px; height: 7px; background: var(--text-3); border-radius: 50%; }.camera-status.online i { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .video-placeholder { position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #05080c; color: var(--text); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
-.video-placeholder video { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #05080c; }.video-message { min-height: 220px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 30px; text-align: center; }.video-icon { display: grid; place-items: center; width: 63px; height: 63px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text-2); border-radius: 50%; margin-bottom: 15px; }.video-message strong { font-size: 15px; font-weight: 600; }.video-message p { font-size: 12px; color: var(--text-2); margin: 9px 0 0; }.preview-footnote { position: absolute; left: 10px; bottom: 10px; z-index: 1; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 6px; padding: 4px 8px; font-size: 10px; color: var(--text); background: var(--glass); }
+.video-placeholder video, .video-placeholder .test-frame { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #05080c; }.video-message { min-height: 220px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 30px; text-align: center; }.video-icon { display: grid; place-items: center; width: 63px; height: 63px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text-2); border-radius: 50%; margin-bottom: 15px; }.video-message strong { font-size: 15px; font-weight: 600; }.video-message p { font-size: 12px; color: var(--text-2); margin: 9px 0 0; }.preview-footnote { position: absolute; left: 10px; bottom: 10px; z-index: 1; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 6px; padding: 4px 8px; font-size: 10px; color: var(--text); background: var(--glass); }
 .event-info { margin-top: 22px; }.info-heading { background: var(--surface-2); border: 1px solid var(--line); padding: 11px 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; border-radius: 10px; }.info-heading h3 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -0.3px; }
 .summary-info { margin: 0 0 15px; display: grid; grid-template-columns: 90px minmax(0, 1fr); font-size: 12px; }
 .summary-info dt, .summary-info dd { margin: 0; padding: 13px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }.summary-info dt { color: var(--text-3); }.summary-info dd { color: var(--text); }.summary-info time { font-size: 11px; }.summary-info small { font-size: 9px; color: var(--text-3); }.confidence-value { font-weight: 700; color: var(--text); }
