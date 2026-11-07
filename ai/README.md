@@ -48,7 +48,8 @@
 - 위치 추정: 첫 프레임에서 `location_session.py`로 자세를 1회 결정(`config/cameras.json` 고정 자세 우선, 없으면 능선 360° 역산), 이후 탐지마다 위경도 계산
 - 위치 추정 준비 결과는 표준 출력에 `Location status: …` 1줄로 기록, 실패해도 탐지·영상 전송은 계속하고 위치는 `null`
 - AI 콜백 인증은 Backend와 같은 `AI_CALLBACK_TOKEN` 환경변수 사용
-- Python 패키지: `ultralytics`, `opencv-python`, `requests`, 위치 추정용 `numpy`, `scipy`, `Pillow`
+- Python 패키지: `ultralytics`, `opencv-python`, `requests`, 위치 추정용 `numpy`, `scipy`, `Pillow`, `certifi`
+- DEM 다운로드는 `certifi` 인증서 묶음으로 HTTPS를 검증, macOS python.org Python의 `CERTIFICATE_VERIFY_FAILED` 방지 (#68)
 - 설치 명령은 프로젝트 [README](../README.md) 참고
 
 ## 위치 추정 테스트
