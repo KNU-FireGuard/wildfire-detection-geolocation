@@ -113,19 +113,17 @@ export async function fetchLiveCctvs({ signal } = {}) {
   }
 }
 
-// 토큰이 만료되었거나 잘못된 경우 화면이 다시 로그인하도록 code로 구분합니다.
-function unauthorizedError() {
-  const error = new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.')
-  error.code = 'unauthorized'
-  return error
+async function postPublic(url, label) {
+  try {
+    return await fetch(url, { method: 'POST', signal: AbortSignal.timeout(15000) })
+  } catch (error) {
+    if (error.name === 'TimeoutError') throw new Error(`${label} 요청 시간이 초과되었습니다. 다시 시도해주세요.`)
+    throw new Error(`${label} API에 연결할 수 없습니다. Backend 서버 연결을 확인해주세요.`)
+  }
 }
 
-export async function refreshLiveCctvs(token) {
-  const response = await fetch('/api/live-cctvs/refresh', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (response.status === 401) throw unauthorizedError()
+export async function refreshLiveCctvs() {
+  const response = await postPublic('/api/live-cctvs/refresh', 'CCTV 목록 갱신')
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || `CCTV 목록 갱신에 실패했습니다. (HTTP ${response.status})`)
@@ -136,13 +134,9 @@ export async function refreshLiveCctvs(token) {
 }
 
 // 운영자가 이벤트를 확인했다고 기록하고 갱신된 이벤트를 돌려줍니다.
-export async function acknowledgeEvent(eventId, token) {
+export async function acknowledgeEvent(eventId) {
   if (!Number.isSafeInteger(eventId) || eventId < 1) throw new Error('올바르지 않은 이벤트 번호입니다.')
-  const response = await fetch(`/api/admin/events/${eventId}/acknowledge`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (response.status === 401) throw unauthorizedError()
+  const response = await postPublic(`/api/events/${eventId}/acknowledge`, '이벤트 확인')
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || `이벤트 확인에 실패했습니다. (HTTP ${response.status})`)

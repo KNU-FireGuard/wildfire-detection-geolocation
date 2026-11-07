@@ -4,17 +4,16 @@ import { useRoute } from 'vue-router'
 import DashboardIcon from '../components/DashboardIcon.vue'
 import EventList from '../components/EventList.vue'
 import MonitoringMap from '../components/MonitoringMap.vue'
-import FireAlertBanner from '../components/FireAlertBanner.vue'
+import DetectionAlertModal from '../components/DetectionAlertModal.vue'
 import EventDetail from '../components/EventDetail.vue'
 import LiveCctvWall from '../components/LiveCctvWall.vue'
-import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, loginAdmin, refreshLiveCctvs, acknowledgeEvent } from '../api/catalog'
-import { ensureAdminToken, useAdminSession } from '../composables/useAdminSession'
+import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, acknowledgeEvent } from '../api/catalog'
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
 import { summarizeOperatingCameras } from '../utils/cameraSummary'
 import { findRequestedCameraId } from '../utils/cameraLink'
-import { activeFireCameraIds, findNewFireEvents, applyAcknowledged } from '../utils/fireAlert'
+import { activeFireCameraIds, findNewDetectionEvents, applyAcknowledged, reconcileDetectionAlerts } from '../utils/fireAlert'
 import { playAlertTone } from '../utils/alertSound'
 
 // 데이터 공급 모드를 명시적으로 선택합니다. API 실패 시 mock으로 자동 대체하지 않습니다.
@@ -31,68 +30,54 @@ const mapVisible = ref(true)
 const isLoading = ref(true)
 const loadError = ref('')
 const refreshError = ref('')
-const { token: adminToken, isLoggedIn, signOut } = useAdminSession()
-const showCctvRefreshForm = ref(false)
 const cctvRefreshBusy = ref(false)
 const cctvRefreshMessage = ref('')
 const cctvRefreshError = ref('')
-const adminUsername = ref('')
-const adminPassword = ref('')
 const now = ref(new Date())
 let requestController
 let clockInterval
 let refreshInterval
+let eventRefreshInterval
+let eventController
+let disposed = false
 let loading = false
 let refreshingTestEvents = false
 let dataRevision = 0
 let linkApplied = false
 let knownEventIds = null
-const fireAlerts = ref([])
+const detectionAlerts = ref([])
 // 확인하지 않은 화재 카메라가 바뀔 때만 지도를 다시 그리도록 문자열 키를 거쳐 집합을 만듦
 const fireKey = computed(() => [...activeFireCameraIds(events.value)].sort((a, b) => a - b).join(','))
 const fireCameraIds = computed(() => new Set(fireKey.value ? fireKey.value.split(',').map(Number) : []))
-function openFireAlert(id) {
+function openDetectionAlert(id) {
+  mapVisible.value = true
   selectEvent(id)
-  fireAlerts.value = []
+  dismissDetectionAlerts()
 }
-// 이벤트 확인은 관리자만 할 수 있어 로그인하지 않았다면 로그인 입력을 먼저 보여줌
-const ackWaitingIds = ref([])
+function dismissDetectionAlerts() {
+  if (ackBusy.value) return
+  detectionAlerts.value = []
+  ackError.value = ''
+}
 const ackBusy = ref(false)
 const ackError = ref('')
-function acknowledge(ids) {
-  ackError.value = ''
-  const list = Array.isArray(ids) ? ids : [ids]
-  if (dataSource === 'mock' || isLoggedIn.value) runAcknowledge(list)
-  else ackWaitingIds.value = list
-}
-async function submitAckLogin() {
+async function acknowledge(ids) {
   if (ackBusy.value) return
+  const list = [...new Set(Array.isArray(ids) ? ids : [ids])]
+  if (!list.length) return
   ackBusy.value = true
   ackError.value = ''
   try {
-    await ensureAdminToken(loginAdmin, adminUsername.value, adminPassword.value)
-  } catch (error) {
-    ackError.value = error.message
-    ackBusy.value = false
-    adminPassword.value = ''
-    return
-  }
-  adminPassword.value = ''
-  ackBusy.value = false
-  await runAcknowledge(ackWaitingIds.value)
-}
-async function runAcknowledge(ids) {
-  ackBusy.value = true
-  try {
-    if (dataSource === 'api') for (const id of ids) await acknowledgeEvent(id, adminToken.value)
-    events.value = applyAcknowledged(events.value, ids)
-    dataRevision++
-    fireAlerts.value = fireAlerts.value.filter(alert => events.value.find(event => event.id === alert.id)?.alerting)
-    ackWaitingIds.value = []
+    for (const id of list) {
+      if (events.value.find(event => event.id === id)?.status === 'CONFIRMED') continue
+      if (dataSource === 'api') await acknowledgeEvent(id)
+      events.value = applyAcknowledged(events.value, [id])
+      dataRevision++
+      detectionAlerts.value = reconcileDetectionAlerts(detectionAlerts.value, events.value)
+    }
     if (dataSource === 'api') await loadData({ silent: true })
   } catch (error) {
     ackError.value = error.message
-    if (error.code === 'unauthorized') { signOut(); ackWaitingIds.value = ids }
   } finally {
     ackBusy.value = false
   }
@@ -142,26 +127,31 @@ function applyData(nextCameras, nextEvents, nextVideos = []) {
   videos.value = nextVideos
   selectedCameraId.value = selection.cameraId
   selectedEventId.value = selection.eventId
-  const fresh = findNewFireEvents(knownEventIds, nextEvents)
+  const fresh = findNewDetectionEvents(knownEventIds, nextEvents)
   knownEventIds = new Set(nextEvents.map(event => event.id))
+  detectionAlerts.value = reconcileDetectionAlerts(detectionAlerts.value, nextEvents, fresh)
   if (fresh.length) {
-    fireAlerts.value = [...fresh, ...fireAlerts.value]
     playAlertTone()
   }
 }
-async function refreshTestEvents() {
+async function refreshEvents() {
   if (dataSource !== 'api' || loading || refreshingTestEvents || ackBusy.value) return
   refreshingTestEvents = true
   const revision = dataRevision
+  const controller = new AbortController()
+  eventController = controller
+  const timeout = setTimeout(() => controller.abort(), 15000)
   try {
-    const nextEvents = await fetchEvents()
-    if (revision === dataRevision && !loading && !ackBusy.value) {
+    const nextEvents = await fetchEvents({ signal: controller.signal })
+    if (!disposed && revision === dataRevision && !loading && !ackBusy.value) {
       applyData(cameras.value, nextEvents, videos.value)
       refreshError.value = ''
     }
   } catch (error) {
-    if (revision === dataRevision) refreshError.value = `최신 이벤트를 가져오지 못했습니다. ${error.message}`
+    if (!disposed && revision === dataRevision) refreshError.value = `최신 이벤트를 가져오지 못했습니다. ${error.message}`
   } finally {
+    clearTimeout(timeout)
+    if (eventController === controller) eventController = null
     refreshingTestEvents = false
   }
 }
@@ -237,30 +227,30 @@ async function refreshCctv() {
   cctvRefreshError.value = ''
   cctvRefreshMessage.value = ''
   try {
-    const token = await ensureAdminToken(loginAdmin, adminUsername.value, adminPassword.value)
-    await refreshLiveCctvs(token)
-    showCctvRefreshForm.value = false
+    await refreshLiveCctvs()
     cctvRefreshMessage.value = 'CCTV 주소를 갱신했습니다.'
     await loadData({ silent: true })
   } catch (error) {
     cctvRefreshError.value = error.message
-    if (error.code === 'unauthorized') signOut()
   } finally {
-    adminPassword.value = ''
     cctvRefreshBusy.value = false
   }
 }
 onMounted(() => {
   loadData()
   clockInterval = setInterval(() => { now.value = new Date() }, 1000)
-  if (dataSource === 'api') refreshInterval = setInterval(() => {
-    if (!document.hidden) loadData({ silent: true })
-  }, 30000)
+  if (dataSource === 'api') {
+    refreshInterval = setInterval(() => { if (!document.hidden) loadData({ silent: true }) }, 30000)
+    eventRefreshInterval = setInterval(() => { if (!document.hidden) refreshEvents() }, 5000)
+  }
 })
 onBeforeUnmount(() => {
+  disposed = true
   requestController?.abort()
+  eventController?.abort()
   clearInterval(clockInterval)
   clearInterval(refreshInterval)
+  clearInterval(eventRefreshInterval)
 })
 </script>
 
@@ -273,35 +263,20 @@ onBeforeUnmount(() => {
           <span class="user-profile"><span class="avatar"><DashboardIcon name="user" :size="20" /></span>admin</span>
         </div>
       </header>
-      <div class="workspace-heading"><span>실시간 관제 현황</span><div class="workspace-actions"><button type="button" class="cctv-refresh-button" :aria-expanded="mapVisible" aria-controls="monitoring-map" @click="mapVisible = !mapVisible">{{ mapVisible ? '지도 닫기' : '지도 열기' }}</button><button v-if="dataSource === 'api'" type="button" class="cctv-refresh-button" :aria-expanded="showCctvRefreshForm" aria-controls="cctv-refresh-form" @click="showCctvRefreshForm = !showCctvRefreshForm">CCTV 주소 갱신</button><span v-if="dataSource === 'mock'" class="mode-badge">데모 데이터</span></div></div>
-      <form v-if="showCctvRefreshForm && dataSource === 'api'" id="cctv-refresh-form" class="cctv-refresh-form" @submit.prevent="refreshCctv">
-        <p>영상이 나오지 않을 때 관리자 계정으로 ITS CCTV 주소를 다시 조회합니다.</p>
-        <template v-if="!isLoggedIn">
-          <label>관리자 ID <input v-model="adminUsername" name="username" autocomplete="username" required></label>
-          <label>비밀번호 <input v-model="adminPassword" name="password" type="password" autocomplete="current-password" required></label>
-        </template>
-        <button type="submit" class="primary-button" :disabled="cctvRefreshBusy">{{ cctvRefreshBusy ? '갱신 중…' : '주소 다시 조회' }}</button>
-      </form>
+      <div class="workspace-heading"><span>실시간 관제 현황</span><div class="workspace-actions"><button type="button" class="cctv-refresh-button" :aria-expanded="mapVisible" aria-controls="monitoring-map" @click="mapVisible = !mapVisible">{{ mapVisible ? '지도 닫기' : '지도 열기' }}</button><button v-if="dataSource === 'api'" type="button" class="cctv-refresh-button" :disabled="cctvRefreshBusy" @click="refreshCctv">{{ cctvRefreshBusy ? '갱신 중…' : 'CCTV 주소 갱신' }}</button><span v-if="dataSource === 'mock'" class="mode-badge">데모 데이터</span></div></div>
       <p v-if="cctvRefreshMessage" class="cctv-refresh-result" role="status">{{ cctvRefreshMessage }}</p>
       <p v-if="cctvRefreshError" class="refresh-error" role="alert">{{ cctvRefreshError }}</p>
       <p v-if="isLoading" class="load-status" role="status">카메라와 탐지 이벤트를 불러오는 중입니다.</p>
       <div v-else-if="loadError" class="load-status" role="alert"><p>{{ loadError }}</p><button class="primary-button" @click="loadData">다시 시도</button></div>
       <template v-else>
         <p v-if="refreshError" class="refresh-error" role="alert">{{ refreshError }}</p>
-        <FireAlertBanner :events="fireAlerts" :cameras="cameras" @open="openFireAlert" @dismiss="fireAlerts = []" @acknowledge="acknowledge" />
-        <form v-if="ackWaitingIds.length" class="cctv-refresh-form" @submit.prevent="submitAckLogin">
-          <p>이벤트를 확인하려면 관리자 로그인이 필요합니다.</p>
-          <label>관리자 ID <input v-model="adminUsername" name="username" autocomplete="username" required></label>
-          <label>비밀번호 <input v-model="adminPassword" name="password" type="password" autocomplete="current-password" required></label>
-          <button type="submit" class="primary-button" :disabled="ackBusy">{{ ackBusy ? '확인 중…' : '로그인 후 확인' }}</button>
-          <button type="button" class="cctv-refresh-button" @click="ackWaitingIds = []">취소</button>
-        </form>
+        <DetectionAlertModal :events="detectionAlerts" :cameras="cameras" :busy="ackBusy" :error="ackError" @open="openDetectionAlert" @dismiss="dismissDetectionAlerts" @acknowledge="acknowledge" />
         <p v-if="ackError" class="refresh-error" role="alert">{{ ackError }}</p>
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
           <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" :focus-request="mapFocusRequest" :fire-camera-ids="fireCameraIds" @select-camera="selectCamera" @focus-applied="finishMapFocus" />
-          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror closable @close="closeCctv" @test-progress="refreshTestEvents" />
+          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror closable @close="closeCctv" @test-progress="refreshEvents" />
           <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
-          <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" @acknowledge="acknowledge" />
+          <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" :ack-busy="ackBusy" @select="selectEvent" @acknowledge="acknowledge" />
         </section>
         <section class="summary-grid" aria-label="관제 요약">
           <article class="summary-card"><span class="summary-icon red"><DashboardIcon name="fire" :size="29" /></span><div><p>탐지 이벤트</p><strong>{{ events.length }}<small>건</small></strong></div></article>
@@ -342,10 +317,6 @@ h1 { margin: 0; font-size: clamp(23px, 2vw, 30px); letter-spacing: -1px; font-we
 .workspace-actions { display: flex; align-items: center; gap: 10px; }
 .cctv-refresh-button { border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text); padding: 6px 13px; font-size: 12px; transition: background 0.15s, border-color 0.15s; }
 .cctv-refresh-button:hover { background: var(--surface-3); border-color: var(--accent); }
-.cctv-refresh-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.cctv-refresh-form p { width: 100%; margin: 0; font-size: 12px; color: var(--text-2); }
-.cctv-refresh-form label { display: grid; gap: 5px; font-size: 12px; color: var(--text-2); }
-.cctv-refresh-form .primary-button { padding: 10px 16px; }
 .cctv-refresh-result { margin: 0 0 12px; padding: 10px 14px; border: 1px solid rgba(54, 214, 163, 0.3); border-radius: var(--radius-sm); background: var(--ok-soft); color: var(--ok); font-size: 12px; }
 .dashboard-footer { display: flex; justify-content: flex-end; gap: 12px; color: var(--text-3); font-size: 11px; margin-top: 22px; }
 @media (min-width: 1600px) { .dashboard-content { padding: 32px 38px; } }

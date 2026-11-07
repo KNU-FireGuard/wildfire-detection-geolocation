@@ -41,7 +41,7 @@ test('CCTV 클릭, 산불 좌표, 연결선과 마커 라벨 이스케이프를 
   assert.equal(selected, camera)
 })
 
-test('추정 산불 위치는 좌표를 중심으로 한 빨간 원으로 표시한다', () => {
+test('오차 미산출 위치는 범위를 지어내지 않고 작은 중심점으로 표시한다', () => {
   const f = fixture()
   const scene = createNaverScene(f.maps, f.map, () => {})
   scene.render({ cameras: [], selectedEvent: { estimatedLocation: fire } })
@@ -51,6 +51,8 @@ test('추정 산불 위치는 좌표를 중심으로 한 빨간 원으로 표시
   assert.match(marker.icon.content, /background:#e0402e/)
   assert.doesNotMatch(marker.icon.content, />추정 산불 위치</)
   assert.equal(marker.icon.anchor.x, marker.icon.anchor.y)
+  assert.match(marker.icon.content, /width:14px;height:14px/)
+  assert.equal(f.overlays.length, 1)
 })
 
 test('오차 반경 표시 기준은 null, 1km 미만, 1km 이상을 구분한다', () => {
@@ -67,7 +69,9 @@ test('1km 미만은 미터 반경 원을 그리고 줌을 바꿔도 실제 반�
   assert.equal(f.overlays.length, 2)
   assert.equal(f.overlays[0].options.radius, 150)
   assert.deepEqual([f.overlays[0].options.center.latitude, f.overlays[0].options.center.longitude], [36.1, 128.1])
-  assert.equal(f.overlays[0].options.fillOpacity, 0.14)
+  assert.equal(f.overlays[0].options.fillOpacity, 0.08)
+  assert.equal(f.overlays[0].options.strokeOpacity, 1)
+  assert.equal(f.overlays[0].options.clickable, false)
   assert.equal(f.overlays[1].options.icon.anchor.x, 7)
   assert.equal(f.listeners.filter(listener => listener.event === 'zoom_changed').length, 0)
   scene.render({ cameras: [], selectedEvent: { estimatedLocation: fire } })
@@ -75,13 +79,22 @@ test('1km 미만은 미터 반경 원을 그리고 줌을 바꿔도 실제 반�
   assert.equal(f.overlays[1].map, null)
 })
 
-test('1km 이상은 기존 크기의 마커와 실제 오차값을 표시한다', () => {
-  const f = fixture()
-  const scene = createNaverScene(f.maps, f.map, () => {})
-  scene.render({ cameras: [], selectedEvent: { estimatedLocation: { ...fire, errorRadiusM: 4360 } } })
-  assert.equal(f.overlays.length, 1)
-  assert.match(f.overlays[0].options.icon.content, /width:24px;height:24px/)
-  assert.match(f.overlays[0].options.title, /위치 신뢰 낮음 · 오차 반경 4.36 km/)
+test('1km 경계와 실제 저장된 큰 반경도 지리적 원으로 표시하고 낮은 신뢰 안내를 유지한다', () => {
+  for (const radius of [4360, 999, 1000, 1910, 4100, 0]) {
+    const f = fixture()
+    const scene = createNaverScene(f.maps, f.map, () => {})
+    const location = { ...fire, errorRadiusM: radius }
+    scene.render({ cameras: [], selectedEvent: { estimatedLocation: location } })
+    assert.equal(f.overlays.length, 2)
+    assert.equal(f.overlays[0].options.map, f.map)
+    assert.equal(f.overlays[0].options.radius, radius)
+    assert.equal(f.overlays[0].options.fillOpacity, 0.08)
+    assert.equal(f.overlays[0].options.strokeOpacity, 1)
+    assert.match(f.overlays[1].options.icon.content, /width:14px;height:14px/)
+    assert.equal(f.overlays[1].options.title, `추정 산불 위치 · ${errorRangeDisplay(location).label}`)
+    scene.clear()
+    assert.ok(f.overlays.every(overlay => overlay.map === null))
+  }
 })
 
 test('미확인 이벤트 위치는 선택 없이 모두 표시하고 확인하면 해당 원을 제거한다', () => {
@@ -115,20 +128,14 @@ test('카메라 선택은 상세 패널이 선택한 최신 이벤트와 같은 
   assert.deepEqual(focusLocationsForRequest({ kind: 'camera', id: 9 }, [camera], events), [])
 })
 
-test('줌아웃하면 추정 위치 원을 줄이고 확대하면 좌표 중심으로 키운다', () => {
-  const f = fixture()
-  const scene = createNaverScene(f.maps, f.map, () => {})
-  scene.render({ cameras: [], selectedEvent: { estimatedLocation: fire } })
-  const marker = f.overlays[0]
-  assert.match(marker.options.icon.content, /width:24px;height:24px/)
-  assert.equal(marker.options.icon.anchor.x, 12)
-  const zoomListener = f.listeners.find(listener => listener.event === 'zoom_changed')
-  assert.ok(zoomListener)
-  f.map.setZoom(14)
-  zoomListener.handler(14)
-  assert.match(marker.options.icon.content, /width:84px;height:84px/)
-  assert.equal(marker.options.icon.anchor.x, 42)
-  assert.equal(marker.options.icon.anchor.y, 42)
+test('잘못되거나 미산출인 반경은 임의의 범위를 표시하지 않는다', () => {
+  for (const radius of [null, undefined, NaN, Infinity, -1, '150']) {
+    const f = fixture()
+    createNaverScene(f.maps, f.map, () => {}).render({ cameras: [], selectedEvent: { estimatedLocation: { ...fire, errorRadiusM: radius } } })
+    assert.equal(f.overlays.length, 1)
+    assert.match(f.overlays[0].options.icon.content, /width:14px;height:14px/)
+    assert.match(f.overlays[0].options.title, /오차 범위 미산출/)
+  }
 })
 
 test('카메라 아이콘도 확대율에 따라 크기를 바꾸고 좌표 앵커를 유지한다', () => {

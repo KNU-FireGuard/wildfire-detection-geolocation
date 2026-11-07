@@ -1,4 +1,4 @@
-// 새 화재 알림음, 브라우저가 소리 재생을 막은 경우(사용자 조작 전)에는 조용히 건너뜁니다.
+// 새 화재·연기 알림음, 브라우저가 소리 재생을 막은 경우(사용자 조작 전)에는 조용히 건너뜁니다.
 export function playAlertTone() {
   try {
     const Context = window.AudioContext || window.webkitAudioContext

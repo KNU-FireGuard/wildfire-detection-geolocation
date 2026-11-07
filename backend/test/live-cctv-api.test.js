@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 process.env.ITS_CCTV_API_KEY = '';
 process.env.JWT_SECRET = 'test-only-jwt-secret-with-more-than-32-characters';
 process.env.AI_CALLBACK_TOKEN = 'test-only-ai-callback-token-with-32-bytes';
+const dbPath = require.resolve('../src/config/db');
+require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { query: async () => ({ rows: [] }) } };
 const app = require('../src/app');
 let server;
 let base;
@@ -33,7 +35,7 @@ test('감시 상태 조회와 AI 프레임 heartbeat는 인증·실행 ID를 검
 });
 after(async () => { if (server) await new Promise(resolve => server.close(resolve)); });
 
-test('지도 목록 조회는 저장된 실제 데이터만 반환하고 갱신은 관리자 인증을 요구한다', async () => {
+test('지도 목록은 저장된 데이터만 반환하고 갱신은 로그인 없이 호출되며 키가 없으면 503이다', async () => {
   const list = await fetch(base);
   assert.equal(list.status, 200);
   const body = await list.json();
@@ -42,7 +44,7 @@ test('지도 목록 조회는 저장된 실제 데이터만 반환하고 갱신�
   assert.ok(body.items.every(item => /^https?:\/\//.test(item.streamUrl || '')));
 
   const anonymous = await fetch(`${base}/refresh`, { method: 'POST' });
-  assert.equal(anonymous.status, 401);
+  assert.equal(anonymous.status, 503);
   const unavailable = await fetch(`${base}/${'a'.repeat(32)}/runs`, { method: 'POST' });
   assert.equal(unavailable.status, 404);
 });

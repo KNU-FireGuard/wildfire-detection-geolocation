@@ -29,17 +29,17 @@
 - `source`는 항상 `live`, 키 설정 여부와 관계없이 저장된 목록만 반환
 - `live`에서 갱신 전 목록은 빈 배열, 갱신 후 항목의 `cameraId`는 DB 카메라 ID, `streamUrl`은 제공자가 반환한 HTTP 또는 HTTPS HLS 주소
 - 목록은 최대 6개, 서버 시작과 목록 조회는 ITS 호출 없음
-- 목록은 관리자 수동 요청으로만 갱신, 서버 시작·화면 조회·재생 실패 시 ITS 자동 호출 없음
+- 목록은 사용자 수동 요청으로만 갱신, 서버 시작·화면 조회·재생 실패 시 ITS 자동 호출 없음
 
 ### `POST /live-cctvs/refresh`
 
-- 관리자 Bearer JWT와 서버의 `ITS_CCTV_API_KEY` 필요
+- 로그인 없이 호출, 서버의 `ITS_CCTV_API_KEY` 필요
 - ITS `cctvInfo`에 전국 범위·공식 HLS 유형 `cctvType=1`·JSON으로 1회 요청
 - `cctvtype=1`·`cctvformat=HLS`·HTTP 또는 HTTPS 주소·유효 좌표만 추려 분산된 6개를 저장하고 `GET /live-cctvs`와 같은 형식 반환
 - 2026-10-29 운영 응답의 `cctvType=1` 주소는 HTTP, HTTPS 화면 배포 시 브라우저의 혼합 콘텐츠 차단 가능
-- 진행 중인 갱신과 중복 요청은 거부, 완료 후 관리자가 다시 요청할 수 있음
+- 진행 중인 갱신과 중복 요청은 거부, 완료 후 사용자가 다시 요청할 수 있음
 - ITS 응답 후 DB 저장 실패 시 대기 목록으로 재시도, 추가 ITS 호출 없음
-- `401` 인증 실패, `409` 갱신 진행 중, `502` ITS 응답 오류·후보 부족, `503` 키 없음
+- `409` 갱신 진행 중, `502` ITS 응답 오류·후보 부족, `503` 키 없음
 - 실제 키 테스트에서 6개 HLS 재생목록·영상 조각·CORS 응답 확인, 주소 만료 시 갱신 필요
 
 ### `GET /live-monitor/status`
@@ -48,7 +48,7 @@
 - `200` `{ "state": "waiting_for_ai", "cameras": [{ "camera_id": 9, "provider_key": "...", "name": "CCTV", "run_id": null, "state": "waiting_for_ai", "last_frame_at": null }] }`
 - 상태: `waiting_for_cctv` | `waiting_for_ai` | `starting` | `running` | `restarting` | `failed` | `stopped`
 - `AI_LIVE_RUNNER_PATH`가 비어 있으면 기본 `ai/inference/live_runner.py` 실행, 지정한 파일이 없으면 `waiting_for_ai` 표시
-- Frontend는 30초마다 상태와 탐지 이벤트를 다시 조회, 상태 조회는 ITS 호출 한도를 사용하지 않음
+- Frontend는 30초마다 상태·카메라 정보를, 5초마다 탐지 이벤트를 다시 조회, 숨겨진 화면의 주기 조회는 생략하며 ITS 호출 한도를 사용하지 않음
 
 ### `POST /live-monitor/heartbeat`
 
@@ -240,6 +240,8 @@
 
 ## 관리자 인증
 
+- 관리자 로그인은 SMS 알림 번호 설정·발송 내역 조회에 사용, Test·CCTV 주소 갱신·이벤트 확인은 로그인 없이 사용
+
 ### `POST /auth/login`
 
 - Request: `{ "username": "admin", "password": "비밀번호" }`
@@ -257,7 +259,7 @@
 
 ## 화재 알림 SMS 관리
 
-- 모든 `/admin/*` API는 `Authorization: Bearer <JWT>` 필요, 누락·오류·만료 시 `401`
+- SMS 관리 API(`/admin/cameras`, `/admin/cameras/:id/alert-phone`, `/admin/sms-logs`)는 `Authorization: Bearer <JWT>` 필요, 누락·오류·만료 시 `401`
 - 알림 번호는 공개 `GET /cameras`에 포함하지 않고 아래 관리자 API에서만 제공
 - 문자는 카메라의 `fire` 탐지 이벤트가 새로 생길 때 해당 카메라 번호로 발송, `smoke`는 발송하지 않음
 - Test 실행과 실시간 감시 모두 `POST /detections` 경로로 같은 규칙 적용
@@ -280,15 +282,19 @@
 - `400` 카메라 ID 또는 번호 형식 오류
 - `404` 카메라 없음
 
-### `POST /admin/events/:id/acknowledge`
+## 이벤트 확인
+
+### `POST /events/:id/acknowledge`
 
 - 운영자가 이벤트를 확인했음을 기록, Request 본문 없음
+- 로그인·Authorization 헤더 없이 호출, 기존 `/admin/events/:id/acknowledge`도 동일한 공개 확인 API의 호환 주소로 유지
 - 처음 확인하면 `acknowledged_at`에 현재 시각 저장, 이미 확인했다면 값을 바꾸지 않고 `200`
 - `fire` 이벤트를 확인하면 같은 카메라에서 알림 중인 다른 `fire` 이벤트도 함께 확인 처리, `smoke`는 해당 이벤트만 처리
 - `200` `{ "item": <event> }`
 - `400` 이벤트 ID 형식 오류
-- `401` 토큰 없음 또는 만료
 - `404` 이벤트 없음
+
+## SMS 발송 내역
 
 ### `GET /admin/sms-logs`
 

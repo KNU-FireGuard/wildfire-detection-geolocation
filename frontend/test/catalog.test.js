@@ -151,21 +151,19 @@ test('ITS 카메라는 DB 카메라 ID와 실제 영상 주소를 유지한다',
   assert.equal(result.cameras[0].streamUrl, 'http://video.example.test/live.m3u8')
 })
 
-test('관리자 토큰으로 CCTV 목록을 수동 갱신하고 서버 오류와 만료를 구분해 전달한다', async () => {
+test('CCTV 목록은 로그인 없이 수동 갱신하고 서버 오류를 전달한다', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
     return Response.json({ source: 'live', refreshedAt: '2026-10-29T08:00:00Z', items: [] })
   }
-  const result = await refreshLiveCctvs('short-lived-token')
+  const result = await refreshLiveCctvs()
   assert.equal(result.refreshedAt, '2026-10-29T08:00:00Z')
   assert.equal(calls.length, 1)
   assert.equal(calls[0].url, '/api/live-cctvs/refresh')
-  assert.equal(calls[0].options.headers.Authorization, 'Bearer short-lived-token')
+  assert.equal(calls[0].options.headers?.Authorization, undefined)
   globalThis.fetch = async () => Response.json({ error: '다시 시도하세요.' }, { status: 409 })
-  await assert.rejects(refreshLiveCctvs('token'), /다시 시도하세요/)
-  globalThis.fetch = async () => Response.json({ error: '토큰 만료' }, { status: 401 })
-  await assert.rejects(refreshLiveCctvs('old'), error => error.code === 'unauthorized')
+  await assert.rejects(refreshLiveCctvs(), /다시 시도하세요/)
 })
 
 test('Test 실행 오류는 서버 메시지를 전달한다', async () => {
@@ -227,20 +225,30 @@ test('서버의 알림 중(is_alerting) 값을 alerting으로 변환하고 값�
   assert.equal(events[1].alerting, false)
 })
 
-test('이벤트 확인은 관리자 토큰으로 이벤트별 주소에 POST하고 401을 로그인 만료로 구분한다', async () => {
+test('이벤트 확인은 로그인 없이 공개 주소에 POST하고 실패 메시지를 전달한다', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
     return Response.json({ item: { ...rawEvent, acknowledged_at: '2026-10-07T06:00:00.000Z' } })
   }
-  const event = await acknowledgeEvent(10, 'short-lived-token')
+  const event = await acknowledgeEvent(10)
   assert.equal(event.status, 'CONFIRMED')
-  assert.equal(calls[0].url, '/api/admin/events/10/acknowledge')
+  assert.equal(calls[0].url, '/api/events/10/acknowledge')
   assert.equal(calls[0].options.method, 'POST')
-  assert.equal(calls[0].options.headers.Authorization, 'Bearer short-lived-token')
-  globalThis.fetch = async () => Response.json({ error: '토큰 만료' }, { status: 401 })
-  await assert.rejects(acknowledgeEvent(10, 'old'), error => error.code === 'unauthorized')
+  assert.equal(calls[0].options.headers?.Authorization, undefined)
   globalThis.fetch = async () => Response.json({ error: '탐지 이벤트가 없습니다.' }, { status: 404 })
-  await assert.rejects(acknowledgeEvent(10, 'token'), /탐지 이벤트가 없습니다/)
-  await assert.rejects(acknowledgeEvent(0, 'token'), /올바르지 않은/)
+  await assert.rejects(acknowledgeEvent(10), /탐지 이벤트가 없습니다/)
+  await assert.rejects(acknowledgeEvent(0), /올바르지 않은/)
+})
+
+test('확인·CCTV 갱신은 시간 제한을 두고 지연과 연결 실패를 안내한다', async () => {
+  for (const action of [() => acknowledgeEvent(10), () => refreshLiveCctvs()]) {
+    globalThis.fetch = async (_url, options) => {
+      assert.ok(options.signal instanceof AbortSignal)
+      throw new DOMException('simulated timeout', 'TimeoutError')
+    }
+    await assert.rejects(action(), /요청 시간이 초과/)
+    globalThis.fetch = async () => { throw new TypeError('fetch failed') }
+    await assert.rejects(action(), /연결할 수 없습니다/)
+  }
 })
