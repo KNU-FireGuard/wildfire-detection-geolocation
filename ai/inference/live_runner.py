@@ -134,22 +134,15 @@ def receive(camera, buffer, stop):
 
 
 def location_for(camera):
-    """실시간은 이름이 일치하는 고정 카메라 보정값만 사용, 무보정 역산은 시도하지 않음."""
-    try:
-        from ai.camera_config import find_camera_config, load_camera_configs
-        from ai.location_session import LocationSession
-
-        config = find_camera_config(load_camera_configs(), name=camera.get("name"))
-        if not config or not config.get("fixed_pose"):
-            return None
-        if camera.get("latitude") is None or camera.get("longitude") is None:
-            return None
-        # Test 카메라의 DB ID 설정과 우연히 매칭되지 않도록 이름으로만 선택
-        return LocationSession({"id": None, "name": camera["name"],
-                                "lat": camera["latitude"], "lon": camera["longitude"]})
-    except Exception as exc:
-        log(f"[live camera={camera['camera_id']}] location unavailable: {type(exc).__name__}")
+    """좌표가 있으면 기존 세션 사용, 고정 자세가 없으면 능선·DEM으로 자세 자동 추정."""
+    if camera.get("latitude") is None or camera.get("longitude") is None:
         return None
+    from ai.location_session import LocationSession
+
+    # Test 카메라의 DB ID 설정과 우연히 매칭되지 않도록 이름으로만 선택
+    return LocationSession({"id": None, "name": camera["name"],
+                            "lat": camera["latitude"], "lon": camera["longitude"]},
+                           allow_fixed_pose=camera.get("allow_fixed_pose", True))
 
 
 class CameraAnalysis:
@@ -159,15 +152,25 @@ class CameraAnalysis:
         self.previous = None
         self.scene = None
         self.shape = None
-        self.location_enabled = True
-        self.context = AnalysisContext()
+        self.pose = PoseContext()
+        self.context = AnalysisContext(pose=self.pose)
+        self.stable_count = 0
+        self.stable_since = None
 
-    def reset(self, disable_location=False):
+    def reset(self, recalibrate=False):
         self.gate.reset()
         self.context.cancelled.set()
-        if disable_location:
-            self.location_enabled = False
-        self.context = AnalysisContext(self.location_enabled)
+        enabled = self.context.location_enabled
+        if recalibrate:
+            self.pose.cancelled.set()
+            self.pose = PoseContext(allow_fixed_pose=False)
+            enabled = False
+            self.scene = None
+            self.shape = None
+            self.previous = None
+        self.context = AnalysisContext(location_enabled=enabled, pose=self.pose)
+        self.stable_count = 0
+        self.stable_since = None
 
     def process(self, result, names, packet):
         import cv2
@@ -175,9 +178,10 @@ class CameraAnalysis:
         if time.monotonic() - packet.captured_at > 1:
             self.reset()
             return []
-        if self.previous and (packet.generation != self.previous.generation
-                              or packet.sequence != self.previous.sequence + 1
-                              or not 0 < packet.timestamp - self.previous.timestamp <= 0.4 + 1e-6):
+        if self.previous and packet.generation != self.previous.generation:
+            self.reset(recalibrate=True)
+        elif self.previous and (packet.sequence != self.previous.sequence + 1
+                                or not 0 < packet.timestamp - self.previous.timestamp <= 0.4 + 1e-6):
             self.reset()
         self.previous = packet
         scene = cv2.resize(cv2.cvtColor(packet.frame, cv2.COLOR_BGR2GRAY), (32, 18))
@@ -185,16 +189,30 @@ class CameraAnalysis:
             packet.frame.shape != self.shape or cv2.absdiff(scene, self.scene).mean() / 255 > 0.25
         )
         if changed:
-            self.reset(disable_location=True)
+            self.reset(recalibrate=True)
+            self.previous = packet
         self.scene, self.shape = scene, packet.frame.shape
+        if not self.context.location_enabled:
+            self.stable_count += 1
+            if self.stable_since is None:
+                self.stable_since = packet.timestamp
+            if self.stable_count >= 10 and packet.timestamp - self.stable_since >= 1.8 - 1e-6:
+                self.context.location_enabled = True
         return frame_detections(result, names, self.camera["run_id"], self.camera["camera_id"], None,
                                 gate=self.gate, timestamp=packet.timestamp)
+
+
+@dataclass
+class PoseContext:
+    allow_fixed_pose: bool = True
+    cancelled: threading.Event = field(default_factory=threading.Event)
 
 
 @dataclass
 class AnalysisContext:
     location_enabled: bool = True
     cancelled: threading.Event = field(default_factory=threading.Event)
+    pose: PoseContext = field(default_factory=PoseContext)
 
 
 @dataclass
@@ -205,7 +223,7 @@ class LocationTask:
     payload: dict | None = None
 
     def current(self):
-        return not self.context.cancelled.is_set()
+        return not self.context.cancelled.is_set() and not self.context.pose.cancelled.is_set()
 
     def fresh(self):
         return self.current() and time.monotonic() - self.packet.captured_at <= 5
@@ -231,30 +249,60 @@ class TimingStats:
                 for stage, (count, total, maximum) in values.items()}
 
 
+@dataclass
+class LocationState:
+    pose: PoseContext
+    session: object = None
+    ready: bool = False
+    terminal: bool = False
+    retry_at: float = 0
+    attempts: int = 0
+
+
 class LocationWorker:
     """DEM 준비·위치 계산은 별도 스레드에서 처리, 대기는 카메라·클래스별 최신 표본만 유지."""
-    def __init__(self, emit, session_factory=None, timings=None):
+    def __init__(self, emit, session_factory=None, timings=None, retry_delay=30, max_retry_delay=300):
         self.emit = emit
         self.session_factory = session_factory or location_for
         self.timings = timings or TimingStats()
         self.pending = {}
-        self.sessions = {}
-        self.prepared = set()
+        self.states = {}
+        self.retry_delay = retry_delay
+        self.max_retry_delay = max_retry_delay
         self.lock = threading.Lock()
+
+    def _state(self, task):
+        # 호출자가 lock을 유지, 자세 변경 전의 세션과 대기 결과를 이어받지 않음
+        camera_id = task.camera["camera_id"]
+        state = self.states.get(camera_id)
+        if state is None or state.pose is not task.context.pose:
+            state = LocationState(task.context.pose)
+            self.states[camera_id] = state
+            self.pending = {key: item for key, item in self.pending.items()
+                            if item.camera["camera_id"] != camera_id or item.context.pose is task.context.pose}
+        return state
 
     def observe(self, camera, packet, context):
         # 첫 분석 프레임부터 DEM을 준비해 첫 확정 탐지 시의 대기를 줄임
-        if not context.location_enabled:
+        task = LocationTask(camera, packet, context)
+        if not context.location_enabled or not task.current():
             return
         with self.lock:
-            if camera["camera_id"] not in self.prepared:
-                self.pending[(camera["camera_id"], "prepare")] = LocationTask(camera, packet, context)
+            if not task.current():
+                return
+            state = self._state(task)
+            if not state.ready and not state.terminal and time.monotonic() >= state.retry_at:
+                self.pending[(camera["camera_id"], "prepare")] = task
 
     def submit(self, task):
         if not task.fresh() or not task.context.location_enabled:
             return
         with self.lock:
-            self.pending[(task.camera["camera_id"], task.payload["detection"]["class"])] = task
+            if not task.current():
+                return
+            state = self._state(task)
+            if not state.terminal and (state.ready or time.monotonic() >= state.retry_at):
+                self.pending[(task.camera["camera_id"], task.payload["detection"]["class"])] = task
 
     def run_once(self):
         with self.lock:
@@ -266,21 +314,46 @@ class LocationWorker:
         if not task.current() or not task.context.location_enabled or (task.payload is not None and not task.fresh()):
             return True
         camera_id = task.camera["camera_id"]
-        if camera_id not in self.prepared:
+        with self.lock:
+            if not task.current():
+                return True
+            state = self._state(task)
+            if state.terminal or (not state.ready and time.monotonic() < state.retry_at):
+                return True
+        if not state.ready:
             started = time.monotonic()
             session = None
+            terminal = False
+            status = {"ready": False, "reason": "PREPARATION_FAILED"}
             try:
-                session = self.session_factory(task.camera)
-                status = prepare_location(session, SimpleNamespace(orig_img=task.packet.frame))
-                if not status or not status.get("ready"):
-                    session = None
+                session = self.session_factory({**task.camera, "allow_fixed_pose": state.pose.allow_fixed_pose})
+                if session is None:
+                    terminal = True
+                    status = {"ready": False, "reason": "NO_CAMERA_COORDINATES"}
+                else:
+                    status = prepare_location(session, SimpleNamespace(orig_img=task.packet.frame)) or status
+                    terminal = status.get("reason") == "NO_CAMERA_COORDINATES"
             except Exception as exc:
                 log(f"[live camera={camera_id}] location preparation failed: {type(exc).__name__}")
             self.timings.record("location_prepare", time.monotonic() - started, camera_id)
-            self.sessions[camera_id] = session
             with self.lock:
-                self.prepared.add(camera_id)
-        session = self.sessions.get(camera_id)
+                if state.pose.cancelled.is_set() or self.states.get(camera_id) is not state:
+                    return True
+                state.ready = bool(status.get("ready"))
+                state.session = session if state.ready else None
+                state.terminal = terminal
+                if state.ready:
+                    state.attempts = 0
+                    state.retry_at = 0
+                else:
+                    state.attempts += 1
+                    delay = min(self.retry_delay * 2 ** min(state.attempts - 1, 5), self.max_retry_delay)
+                    state.retry_at = math.inf if terminal else time.monotonic() + delay
+            warnings = ','.join(status.get("warnings") or []) or 'none'
+            retry_in = 'none' if state.ready or terminal else f'{delay:.0f}'
+            log(f"[live camera={camera_id}] location_ready={state.ready} mode={status.get('mode')} "
+                f"reason={status.get('reason')} warnings={warnings} retry_in_s={retry_in}")
+        session = state.session
         if session is None or task.payload is None or not task.fresh():
             return True
         started = time.monotonic()

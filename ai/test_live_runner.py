@@ -3,7 +3,7 @@ import json
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import requests
@@ -338,6 +338,237 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(timings.take(), {"batch_inference": {"count": 2, "avg_ms": 200, "max_ms": 300}})
         self.assertEqual(timings.take(1), {"location_prepare": {"count": 1, "avg_ms": 2000, "max_ms": 2000}})
         self.assertEqual(timings.take(), {})
+
+
+class AutomaticLiveLocationTests(unittest.TestCase):
+    def test_unconfigured_live_camera_runs_existing_blind_session_and_sends_position(self):
+        from ai.location_session import LocationSession
+
+        camera = {**CAMERA, "name": "unconfigured live camera", "latitude": 36.4, "longitude": 128.6}
+        location = {"latitude": 36.401, "longitude": 128.601, "error_range_m": 100}
+        provider = SimpleNamespace(estimate_blind_ptz=Mock(return_value={
+            "calibrated": True, "pan": 90.0, "tilt": -2.0, "roll": 0.0,
+            "rms_deg": .2, "uniqueness_ratio": 2.0,
+        }))
+        estimator = SimpleNamespace(
+            camera_configs=[],
+            skyline_extractor=SimpleNamespace(extract=lambda **kwargs: {"is_valid": True, "ridge_pts": np.zeros((20, 2))}),
+            _get_provider=lambda *args: provider,
+            estimate_location=lambda *args, **kwargs: {"location_estimation": location},
+        )
+        sessions = []
+
+        def create_session(camera, **kwargs):
+            session = LocationSession(camera, estimator=estimator, **kwargs)
+            sessions.append(session)
+            return session
+
+        cb, http, stop = callbacks(), Http(), threading.Event()
+        worker = live_runner.LocationWorker(cb.submit_location)
+        cb.locations = worker
+        analysis, frame = confirmed_analysis(camera), packet()
+        with patch('ai.location_session.LocationSession', side_effect=create_session):
+            worker.observe(camera, frame, analysis.context)
+            worker.run_once()
+            cb.submit(camera, analysis.process(result(), NAMES, frame), frame, analysis.context)
+            cb.flush_once(http, stop)
+            worker.run_once()
+            cb.flush_once(http, stop)
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0].status["mode"], "blind_360_once")
+        self.assertEqual(sessions[0].status["fov_h_deg"], 60)
+        self.assertIn("FOV_DEFAULT_USED", sessions[0].status["warnings"])
+        self.assertEqual(provider.estimate_blind_ptz.call_count, 3)
+        detections = [item for item in http.posts if "detection" in item]
+        self.assertIsNone(detections[0]["location_estimation"])
+        self.assertEqual(detections[1]["location_estimation"], location)
+
+    def test_camera_without_coordinates_skips_location_without_importing_estimator(self):
+        with patch('ai.location_session.LocationSession') as create:
+            self.assertIsNone(live_runner.location_for({**CAMERA, "latitude": None, "longitude": None}))
+        create.assert_not_called()
+
+    def test_preparation_failure_retries_with_backoff_then_recovers(self):
+        clock = [100.0]
+
+        class RecoveringSession(Session):
+            def prepare(self, **kwargs):
+                self.preparations += 1
+                ready = self.preparations >= 3
+                return {"ready": ready, "reason": None if ready else "DEM_UNAVAILABLE"}
+
+        session, calls = RecoveringSession(), []
+        worker = live_runner.LocationWorker(lambda *args: None,
+                                           session_factory=lambda camera: calls.append(camera) or session)
+        context = confirmed_analysis().context
+        with patch.object(live_runner.time, "monotonic", side_effect=lambda: clock[0]):
+            for timestamp, expected_calls in ((100, 1), (129, 1), (130, 2), (189, 2), (190, 3), (300, 3)):
+                clock[0] = timestamp
+                worker.observe(CAMERA, packet(captured_at=timestamp), context)
+                worker.run_once()
+                self.assertEqual(len(calls), expected_calls)
+
+    def test_repeated_failures_cap_retry_delay_at_five_minutes(self):
+        clock, calls = [100.0], []
+
+        class Offline(Session):
+            def prepare(self, **kwargs):
+                return {"ready": False, "reason": "DEM_UNAVAILABLE"}
+
+        worker = live_runner.LocationWorker(lambda *args: None,
+                                           session_factory=lambda camera: calls.append(camera) or Offline())
+        context = confirmed_analysis().context
+        with patch.object(live_runner.time, "monotonic", side_effect=lambda: clock[0]):
+            for timestamp, expected in ((100, 1), (130, 2), (190, 3), (310, 4), (550, 5),
+                                        (849, 5), (850, 6), (1149, 6), (1150, 7)):
+                clock[0] = timestamp
+                worker.observe(CAMERA, packet(captured_at=timestamp), context)
+                worker.run_once()
+                self.assertEqual(len(calls), expected)
+
+    def test_missing_coordinates_are_not_retried(self):
+        clock, calls = [100.0], []
+        camera = {**CAMERA, "latitude": None, "longitude": None}
+        worker = live_runner.LocationWorker(lambda *args: None,
+                                           session_factory=lambda camera: calls.append(camera) or None)
+        context = confirmed_analysis().context
+        with patch.object(live_runner.time, "monotonic", side_effect=lambda: clock[0]):
+            for timestamp in (100, 130, 500):
+                clock[0] = timestamp
+                worker.observe(camera, packet(captured_at=timestamp), context)
+                worker.run_once()
+        self.assertEqual(len(calls), 1)
+
+    def test_ridge_quality_failure_keeps_fire_detection_and_does_not_emit_position(self):
+        class NoRidge(Session):
+            def prepare(self, **kwargs):
+                return {"ready": False, "reason": "RIDGE_NOT_DETECTED"}
+
+        cb, http, stop = callbacks(), Http(), threading.Event()
+        worker = live_runner.LocationWorker(cb.submit_location, session_factory=lambda camera: NoRidge())
+        cb.locations = worker
+        analysis, frame = confirmed_analysis(), packet()
+        cb.submit(CAMERA, analysis.process(result(), NAMES, frame), frame, analysis.context)
+        cb.flush_once(http, stop)
+        worker.run_once()
+        cb.flush_once(http, stop)
+        detections = [item for item in http.posts if "detection" in item]
+        self.assertEqual(len(detections), 1)
+        self.assertIsNone(detections[0]["location_estimation"])
+
+    def test_changed_view_waits_for_stability_then_prepares_a_new_pose(self):
+        calls = []
+        worker = live_runner.LocationWorker(lambda *args: None,
+                                           session_factory=lambda camera: calls.append(camera) or Session())
+        analysis = confirmed_analysis()
+        first = packet()
+        analysis.process(result(), NAMES, first)
+        worker.observe(CAMERA, first, analysis.context)
+        worker.run_once()
+        old_context = analysis.context
+        for sequence in range(20, 30):
+            frame = packet(sequence)
+            frame.frame = np.full_like(FRAME, 255)
+            analysis.process(result(), NAMES, frame)
+            worker.observe(CAMERA, frame, analysis.context)
+            worker.run_once()
+            self.assertEqual(len(calls), 2 if sequence == 29 else 1)
+        self.assertTrue(old_context.cancelled.is_set())
+        self.assertTrue(analysis.context.location_enabled)
+        self.assertFalse(calls[-1]["allow_fixed_pose"])
+
+    def test_reconnect_reprepares_even_when_the_image_looks_unchanged(self):
+        calls = []
+        worker = live_runner.LocationWorker(lambda *args: None,
+                                           session_factory=lambda camera: calls.append(camera) or Session())
+        analysis = confirmed_analysis()
+        first = packet()
+        analysis.process(result(), NAMES, first)
+        worker.observe(CAMERA, first, analysis.context)
+        worker.run_once()
+        for sequence in range(20, 30):
+            frame = packet(sequence)
+            frame.generation = 2
+            analysis.process(result(), NAMES, frame)
+            worker.observe(CAMERA, frame, analysis.context)
+            worker.run_once()
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(calls[-1]["allow_fixed_pose"])
+
+    def test_reconnect_is_detected_after_stale_frames_reset_the_votes(self):
+        calls = []
+        worker = live_runner.LocationWorker(lambda *args: None,
+                                           session_factory=lambda camera: calls.append(camera) or Session())
+        analysis = confirmed_analysis()
+        first = packet()
+        analysis.process(result(), NAMES, first)
+        worker.observe(CAMERA, first, analysis.context)
+        worker.run_once()
+        analysis.reset()  # Main loop discarded an expired frame before reconnect.
+        for sequence in range(20, 30):
+            frame = packet(sequence)
+            frame.generation = 2
+            analysis.process(result(), NAMES, frame)
+            worker.observe(CAMERA, frame, analysis.context)
+            worker.run_once()
+        self.assertEqual(len(calls), 2)
+
+    def test_frame_drop_resets_votes_but_reuses_unchanged_camera_pose(self):
+        calls = []
+        worker = live_runner.LocationWorker(lambda *args: None,
+                                           session_factory=lambda camera: calls.append(camera) or Session())
+        analysis = confirmed_analysis()
+        for sequence in (19, 21):
+            frame = packet(sequence)
+            analysis.process(result(), NAMES, frame)
+            worker.observe(CAMERA, frame, analysis.context)
+            worker.run_once()
+        self.assertEqual(len(calls), 1)
+
+    def test_scene_change_during_preparation_does_not_cache_the_old_pose(self):
+        calls = []
+        analysis = confirmed_analysis()
+
+        def switch_scene():
+            for sequence in range(20, 30):
+                frame = packet(sequence)
+                frame.frame = np.full_like(FRAME, 255)
+                analysis.process(result(), NAMES, frame)
+                worker.observe(CAMERA, frame, analysis.context)
+
+        def create(camera):
+            calls.append(camera)
+            return Session(switch_scene if len(calls) == 1 else None)
+
+        worker = live_runner.LocationWorker(lambda *args: None, session_factory=create)
+        first = packet()
+        analysis.process(result(), NAMES, first)
+        worker.observe(CAMERA, first, analysis.context)
+        worker.run_once()
+        worker.run_once()
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(calls[-1]["allow_fixed_pose"])
+
+    def test_frame_drop_during_preparation_keeps_completed_pose_but_not_old_location(self):
+        calls = []
+        analysis = confirmed_analysis()
+
+        def drop_frame():
+            frame = packet(21)
+            analysis.process(result(), NAMES, frame)
+            worker.observe(CAMERA, frame, analysis.context)
+
+        def create(camera):
+            calls.append(camera)
+            return Session(drop_frame if len(calls) == 1 else None)
+
+        worker = live_runner.LocationWorker(lambda *args: None, session_factory=create)
+        first = packet()
+        analysis.process(result(), NAMES, first)
+        worker.observe(CAMERA, first, analysis.context)
+        worker.run_once()
+        worker.run_once()
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

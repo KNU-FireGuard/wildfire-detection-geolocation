@@ -52,6 +52,16 @@
 - DEM 다운로드는 `certifi` 인증서 묶음으로 HTTPS를 검증, macOS python.org Python의 `CERTIFICATE_VERIFY_FAILED` 방지 (#68)
 - 설치 명령은 프로젝트 [README](../README.md) 참고
 
+## 실시간 CCTV 위치 추정
+
+- `inference/live_runner.py`에서 Test와 같은 `LocationSession` 사용, 위경도가 있으면 `fixed_pose`가 없어도 능선·DEM 기반 자세 추정 실행
+- 화각은 카메라 설정값 우선, 없으면 기본 60°와 `FOV_DEFAULT_USED` 경고, 기존 54°·66° 대체 자세로 오차 범위 평가
+- 확정 탐지를 위치 없이 먼저 전송하고 별도 작업자가 위치 보완, DEM·자세 준비 실패가 탐지와 heartbeat를 막지 않음
+- 준비 실패는 30·60·120·240·300초 간격으로 최신 프레임 재시도, 이후 최대 300초 간격 유지, 위경도 없음은 생략
+- 큰 장면 변화·해상도 변경·재접속 뒤 연속 10프레임·1.8초 이상 안정 시 이전 고정 자세를 재사용하지 않고 재추정, 단순 프레임 누락에는 같은 자세 유지
+- 준비 상태는 `[live camera=…] location_ready=… mode=… reason=… warnings=… retry_in_s=…` 로그로 확인
+- 점진적인 PTZ·줌 변화의 완전한 감지와 실제 카메라 화각 자동 측정은 미지원
+
 ## 위치 추정 테스트
 
 - 저장소 루트에서 실행

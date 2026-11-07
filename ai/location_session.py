@@ -8,7 +8,8 @@
   2. 고정 자세가 없으면 첫 프레임 능선으로 360° 역산 1회 (화각은 설정값, 없으면 기본 60° + FOV_DEFAULT_USED)
 - bbox는 YOLO 원본 픽셀 xyxy, 목표점은 bbox 아래 중앙 (연기 발생 지점)
 - 반환은 Backend 탐지 JSON의 location_estimation 형식 {latitude, longitude, error_range_m}
-- 이동하는 PTZ 카메라는 실행 중 자세가 바뀌므로 대상 아님 (고정 카메라·고정 프리셋 전제)
+- 세션은 카메라 자세가 일정한 촬영 구간 전제, 연속 이동 중인 PTZ 추적은 미지원
+- 실시간 작업자는 큰 장면 변화·재접속 뒤 새 세션을 만들고 allow_fixed_pose=False로 이전 고정 자세의 재사용 방지
 """
 from __future__ import annotations
 
@@ -25,13 +26,14 @@ FOV_UNCERTAINTY_RATIO = 0.10
 
 
 class LocationSession:
-    def __init__(self, camera: dict, estimator=None):
-        """camera: {"id": DB ID, "name": DB 이름, "lat": 위도, "lon": 경도}"""
+    def __init__(self, camera: dict, estimator=None, *, allow_fixed_pose: bool = True):
+        """camera: {id, name, lat, lon}, allow_fixed_pose=False는 실시간 시점 변경 후 자동 재추정용"""
         if estimator is None:
             from ai.fire_location_estimator import FireLocationEstimator
 
             estimator = FireLocationEstimator()
         self.camera = dict(camera)
+        self.allow_fixed_pose = allow_fixed_pose
         self.estimator = estimator
         self.config = find_camera_config(estimator.camera_configs, camera_id=camera.get("id"), name=camera.get("name"))
         self.status: dict = {"ready": False, "reason": "NOT_PREPARED"}
@@ -46,7 +48,7 @@ class LocationSession:
             self.status = {"ready": False, "reason": "NO_CAMERA_COORDINATES", "warnings": []}
             return self.status
         cfg = self.config
-        if cfg is not None and cfg.get("fixed_pose"):
+        if self.allow_fixed_pose and cfg is not None and cfg.get("fixed_pose"):
             pose = cfg["fixed_pose"]
             tower_h = cfg.get("tower_height_m")
             try:
