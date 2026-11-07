@@ -47,6 +47,48 @@ for (const force of [false, true]) {
   });
 }
 
+for (const phase of ['termination', 'preparation']) {
+  test(`종료 요청 후 ${phase} 대기가 풀려도 새 AI를 실행하지 않는다`, async () => {
+    let items = cameras;
+    let release;
+    let entered;
+    const waiting = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const children = [];
+    const runs = fakeRuns();
+    const monitor = createLiveMonitor({
+      catalog: { list: async () => ({ items }) },
+      canRun: async () => {
+        if (phase === 'preparation' && children.length) { entered(); await gate; }
+        return true;
+      },
+      runManager: runs, finalizeEvents: async () => {}, getToken: () => 'test-token',
+      spawnImpl() {
+        const child = new EventEmitter();
+        child.stdin = new PassThrough();
+        child.kill = () => {
+          if (phase === 'termination' && children.length === 1) {
+            entered();
+            gate.then(() => child.emit('close', 0));
+          } else queueMicrotask(() => child.emit('close', 0));
+        };
+        children.push(child);
+        return child;
+      },
+    });
+    await monitor.start();
+    items = cameras.map(camera => ({ ...camera, streamUrl: `${camera.streamUrl}?new` }));
+    const update = monitor.reconcile();
+    await waiting;
+    const stopping = monitor.stop();
+    release();
+    await Promise.all([update, stopping]);
+    assert.equal(children.length, 1, '종료 요청 후 대체 작업자를 생성하면 안 됩니다.');
+    assert.equal(runs.runs.size, 0);
+    assert.equal(monitor.status().state, 'stopped');
+  });
+}
+
 function fakeRuns() {
   let id = 100;
   const runs = new Map();

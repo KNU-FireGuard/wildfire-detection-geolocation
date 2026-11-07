@@ -124,7 +124,9 @@ function createLiveMonitor({
   async function launch() {
     if (!active) return;
     if (slots.length !== 6) { overall = 'waiting_for_cctv'; return; }
-    if (!resolvedRunnerPath || !await canRun(resolvedRunnerPath)) {
+    const runnable = resolvedRunnerPath && await canRun(resolvedRunnerPath);
+    if (!active) return;
+    if (!runnable) {
       overall = 'waiting_for_ai';
       slots.forEach(slot => { slot.state = 'waiting_for_ai'; });
       return;
@@ -237,7 +239,14 @@ function createLiveMonitor({
   }
 
   return {
-    start, stop: () => serialize(stop), reconcile: () => serialize(reconcile),
+    start,
+    stop: () => {
+      // Block launches immediately, even while a reconciliation is still waiting.
+      active = false;
+      clearTimers();
+      return serialize(stop);
+    },
+    reconcile: () => serialize(reconcile),
     status, recordHeartbeat,
   };
 }
