@@ -1,7 +1,7 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { loginAdmin } from '../api/catalog'
-import { fetchAdminCameras, fetchSmsLogs, updateAlertPhone } from '../api/admin'
+import { fetchAdminCameras, fetchSmsLogs, updateAlertPhone, deleteSmsLogs } from '../api/admin'
 import { useAdminSession } from '../composables/useAdminSession'
 import { formatDetectedAt } from '../utils/eventFormat'
 
@@ -20,6 +20,38 @@ const camerasError = ref('')
 const logs = ref([])
 const logsLoading = ref(false)
 const logsError = ref('')
+const selectedLogs = ref(new Set())
+const logsDeleting = ref(false)
+const deleteNotice = ref('')
+const deleteError = ref('')
+let active = true
+onBeforeUnmount(() => { active = false })
+const allLogsSelected = computed(() => logs.value.length > 0 && logs.value.every(log => selectedLogs.value.has(log.id)))
+function selectLog(id, checked) {
+  const next = new Set(selectedLogs.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedLogs.value = next
+}
+function selectAllLogs(checked) { selectedLogs.value = checked ? new Set(logs.value.map(log => log.id)) : new Set() }
+async function removeSelectedLogs() {
+  if (logsDeleting.value || logsLoading.value || !selectedLogs.value.size) return
+  const ids = [...selectedLogs.value]
+  if (!window.confirm(`선택한 문자 발송 내역 ${ids.length}건을 삭제할까요?`)) return
+  const sessionToken = token.value
+  logsDeleting.value = true
+  deleteNotice.value = ''; deleteError.value = ''
+  try {
+    const result = await deleteSmsLogs(ids, sessionToken)
+    if (!active || token.value !== sessionToken) return
+    const removed = new Set(ids)
+    logs.value = logs.value.filter(log => !removed.has(log.id))
+    selectedLogs.value = new Set()
+    deleteNotice.value = `${result.count}건을 삭제했습니다.`
+  } catch (error) {
+    if (active && token.value === sessionToken && !expire(error)) deleteError.value = error.message
+  } finally { logsDeleting.value = false }
+}
 
 const STATUS = {
   sent: { label: '발송 요청 수락', tone: 'ok' },
@@ -62,12 +94,18 @@ async function loadCameras() {
 }
 
 async function loadLogs() {
+  if (logsDeleting.value || logsLoading.value) return
+  const sessionToken = token.value
   logsLoading.value = true
   logsError.value = ''
   try {
-    logs.value = await fetchSmsLogs(token.value)
+    const items = await fetchSmsLogs(sessionToken)
+    if (!active || token.value !== sessionToken) return
+    logs.value = items
+    const available = new Set(items.map(log => log.id))
+    selectedLogs.value = new Set([...selectedLogs.value].filter(id => available.has(id)))
   } catch (error) {
-    if (!expire(error)) logsError.value = error.message
+    if (active && token.value === sessionToken && !expire(error)) logsError.value = error.message
   } finally {
     logsLoading.value = false
   }
@@ -94,7 +132,7 @@ function logout() {
 }
 
 watch(isLoggedIn, loggedIn => {
-  if (!loggedIn) return
+  if (!loggedIn) { selectedLogs.value = new Set(); deleteNotice.value = ''; deleteError.value = ''; return }
   loadCameras()
   loadLogs()
 }, { immediate: true })
@@ -130,10 +168,9 @@ watch(isLoggedIn, loggedIn => {
         <div v-else class="table-scroll">
           <table>
             <caption class="sr-only">카메라별 알림 번호</caption>
-            <thead><tr><th>ID</th><th>카메라</th><th>구분</th><th>알림 번호</th><th>저장</th></tr></thead>
+            <thead><tr><th>카메라</th><th>구분</th><th>알림 번호</th><th>저장</th></tr></thead>
             <tbody>
               <tr v-for="camera in cameras" :key="camera.id">
-                <td>{{ camera.id }}</td>
                 <td>{{ camera.name }}</td>
                 <td>{{ camera.sourceType === 'live' ? '실시간' : 'Test' }}</td>
                 <td><input v-model="drafts[camera.id]" inputmode="numeric" placeholder="01012345678" :aria-label="`${camera.name} 알림 번호`" @keyup.enter="save(camera)"></td>
@@ -152,20 +189,27 @@ watch(isLoggedIn, loggedIn => {
       <section class="dashboard-panel" aria-label="문자 발송 내역">
         <div class="section-heading">
           <h2>문자 발송 내역</h2>
-          <button type="button" class="secondary-button" :disabled="logsLoading" @click="loadLogs">새로고침</button>
+          <button type="button" class="secondary-button" :disabled="logsLoading || logsDeleting" @click="loadLogs">새로고침</button>
         </div>
         <p class="hint">최근 100건입니다. 발송 요청 수락은 문자 제공자가 요청을 받았다는 뜻이며 단말 수신 확인은 아닙니다.</p>
+        <div class="log-actions">
+          <span>선택 {{ selectedLogs.size }}건</span>
+          <button type="button" class="secondary-button delete-button" :disabled="logsDeleting || logsLoading || !selectedLogs.size" @click="removeSelectedLogs">{{ logsDeleting ? '삭제 중' : '선택 삭제' }}</button>
+        </div>
+        <p v-if="deleteNotice" class="form-ok" role="status">{{ deleteNotice }}</p>
+        <p v-if="deleteError" class="form-error" role="alert">{{ deleteError }}</p>
         <p v-if="logsLoading" role="status">불러오는 중입니다.</p>
         <p v-else-if="logsError" class="form-error" role="alert">{{ logsError }}</p>
         <p v-else-if="!logs.length" class="empty-message">발송 내역이 없습니다.</p>
         <div v-else class="table-scroll">
           <table>
             <caption class="sr-only">문자 발송 내역</caption>
-            <thead><tr><th>시각</th><th>카메라</th><th>번호</th><th>상태</th><th>제공자</th><th>문구</th><th>사유</th></tr></thead>
+            <thead><tr><th><input type="checkbox" aria-label="문자 발송 내역 전체 선택" :checked="allLogsSelected" :indeterminate="selectedLogs.size > 0 && !allLogsSelected" :disabled="logsDeleting" @change="selectAllLogs($event.target.checked)"></th><th>시각</th><th>카메라</th><th>번호</th><th>상태</th><th>제공자</th><th>문구</th><th>사유</th></tr></thead>
             <tbody>
               <tr v-for="log in logs" :key="log.id">
+                <td><input type="checkbox" :aria-label="`${log.cameraName ?? '카메라 정보 없음'} ${formatDetectedAt(log.createdAt)} 발송 내역 선택`" :checked="selectedLogs.has(log.id)" :disabled="logsDeleting" @change="selectLog(log.id, $event.target.checked)"></td>
                 <td class="time-cell">{{ formatDetectedAt(log.createdAt) }}</td>
-                <td>{{ log.cameraName ?? `ID ${log.cameraId}` }}</td>
+                <td>{{ log.cameraName ?? '카메라 정보 없음' }}</td>
                 <td>{{ log.phoneNumber ?? '-' }}</td>
                 <td><span class="badge" :class="STATUS[log.status]?.tone">{{ STATUS[log.status]?.label ?? log.status }}</span></td>
                 <td>{{ log.provider }}</td>
@@ -182,6 +226,9 @@ watch(isLoggedIn, loggedIn => {
 
 <style scoped>
 .admin-page { display: grid; gap: 20px; align-content: start; }
+.log-actions { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+.delete-button { color: var(--fire); border-color: var(--fire); }
+input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
 .page-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.8px; margin: 0; }
 .hint { color: var(--text-3); font-size: 12px; line-height: 1.6; }
