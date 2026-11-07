@@ -21,6 +21,39 @@ const entries = [
   roadsectionid: name,
 }));
 
+for (const pending of [false, true]) {
+  test(`${pending ? '보관 목록 재개' : '신규 갱신'} 중 DB 저장이 끝날 때까지 중복 요청을 막는다`, async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'fireguard-lock-'));
+    const cachePath = path.join(directory, 'cctv.json');
+    const items = normalizeItsResponse({ response: { data: entries } });
+    let release;
+    let entered;
+    const saving = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const catalog = createCctvCatalog({
+      cachePath, client: { fetchCctvs: async () => items },
+      saveCameras: async selected => { entered(); await gate; return selected; },
+    });
+    if (pending) await fs.writeFile(`${cachePath}.pending`, JSON.stringify({
+      refreshedAt: new Date().toISOString(), items: items.slice(0, 6),
+    }));
+    const refresh = catalog.refresh();
+    try {
+      await saving;
+      const duplicate = catalog.refresh();
+      duplicate.catch(() => {});
+      await assert.rejects(Promise.race([
+        duplicate,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('중복 요청이 저장에 진입함')), 50)),
+      ]), /이미 진행 중/);
+    } finally {
+      release();
+      await refresh;
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+}
+
 test('ITS 응답에서 공식 유형 1의 HLS 영상과 유효한 좌표만 추출한다', () => {
   const cameras = normalizeItsResponse({ response: { data: [
     entries[0],

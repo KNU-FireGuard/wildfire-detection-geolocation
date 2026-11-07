@@ -41,6 +41,25 @@ function createLiveMonitor({
   let restartCount = 0;
   let slots = [];
   let overall = 'stopped';
+  let lifecycle = Promise.resolve();
+
+  function serialize(operation) {
+    const result = lifecycle.then(operation);
+    lifecycle = result.catch(() => {});
+    return result;
+  }
+
+  function terminateWorker(child) {
+    return new Promise(resolve => {
+      // Register before signalling so a quick exit cannot be missed.
+      const timer = setTimeout(() => child.kill('SIGKILL'), terminationGraceMs);
+      child.once('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      child.kill('SIGTERM');
+    });
+  }
 
   function clearTimers() {
     if (restartTimer) clearTimeout(restartTimer);
@@ -186,7 +205,7 @@ function createLiveMonitor({
     if (worker) {
       const old = worker;
       worker = null;
-      old.kill('SIGTERM');
+      await terminateWorker(old);
       for (const slot of slots) {
         await closeRun(slot, 'CCTV 목록이 갱신되었습니다.');
       }
@@ -200,7 +219,7 @@ function createLiveMonitor({
   async function start() {
     if (active) return status();
     active = true;
-    await reconcile();
+    await serialize(reconcile);
     return status();
   }
 
@@ -209,7 +228,7 @@ function createLiveMonitor({
     clearTimers();
     const child = worker;
     worker = null;
-    child?.kill('SIGTERM');
+    if (child) await terminateWorker(child);
     for (const slot of slots) {
       await closeRun(slot, 'Backend 서버가 종료되었습니다.');
       slot.state = 'stopped';
@@ -217,7 +236,10 @@ function createLiveMonitor({
     overall = 'stopped';
   }
 
-  return { start, stop, reconcile, status, recordHeartbeat };
+  return {
+    start, stop: () => serialize(stop), reconcile: () => serialize(reconcile),
+    status, recordHeartbeat,
+  };
 }
 
 module.exports = { createLiveMonitor };

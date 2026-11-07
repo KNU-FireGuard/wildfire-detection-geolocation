@@ -9,6 +9,44 @@ const cameras = Array.from({ length: 6 }, (_, index) => ({
   name: `CCTV ${index + 1}`, streamUrl: `http://video.example.test/${index + 1}.m3u8`,
 }));
 
+for (const force of [false, true]) {
+  test(`주소 갱신은 이전 작업자의 ${force ? '강제' : '정상'} 종료를 기다린다`, async () => {
+    let items = cameras;
+    const children = [];
+    const monitor = createLiveMonitor({
+      catalog: { list: async () => ({ items }) },
+      canRun: async () => true, runManager: fakeRuns(),
+      finalizeEvents: async () => {}, getToken: () => 'test-token',
+      terminationGraceMs: 10,
+      spawnImpl() {
+        const child = new EventEmitter();
+        child.stdin = new PassThrough();
+        child.signals = [];
+        child.kill = signal => {
+          child.signals.push(signal);
+          if (signal === 'SIGKILL' || children.length > 1) {
+            queueMicrotask(() => child.emit('close', 0));
+          }
+        };
+        children.push(child);
+        return child;
+      },
+    });
+    await monitor.start();
+    items = cameras.map(camera => ({ ...camera, streamUrl: `${camera.streamUrl}?new` }));
+    const update = monitor.reconcile();
+    const concurrentUpdate = monitor.reconcile();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(children.length, 1);
+    assert.deepEqual(children[0].signals, ['SIGTERM']);
+    if (!force) children[0].emit('close', 0);
+    await Promise.all([update, concurrentUpdate]);
+    assert.equal(children.length, 2);
+    assert.deepEqual(children[0].signals, force ? ['SIGTERM', 'SIGKILL'] : ['SIGTERM']);
+    await monitor.stop();
+  });
+}
+
 function fakeRuns() {
   let id = 100;
   const runs = new Map();
@@ -54,7 +92,7 @@ test('Backend가 만든 실행 ID와 6개 영상 주소를 한 AI 작업자에 �
       child.stdin = new PassThrough();
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
-      child.kill = () => { child.killed = true; };
+      child.kill = () => { child.killed = true; queueMicrotask(() => child.emit('close', 0)); };
       child.input = '';
       child.stdin.on('data', chunk => { child.input += chunk; });
       children.push({ child, args, options });
@@ -123,7 +161,7 @@ test('AI 프로세스 실행이 즉시 실패해도 재시도한다', async () =
       child.stdin = new PassThrough();
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
-      child.kill = () => {};
+      child.kill = () => { queueMicrotask(() => child.emit('close', 0)); };
       queueMicrotask(() => child.emit('spawn'));
       return child;
     },
