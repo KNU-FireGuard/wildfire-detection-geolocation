@@ -7,7 +7,7 @@
 ## 준비물
 
 - Node.js `^20.19.0 || >=22.12.0`과 npm
-- Python과 pip
+- Python 3.11과 pip 권장, `pip install`은 패키지만 설치하며 Python 버전은 변경하지 않음
 - Docker와 Docker Compose
 - [Git LFS](https://git-lfs.com): 저장소를 내려받기 전에 `git lfs install` 실행, 설치하지 않으면 모델 가중치(`.pt`)가 포인터 파일로 받아져 분석이 실패
 
@@ -33,19 +33,25 @@ if not exist ".env" copy ".env.example" ".env"
 - 초기 관리자 비밀번호는 12자 이상으로 설정
 - AI 모델은 기본값 `ai/weights/yolo26s_final/weights/best.pt`를 사용, 다른 가중치를 쓰려면 `.env`에 `AI_MODEL_PATH`(저장소 루트 기준 경로) 설정
 
-카메라 Test 기능을 사용하려면 AI 패키지 설치
+카메라 Test·실시간 분석에 사용할 Python 버전을 확인한 뒤 같은 실행 파일로 AI 패키지 설치
 
 ### Bash
 
 ```bash
+python3 --version
 python3 -m pip install -r ai/requirements.txt
 ```
 
 ### Windows CMD
 
 ```cmd
+python --version
 python -m pip install -r ai/requirements.txt
 ```
+
+- Backend는 기본적으로 macOS·Linux에서 `python3`, Windows에서 `python` 실행
+- 여러 Python이나 가상환경을 사용하면 루트 `.env`의 `PYTHON_EXECUTABLE`에 패키지를 설치한 Python 실행 파일의 절대 경로를 설정한 뒤 Backend 재시작
+- 경로 확인: macOS·Linux는 `python3 -c "import sys; print(sys.executable)"`, Windows는 `python -c "import sys; print(sys.executable)"`
 
 ```text
 docker compose up -d db
