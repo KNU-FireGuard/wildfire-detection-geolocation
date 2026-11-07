@@ -7,6 +7,13 @@ const smoke = (id, overrides = {}) => ({ id, cameraId: 10, type: 'smoke', status
   alerting: false, detectedAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now).toISOString(), ...overrides })
 const fire = (id, overrides = {}) => ({ ...smoke(id), type: 'fire', alerting: true, ...overrides })
 
+test('브라우저 시각이 달라도 서버가 알림 중인 연기는 표시하고 만료된 연기는 제외한다', () => {
+  const events = [smoke(1, { popupAlerting: true }), smoke(2, { popupAlerting: false, cameraId: 11 })]
+  const wrongClock = now + 3 * 60 * 60 * 1000
+  assert.deepEqual(alerts.findNewDetectionEvents(new Set(), events, wrongClock).map(event => event.id), [1])
+  assert.deepEqual(alerts.reconcileDetectionAlerts(events, events, [], wrongClock).map(event => event.id), [1])
+})
+
 test('연기는 화재 전용 alerting 값이 false여도 새 탐지 팝업에 포함하고 첫 조회는 생략한다', () => {
   const events = [smoke(1), fire(2)]
   assert.deepEqual(alerts.findNewDetectionEvents(null, events, now), [])

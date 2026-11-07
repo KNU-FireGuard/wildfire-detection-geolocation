@@ -29,6 +29,18 @@ for (const resource of ['cameras', 'videos', 'events']) {
     assert.deepEqual(await response.json(), { items: [], limit: 20, offset: 5 });
   });
 }
+test('이벤트 목록은 화재·연기 팝업 대상을 DB 시각으로 계산해 반환한다', async () => {
+  query = async sql => {
+    assert.match(sql, /e\.class IN \('fire', 'smoke'\)/);
+    assert.match(sql, /AS is_popup_alerting/);
+    assert.match(sql, /CURRENT_TIMESTAMP - INTERVAL '30 minutes'/);
+    return { rows: [{ id: 1, class: 'smoke', is_alerting: false, is_popup_alerting: true }] };
+  };
+  const response = await fetch(`${base}/api/events`);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).items[0].is_popup_alerting, true);
+});
+
 test('list serializes nullable fields and UTC dates', async () => {
   query = async (sql, params) => {
     assert.deepEqual(params, [50, 0]);

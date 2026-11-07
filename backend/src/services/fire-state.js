@@ -13,4 +13,8 @@ function alertingSql(alias = 'e') {
   return `(${alias}.class = 'fire' AND ${alias}.acknowledged_at IS NULL AND ${lastDetectedSql(alias)} > CURRENT_TIMESTAMP - ${WINDOW})`;
 }
 
-module.exports = { FIRE_ACTIVE_MINUTES, WINDOW, lastDetectedSql, alertingSql };
+function popupAlertingSql(alias = 'e') {
+  return `(${alias}.class IN ('fire', 'smoke') AND ${alias}.acknowledged_at IS NULL AND ${lastDetectedSql(alias)} > CURRENT_TIMESTAMP - ${WINDOW})`;
+}
+
+module.exports = { FIRE_ACTIVE_MINUTES, WINDOW, lastDetectedSql, alertingSql, popupAlertingSql };

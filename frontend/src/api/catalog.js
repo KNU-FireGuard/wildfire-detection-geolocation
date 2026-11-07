@@ -41,6 +41,7 @@ function normalizeEvent(event) {
     acknowledgedAt: event.acknowledged_at ?? null,
     // 서버가 계산한 값: 확인하지 않았고 마지막 탐지가 30분 안인 화재 이벤트
     alerting: event.is_alerting === true,
+    popupAlerting: typeof event.is_popup_alerting === 'boolean' ? event.is_popup_alerting : null,
     status: event.acknowledged_at ? 'CONFIRMED' : 'UNCONFIRMED',
   }
 }

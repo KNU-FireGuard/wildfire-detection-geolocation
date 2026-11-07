@@ -1,11 +1,12 @@
 const pool = require('../config/db');
 const fs = require('node:fs');
-const { alertingSql } = require('../services/fire-state');
+const { alertingSql, popupAlertingSql } = require('../services/fire-state');
 const path = require('node:path');
 
 const EVENT_COLUMNS = `e.id, e.video_id, COALESCE(e.camera_id, v.camera_id) AS camera_id, e.class, e.started_at,
   e.ended_at, e.max_confidence, e.estimated_latitude, e.estimated_longitude,
-  e.error_range_m, e.acknowledged_at, ${alertingSql('e')} AS is_alerting, e.created_at, e.updated_at`;
+  e.error_range_m, e.acknowledged_at, ${alertingSql('e')} AS is_alerting,
+  ${popupAlertingSql('e')} AS is_popup_alerting, e.created_at, e.updated_at`;
 const EVENT_FROM = 'FROM detection_events e LEFT JOIN videos v ON v.id = e.video_id';
 
 function pagination(query) {
