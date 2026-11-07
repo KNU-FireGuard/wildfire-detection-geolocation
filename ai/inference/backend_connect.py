@@ -4,6 +4,7 @@ import os
 import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 import requests
@@ -13,6 +14,105 @@ AI_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = AI_DIR / "weights" / "yolo26s_final" / "weights" / "best.pt"
 BOUNDARY = "frame"
 FRAME_QUEUE_SIZE = 2
+
+
+class CaptureSchedule:
+    def __init__(self):
+        self.last_saved = {}
+
+    def due(self, class_name, timestamp):
+        previous = self.last_saved.get(class_name)
+        return previous is None or round(timestamp * 1000) - previous >= 5000
+
+    def saved(self, class_name, timestamp):
+        self.last_saved[class_name] = round(timestamp * 1000)
+
+
+class CaptureUploader:
+    """Bounded, best-effort JPEG worker; inference never waits for HTTP upload."""
+    def __init__(self, args, headers, max_pending=2, retry_delay=5, max_age=15,
+                 clock=time.monotonic, post=None, autostart=True):
+        self.args, self.headers = args, dict(headers)
+        self.pending = queue.Queue(maxsize=max_pending)
+        self.schedule = CaptureSchedule()
+        self.retry_after = {}
+        self.retry_delay, self.max_age = retry_delay, max_age
+        self.clock, self.post = clock, post or requests.post
+        self.lock = threading.Lock()
+        self.closed = False
+        self.abort = threading.Event()
+        self.worker = None
+        if autostart:
+            self.worker = threading.Thread(target=self._run, daemon=True)
+            self.worker.start()
+
+    def submit(self, class_name, timestamp, result):
+        with self.lock:
+            if (self.closed or self.pending.full()
+                    or self.clock() < self.retry_after.get(class_name, 0)
+                    or not self.schedule.due(class_name, timestamp)):
+                return False
+            try:
+                # Results.cpu() detaches GPU boxes; copy pixels before producer advances.
+                snapshot = result.cpu() if hasattr(result, 'cpu') else result
+                if hasattr(snapshot, 'orig_img'):
+                    snapshot.orig_img = snapshot.orig_img.copy()
+                self.pending.put_nowait((class_name, round(timestamp * 1000), snapshot, self.clock()))
+                self.schedule.saved(class_name, timestamp)
+                return True
+            except Exception as exc:
+                self.retry_after[class_name] = self.clock() + self.retry_delay
+                print(f"Capture queue failed: {type(exc).__name__}: {exc}", flush=True)
+                return False
+
+    def run_once(self, timeout=0):
+        try:
+            class_name, timestamp_ms, result, queued_at = self.pending.get(timeout=timeout)
+        except queue.Empty:
+            return False
+        try:
+            with self.lock:
+                retrying = self.clock() < self.retry_after.get(class_name, 0)
+            if retrying or self.clock() - queued_at > self.max_age:
+                return True
+            try:
+                jpeg = encode_frame(result, self.args.stream_width, self.args.jpeg_quality)
+                if self.abort.is_set() or self.clock() - queued_at > self.max_age:
+                    return True
+                response = self.post(
+                    f"{self.args.capture_url}/{class_name}",
+                    headers={**self.headers, 'Content-Type': 'image/jpeg', 'X-Video-Time-Ms': str(timestamp_ms)},
+                    data=jpeg, timeout=(5, 10),
+                )
+                response.raise_for_status()
+            except Exception as exc:
+                with self.lock:
+                    self.retry_after[class_name] = self.clock() + self.retry_delay
+                print(f"Capture save failed: {type(exc).__name__}: {exc}", flush=True)
+            return True
+        finally:
+            self.pending.task_done()
+
+    def _run(self):
+        while not self.abort.is_set():
+            if self.closed and self.pending.empty():
+                return
+            self.run_once(timeout=0.1)
+
+    def close(self, timeout=20):
+        with self.lock:
+            self.closed = True
+        if self.worker is not None:
+            self.worker.join(timeout)
+            if self.worker.is_alive():
+                self.abort.set()
+                print('Capture drain timed out; remaining captures may be omitted', flush=True)
+        while True:
+            try:
+                self.pending.get_nowait()
+                self.pending.task_done()
+            except queue.Empty:
+                break
 
 if str(AI_DIR.parent) not in sys.path:
     sys.path.insert(0, str(AI_DIR.parent))
@@ -36,6 +136,7 @@ def parse_args(argv=None):
     parser.add_argument("--source-path", type=Path, required=True)
     parser.add_argument("--video-url", required=True, help="Annotated MJPEG upload URL")
     parser.add_argument("--result-url", required=True, help="Detection JSON API URL")
+    parser.add_argument("--capture-url", help="If set, save confirmed JPEG captures instead of uploading MJPEG")
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
     parser.add_argument("--confidence", type=float, default=0.3, help="Minimum fire confidence")
     parser.add_argument("--smoke-confidence", type=float, default=0.5, help="Minimum smoke confidence")
@@ -164,7 +265,8 @@ def frame_detections(result, names, run_id, camera_id, session, fire_confidence=
     return payloads
 
 
-def send_detections(model, result, args, headers, detection_count, session=None, gate=None, timestamp=None):
+def send_detections(model, result, args, headers, detection_count, session=None, gate=None, timestamp=None,
+                    capture_uploader=None):
     for payload in frame_detections(
         result, model.names, args.run_id, args.camera_id, session,
         fire_confidence=args.confidence, smoke_confidence=args.smoke_confidence,
@@ -178,6 +280,9 @@ def send_detections(model, result, args, headers, detection_count, session=None,
         )
         response.raise_for_status()
         detection_count[0] += 1
+        class_name = payload['detection']['class']
+        if capture_uploader is not None:
+            capture_uploader.submit(class_name, timestamp, result)
 
 
 def filter_result_boxes(result, names, fire_confidence, smoke_confidence):
@@ -228,6 +333,8 @@ def sampled_video_frames(source_path, stop):
 def infer_frames(model, args, headers, detection_count, frames, stop, session=None):
     # Producer thread: decode and inference run here while the consumer encodes and uploads.
     def put(item):
+        if frames is None:
+            return True
         while not stop.is_set():
             try:
                 frames.put(item, timeout=0.5)
@@ -236,10 +343,13 @@ def infer_frames(model, args, headers, detection_count, frames, stop, session=No
                 continue
         return False
 
+    capture_uploader = None
     try:
         import cv2
 
         gate = TemporalDetectionGate()
+        if getattr(args, 'capture_url', None):
+            capture_uploader = CaptureUploader(args, headers)
         prepared = False
         previous_scene = None
         previous_shape = None
@@ -273,12 +383,17 @@ def infer_frames(model, args, headers, detection_count, frames, stop, session=No
                 status = prepare_location(session, result)
                 if status is None or not status.get("ready"):
                     session = None
-            send_detections(model, result, args, headers, detection_count, session, gate, timestamp)
+            send_detections(model, result, args, headers, detection_count, session, gate, timestamp, capture_uploader)
             if not put(result):
                 return
         put(None)
     except BaseException as error:
+        if frames is None:
+            raise
         put(error)
+    finally:
+        if capture_uploader is not None:
+            capture_uploader.close()
 
 
 def encode_frame(result, stream_width, jpeg_quality):
@@ -344,6 +459,11 @@ def main():
     model = YOLO(str(args.model_path))
     session = create_location_session(args)
     detection_count = [0]
+
+    if args.capture_url:
+        infer_frames(model, args, headers, detection_count, None, threading.Event(), session)
+        print(f"Run ID: {args.run_id}; detections sent: {detection_count[0]}; capture analysis completed", flush=True)
+        return
 
     response = requests.post(
         args.video_url,

@@ -13,6 +13,15 @@ erDiagram
     cameras |o--o{ detection_events : live_source
     cameras |o--o{ sms_logs : alert_target
     detection_events |o--o{ sms_logs : trigger
+    detection_events ||--o{ event_captures : evidence
+
+    event_captures {
+        integer id PK
+        integer event_id FK
+        bigint video_time_ms
+        bytea jpeg
+        timestamptz created_at
+    }
 
     cameras {
         integer id PK
@@ -184,3 +193,14 @@ erDiagram
 - `sent`는 업체의 요청 수락이며 단말 수신 확인은 아님
 - 번호는 발송 당시 값을 보관하므로 이후 카메라 번호를 바꿔도 기록은 유지
 - 기존 DB의 `sms_recipients`는 더 이상 사용하지 않으며 삭제하지 않고 유지
+
+## event_captures · 확정 탐지 캡처
+
+- 테스트 영상의 확정 프레임 JPEG와 원본 영상 시각을 이벤트에 연결, 기존 이벤트 집계·확인·SMS 규칙은 유지
+- `id`: 정수 기본 키, `event_id`: 탐지 이벤트 외래 키, 이벤트 삭제 시 함께 삭제
+- `video_time_ms`: 원본 영상 시작 기준 밀리초, 0 이상, `(event_id, video_time_ms)` 유일
+- `jpeg`: 4바이트 이상·2MiB 이하 BYTEA, 조회 API는 이미지 본문을 별도 제공
+- `created_at`: DB 저장 시각, 영상 시각과 구분
+- 저장 트랜잭션에서 부모 이벤트 행 잠금 후 마지막 캡처와 최소 5000ms 간격 검증, 같은 시각·역행 업로드는 추가 저장하지 않음
+- 기존 DB 적용: `sql/003-event-captures.sql`, 신규 DB: `sql/init.sql`
+- JPEG 보관은 DB 용량을 사용하며 자동 만료는 없음, 향후 장기 운영 시 보존 기간과 외부 저장소 전환을 별도로 결정

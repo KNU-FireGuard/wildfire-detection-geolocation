@@ -17,7 +17,7 @@ for (const force of [false, true]) {
       catalog: { list: async () => ({ items }) },
       canRun: async () => true, runManager: fakeRuns(),
       finalizeEvents: async () => {}, getToken: () => 'test-token',
-      terminationGraceMs: 10,
+      terminationGraceMs: 1000,
       spawnImpl() {
         const child = new EventEmitter();
         child.stdin = new PassThrough();

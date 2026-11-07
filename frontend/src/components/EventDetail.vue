@@ -1,5 +1,7 @@
 ﻿<script setup>
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import RecordedVideo from './RecordedVideo.vue'
+import EventCaptures from './EventCaptures.vue'
 import DashboardIcon from './DashboardIcon.vue'
 import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
 import { errorRangeDisplay } from '../maps/naverScene'
@@ -14,10 +16,26 @@ const props = defineProps({
   mirror: { type: Boolean, default: false },
   closable: { type: Boolean, default: false },
 })
-const emit = defineEmits(['test-progress', 'close'])
+const emit = defineEmits(['test-progress', 'test-started', 'close'])
 const showDetails = ref(false)
 const rangeDisplay = computed(() => errorRangeDisplay(props.event?.estimatedLocation))
-const testFrameUrl = ref('')
+const activeVideoId = ref(null)
+const playbackPosition = ref(0)
+const playbackSequence = ref(0)
+const testVideoId = computed(() => activeVideoId.value ?? props.event?.videoId
+  ?? props.videos.find(video => video.camera_id === props.camera?.id)?.id ?? null)
+watch(() => props.camera?.id, () => { activeVideoId.value = null; playbackPosition.value = 0; playbackSequence.value++ })
+function startPlayback(run) {
+  activeVideoId.value = run.video_id
+  playbackPosition.value = 0
+  playbackSequence.value++
+  emit('test-started', run)
+}
+function seekCapture(seconds) {
+  activeVideoId.value = props.event?.videoId ?? testVideoId.value
+  playbackPosition.value = seconds
+  playbackSequence.value++
+}
 const cameraStatusLabel = computed(() => {
   if (props.camera?.sourceType === 'live') return ({
     running: 'AI 감시 중', starting: 'AI 시작 중', restarting: 'AI 재시작 중',
@@ -43,11 +61,11 @@ const cameraStatusLabel = computed(() => {
         <LiveVideo v-else :key="camera.id" :url="camera.streamUrl" />
       </template>
       <div v-else-if="camera?.sourceType === 'live'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>실시간 영상 주소가 없습니다.</strong><p>CCTV 목록을 갱신한 뒤 다시 확인하세요.</p></div>
-      <img v-else-if="camera?.sourceType === 'test' && testFrameUrl" class="test-frame" :src="testFrameUrl" alt="AI 탐지 분석 영상">
-      <div v-else-if="camera?.sourceType === 'test'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>Test 분석을 시작하면 탐지 영상이 표시됩니다.</strong></div>
-      <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong></div>
+      <RecordedVideo v-else-if="camera?.sourceType === 'test' && testVideoId" :video-id="testVideoId" :position="playbackPosition" :sequence="playbackSequence" />
+      <div v-else-if="camera?.sourceType === 'test'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>Test 분석을 시작하면 원본 영상을 재생합니다.</strong><p>확정 탐지는 아래 캡처에서 확인할 수 있습니다.</p></div>
+      <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong><p>data/videos에 원본 영상을 넣고 카메라에 연결해 주세요.</p></div>
     </div>
-    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" @frame="testFrameUrl = $event" @events-updated="emit('test-progress')" />
+    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" @started="startPlayback" @events-updated="emit('test-progress')" />
     <div class="event-info" aria-live="polite">
       <div class="info-heading"><h3>탐지 이벤트 정보</h3><span v-if="event" class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span></div>
       <p v-if="!event" class="empty-message">이벤트를 선택하면 상세 정보를 확인할 수 있습니다.</p>
@@ -59,6 +77,7 @@ const cameraStatusLabel = computed(() => {
           <dt>추정 위치</dt><dd>{{ event.estimatedLocation ? '위치 추정 완료' : '위치 추정 정보 없음' }}</dd>
         </dl>
         <button type="button" class="primary-button detail-toggle" :aria-expanded="showDetails" aria-controls="extended-detail" @click="showDetails = !showDetails"><DashboardIcon name="bell" :size="18" />{{ showDetails ? '상세 정보 접기' : '상세 정보 보기' }}<DashboardIcon name="arrow" :size="18" /></button>
+        <EventCaptures v-if="event.videoId" :event-id="event.id" :latest-capture="event.latestCapture" @seek="seekCapture" />
         <div v-if="showDetails" id="extended-detail" class="extended-detail">
           <h4>Camera 정보</h4>
           <dl v-if="camera" class="extended-info">

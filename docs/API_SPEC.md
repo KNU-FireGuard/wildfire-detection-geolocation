@@ -167,6 +167,8 @@
 - Test 작업자는 영상 시각 기준 5fps로 분석하고 불 0.3·연기 0.5 confidence 기준을 각각 적용
 - 같은 클래스·박스 IoU 0.2 이상의 영역을 연결해 최근 20프레임 중 16회 이상 탐지 시 기존 탐지 JSON 전송, 첫 20프레임 이전에는 전송하지 않음
 - 확정 후에도 현재 프레임 탐지와 16/20 조건을 만족할 때만 갱신 전송, Backend의 이벤트 집계·fire 문자 발송 규칙은 동일
+- 현재 Test 화면은 원본 `GET /videos/:video_id/stream`을 재생하고 확정 탐지는 캡처로 표시, 분석 속도와 원본 재생·일시정지는 독립적
+- 이벤트 목록·상세·확인 응답에 `latest_capture` 추가: 캡처 없으면 `null`, 있으면 `{ "id": 1, "video_time_ms": 3800, "image_url": "/api/event-captures/1/image" }`
 
 ### `POST /cameras/:camera_id/test-runs`
 
@@ -183,7 +185,9 @@
 }
 ```
 
-- AI 프로세스 인자: `--run-id`, `--camera-id`, `--source-path`, `--video-url`, `--result-url`, `--model-path`, `--camera-name`
+- AI 프로세스 인자: `--run-id`, `--camera-id`, `--source-path`, `--video-url`, `--result-url`, `--capture-url`, `--model-path`, `--camera-name`
+- `--capture-url`이 있으면 MJPEG 업로드 대신 확정 JPEG를 저장, 성공 종료는 MJPEG 수신 여부와 관계없이 `completed`
+- `stream_url`과 아래 MJPEG API는 이전 작업자 호환용으로 유지하며 현재 Frontend는 연결하지 않음
 - 카메라 DB 위경도가 있으면 `--camera-lat`, `--camera-lon` 추가, 없으면 생략하고 AI는 `location_estimation`을 `null`로 전송
 
 ### `GET /test-runs/:run_id/stream`
@@ -206,7 +210,35 @@
 - Body: `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {bytes}\r\n\r\n{JPEG bytes}\r\n` 반복
 - 성공 `200` `{ "accepted": true }`
 
-### `POST /detections`
+### 테스트 캡처 기록
+
+- 테스트 캡처는 탐지 JSON 수락 후 별도 업로드하며 실패해도 이미 저장된 이벤트를 취소하지 않음
+- JPEG 생성·업로드는 별도 작업자에서 실행, 대기열은 최대 2건이고 가득 차면 추가 캡처를 생략해 후속 분석 대기 방지
+- 실패 후 같은 클래스의 캡처는 실제 경과 시간 기준 5초 동안 추가 시도를 제한, 오래 대기한 캡처(15초 초과)는 생략
+- 영상 종료 시 최대 20초 동안 남은 캡처 업로드 대기, 혼잡·장애·종료 제한으로 일부 캡처가 누락될 수 있으며 탐지 이벤트는 유지
+
+### `POST /test-runs/:run_id/captures/:class_name`
+
+- AI 콜백 토큰 필요, `class_name`은 `fire` 또는 `smoke`, 실행 중인 테스트의 해당 클래스 확정 이벤트에만 저장
+- Header: `Content-Type: image/jpeg`, `X-AI-Token`, `X-Video-Time-Ms`(0 이상 안전 정수, 원본 영상 기준 밀리초)
+- Body: JPEG 바이너리, 최대 2MiB, JPEG 시작·종료 마커 검증
+- 최초 확정 캡처 저장, 이후 이전 저장 시각보다 5000ms 이상 뒤인 확정 캡처만 추가
+- `201` `{ "item": { "id": 1, "event_id": 9, "video_time_ms": 3800, "created_at": "...", "image_url": "/api/event-captures/1/image" } }`
+- 중복·간격 미달·역행은 `200` `{ "item": null }`, 잘못된 요청 `400`, 인증 실패 `401`, 실행 없음 `404`, 실행 종료·확정 이벤트 없음 `409`, 용량 초과 `413`
+
+### `GET /events/:id/captures`
+
+- 공개 조회, 기존 `limit`(1~100)·`offset` 페이지 규칙 사용
+- 선택 `before_time_ms`: 해당 영상 시각보다 이전의 캡처만 조회, Frontend는 새 캡처 추가 중에도 누락 없이 과거 기록을 볼 수 있도록 이 커서 사용
+- 최신 영상 시각 순으로 `{ "items": [캡처 메타데이터], "limit": 20, "offset": 0 }`, 이미지 본문 제외, 캡처 없으면 빈 배열
+- Frontend는 최신 20건을 조회하고 시간순으로 배치, 이전 캡처는 추가 조회, 선택하면 연결된 원본 해당 시점 재생
+- 이전 기록을 펼치는 동안 자동 갱신을 멈추고 `최신 캡처 보기`로 최신 20건 복귀
+
+### `GET /event-captures/:id/image`
+
+- 공개 조회, `200 image/jpeg`, `X-Content-Type-Options: nosniff`, 유효하지 않은 ID `400`, 이미지 없음 `404`
+
+### 탐지 JSON · `POST /detections`
 
 - 탐지 결과 주소: `http://127.0.0.1:3000/api/detections`
 - Header: `Content-Type: application/json`

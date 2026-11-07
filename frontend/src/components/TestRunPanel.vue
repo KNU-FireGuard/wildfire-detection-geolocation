@@ -1,58 +1,26 @@
 <script setup>
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { fetchTestRunStatus, openTestRunStream, startTestRun } from '../api/catalog'
-import { createMjpegParser } from '../utils/mjpeg'
+import { fetchTestRunStatus, startTestRun } from '../api/catalog'
 
 const props = defineProps({ cameraId: { type: Number, required: true } })
-const emit = defineEmits(['frame', 'events-updated'])
+const emit = defineEmits(['started', 'events-updated'])
 const busy = ref(false)
 const status = ref('')
 const error = ref('')
-const frameUrl = ref('')
 let timer
-let streamController
 let generation = 0
 
 function cleanup() {
   generation++
   clearInterval(timer)
   timer = null
-  streamController?.abort()
-  streamController = null
-  if (frameUrl.value) URL.revokeObjectURL(frameUrl.value)
-  frameUrl.value = ''
   status.value = ''
   error.value = ''
   busy.value = false
 }
 
-watch(frameUrl, url => emit('frame', url))
 watch(() => props.cameraId, cleanup)
-onBeforeUnmount(() => { cleanup(); emit('frame', '') })
-
-async function readStream(url, current) {
-  const controller = new AbortController()
-  streamController = controller
-  try {
-    const response = await openTestRunStream(url, controller.signal)
-    const parser = createMjpegParser(frame => {
-      if (current !== generation) return
-      const next = URL.createObjectURL(new Blob([frame], { type: 'image/jpeg' }))
-      if (frameUrl.value) URL.revokeObjectURL(frameUrl.value)
-      frameUrl.value = next
-    })
-    const reader = response.body.getReader()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      parser.push(value)
-    }
-  } catch (cause) {
-    if (current === generation && !controller.signal.aborted && status.value !== 'completed') error.value = cause.message
-  } finally {
-    if (streamController === controller) streamController = null
-  }
-}
+onBeforeUnmount(cleanup)
 
 async function beginTest() {
   if (busy.value || status.value === 'ready' || status.value === 'running') return
@@ -64,7 +32,7 @@ async function beginTest() {
     const run = await startTestRun(cameraId)
     if (current !== generation || cameraId !== props.cameraId) return
     status.value = run.status
-    void readStream(run.stream_url, current)
+    emit('started', run)
     timer = setInterval(async () => {
       if (current !== generation) return
       try {
@@ -97,6 +65,7 @@ async function beginTest() {
     <button type="button" class="primary-button" :disabled="busy || status === 'ready' || status === 'running'" @click="beginTest">{{ busy ? '시작 중…' : 'Test 분석 시작' }}</button>
     <p v-if="status" role="status">분석 상태: {{ ({ ready: '준비 중', running: '진행 중', completed: '완료', failed: '실패' })[status] }}</p>
     <p v-if="error" class="test-error" role="alert">{{ error }}</p>
+    <p>원본 영상은 별도로 재생되며 확정 탐지는 캡처로 기록됩니다. 분석 진행은 영상 재생·일시정지와 독립적입니다.</p>
   </section>
 </template>
 

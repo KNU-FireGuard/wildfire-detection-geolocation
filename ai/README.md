@@ -35,7 +35,7 @@
 | `yolo26n_fire_50/weights/best.pt` | 초기 실험 모델의 최적 가중치 |
 | `yolo26n_fire_50/weights/last.pt` | 마지막 epoch 가중치, 학습 재개용 |
 | `inference/test.py` | 고정된 `ai/test.mp4`를 추론하는 독립 테스트 코드, Backend 연동용 CLI 아님 |
-| `inference/backend_connect.py` | Backend가 실행하는 CLI, MJPEG 영상과 탐지 JSON 전송 |
+| `inference/backend_connect.py` | Backend가 실행하는 CLI, 탐지 JSON과 확정 JPEG 캡처 전송, `--capture-url` 미지정 시 기존 MJPEG 호환 모드 |
 | `args.yaml` | 학습 설정 |
 | `results.csv`, `results.png` | 학습 지표와 그래프 |
 | `BoxF1_curve.png`, `BoxP_curve.png`, `BoxPR_curve.png`, `BoxR_curve.png` | 성능 곡선 |
