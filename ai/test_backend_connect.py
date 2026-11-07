@@ -5,6 +5,8 @@ AI 실행 코드의 위치 추정 연결 테스트 (#60)
 """
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 from ai.inference import backend_connect as bc
@@ -79,6 +81,32 @@ class DetectionPayloadTests(unittest.TestCase):
 
 
 class FrameDetectionsTests(unittest.TestCase):
+    def test_class_confidence_boundaries(self):
+        result = _Result([
+            _Box(0, 0.299, [1, 1, 2, 2]), _Box(0, 0.3, [1, 1, 2, 2]),
+            _Box(1, 0.499, [1, 1, 2, 2]), _Box(1, 0.5, [1, 1, 2, 2]),
+        ])
+        payloads = bc.frame_detections(result, NAMES, 1, 2, None)
+        self.assertEqual([(p["detection"]["class"], p["detection"]["confidence"]) for p in payloads],
+                         [("fire", 0.3), ("smoke", 0.5)])
+
+    def test_callback_and_location_only_after_confirmation(self):
+        args = SimpleNamespace(run_id=1, camera_id=2, confidence=0.3, smoke_confidence=0.5, result_url="http://x/det")
+        session = _FakeSession(location={"latitude": 36, "longitude": 128, "error_range_m": 100})
+        gate = bc.TemporalDetectionGate()
+        counter = [0]
+        with patch.object(bc.requests, "post") as post:
+            for i in range(19):
+                result = _Result([_Box(0, 0.7, [10, 10, 50, 50])])
+                bc.send_detections(SimpleNamespace(names=NAMES), result, args, {}, counter, session, gate, i / 5)
+            post.assert_not_called()
+            self.assertEqual(session.located, [])
+            for timestamp in (3.8, 4):
+                bc.send_detections(SimpleNamespace(names=NAMES), result, args, {}, counter, session, gate, timestamp)
+            self.assertEqual(counter, [2])
+            self.assertEqual(post.call_count, 2)
+            self.assertEqual(post.call_args.kwargs["json"]["location_estimation"], session.location)
+
     def test_each_fire_smoke_box_gets_location_from_session(self):
         loc = {"latitude": 36.4, "longitude": 128.6, "error_range_m": None}
         session = _FakeSession(location=loc)
@@ -135,6 +163,7 @@ class ParseArgsTests(unittest.TestCase):
         self.assertIsNone(args.camera_lat)
         self.assertIsNone(args.camera_lon)
         self.assertIsNone(args.camera_name)
+        self.assertEqual((args.confidence, args.smoke_confidence), (0.3, 0.5))
 
     def test_camera_args(self):
         args = bc.parse_args(self.base + ["--camera-name", "경북의성", "--camera-lat", "36.382", "--camera-lon", "128.5779"])
