@@ -5,7 +5,6 @@ const { randomUUID } = require('node:crypto');
 const { PassThrough, Readable } = require('node:stream');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const jwt = require('jsonwebtoken');
 
 const originalDbPassword = process.env.DB_PASSWORD;
 process.env.JWT_SECRET = 'test-only-jwt-secret-with-more-than-32-characters';
@@ -64,8 +63,6 @@ childProcess.spawn = originalSpawn;
 
 let server;
 let base;
-const adminToken = jwt.sign({ id: 1, username: 'admin' }, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
-const adminHeaders = { Authorization: `Bearer ${adminToken}` };
 const aiHeaders = { 'X-AI-Token': process.env.AI_CALLBACK_TOKEN };
 
 before(async () => {
@@ -87,14 +84,8 @@ after(async () => {
   else process.env.DB_PASSWORD = originalDbPassword;
 });
 
-test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한다', async () => {
-  const unauthorized = await fetch(`${base}/cameras/1/test-runs`, { method: 'POST' });
-  assert.equal(unauthorized.status, 401);
-
-  const started = await fetch(`${base}/cameras/1/test-runs`, {
-    method: 'POST',
-    headers: adminHeaders,
-  });
+test('Test API는 로그인 없이 시작·조회·영상 중계를 허용하고 AI 콜백은 인증한다', async () => {
+  const started = await fetch(`${base}/cameras/1/test-runs`, { method: 'POST' });
   assert.equal(started.status, 202);
   const run = await started.json();
   assert.deepEqual(run, {
@@ -107,10 +98,7 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
   });
   assert.equal(Number.isSafeInteger(run.id), true);
 
-  const duplicate = await fetch(`${base}/cameras/1/test-runs`, {
-    method: 'POST',
-    headers: adminHeaders,
-  });
+  const duplicate = await fetch(`${base}/cameras/1/test-runs`, { method: 'POST' });
   assert.equal(duplicate.status, 409);
 
   await new Promise(resolve => setImmediate(resolve));
@@ -132,12 +120,9 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
   assert.equal(Object.hasOwn(child.options.env, 'DB_PASSWORD'), false);
   assert.equal(Object.hasOwn(child.options.env, 'JWT_SECRET'), false);
 
-  const status = await fetch(`${base}/test-runs/${run.id}`, { headers: adminHeaders });
+  const status = await fetch(`${base}/test-runs/${run.id}`);
   assert.equal(status.status, 200);
   assert.equal((await status.json()).status, 'running');
-
-  const deniedStream = await fetch(`${base}/test-runs/${run.id}/stream`);
-  assert.equal(deniedStream.status, 401);
 
   const detection = await fetch(`${base}/detections`, {
     method: 'POST',
@@ -166,7 +151,7 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
   assert.equal(repeatedDetection.status, 202);
   assert.ok(queryCalls.some(call => /UPDATE detection_events/.test(call.sql)));
 
-  const stream = await fetch(`${base}/test-runs/${run.id}/stream`, { headers: adminHeaders });
+  const stream = await fetch(`${base}/test-runs/${run.id}/stream`);
   assert.equal(stream.status, 200);
   assert.match(stream.headers.get('content-type'), /multipart\/x-mixed-replace; boundary=frame/);
   assert.equal(stream.headers.get('cache-control'), 'no-store');
@@ -202,7 +187,7 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
   assert.ok(Buffer.concat(received).includes(Buffer.from('Content-Type: image/jpeg')));
 
   child.child.emit('close', 0);
-  const completed = await fetch(`${base}/test-runs/${run.id}`, { headers: adminHeaders });
+  const completed = await fetch(`${base}/test-runs/${run.id}`);
   assert.equal((await completed.json()).status, 'completed');
   assert.ok(queryCalls.some(call => (
     /UPDATE detection_events/.test(call.sql)
@@ -212,7 +197,7 @@ test('Test API는 관리자 인증, MJPEG 중계, AI 탐지 콜백을 연결한�
 });
 
 test('DB에 위경도가 없는 카메라는 위치 인자를 넘기지 않는다', async () => {
-  const started = await fetch(`${base}/cameras/2/test-runs`, { method: 'POST', headers: adminHeaders });
+  const started = await fetch(`${base}/cameras/2/test-runs`, { method: 'POST' });
   assert.equal(started.status, 202);
   await new Promise(resolve => setImmediate(resolve));
   const child = spawned.at(-1);
