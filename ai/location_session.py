@@ -16,6 +16,13 @@ from ai.camera_config import find_camera_config
 
 DEFAULT_FOV_H_DEG = 60.0  # FireLocationEstimator 코드 기본값과 동일
 
+# 오차 반경(#59)에 쓰는 자세 각도 오차 σ
+# - 검증 랜드마크가 없으면 #56 품질 게이트가 허용하는 최대 정합 잔차(이보다 크면 자세를 거부했을 값)
+GATE_MAX_RESIDUAL_DEG = 1.5
+# - 화각을 모르면 기본 화각 ±10%로도 자세를 구해 오차 원에 포함
+#   근거: 청성 실험에서 게이트 통과 화각 54~66°(60° ± 10%), 가창오리 46~54°(50° ± 8%)
+FOV_UNCERTAINTY_RATIO = 0.10
+
 
 class LocationSession:
     def __init__(self, camera: dict, estimator=None):
@@ -57,6 +64,7 @@ class LocationSession:
                     "warnings": [],
                 }
                 return self.status
+            validation = (cfg.get("uncertainty") or {}).get("validation_max_error_deg")
             self.status = {
                 "ready": True,
                 "mode": "config_fixed_pose",
@@ -66,6 +74,10 @@ class LocationSession:
                 "tilt": float(pose["tilt"]),
                 "roll": float(pose["roll"]),
                 "tower_height_m": cfg.get("tower_height_m"),
+                # 보정에 쓰지 않은 검증 랜드마크의 최대 방향 오차가 있으면 그 측정값, 없으면 게이트 상한
+                "angular_sigma_deg": float(validation) if validation is not None else GATE_MAX_RESIDUAL_DEG,
+                "sigma_source": "validation_landmarks" if validation is not None else "gate_max_residual",
+                "alt_views": [],
                 "warnings": [],
             }
             return self.status
@@ -99,6 +111,16 @@ class LocationSession:
         if not blind.get("calibrated", False):
             self.status = {**base, "reason": blind.get("reason") or "CALIBRATION_FAILED"}
             return self.status
+        alt_views = []
+        if cfg is None:
+            # 화각을 모름: 기본 화각 ±10%로도 1회씩 역산, 게이트를 통과한 자세만 오차 원에 포함 (시작 시에만)
+            for ratio in (1.0 - FOV_UNCERTAINTY_RATIO, 1.0 + FOV_UNCERTAINTY_RATIO):
+                alt_fov = round(fov * ratio, 1)
+                alt = provider.estimate_blind_ptz(ridge_pts=ext["ridge_pts"], width=w, height=h, fov_h=alt_fov)
+                if alt.get("calibrated", False):
+                    alt_views.append(
+                        {"fov_h": alt_fov, "pan": float(alt["pan"]), "tilt": float(alt["tilt"]), "roll": float(alt["roll"])}
+                    )
         self.status = {
             **base,
             "ready": True,
@@ -106,6 +128,10 @@ class LocationSession:
             "tilt": float(blind["tilt"]),
             "roll": float(blind["roll"]),
             "uniqueness_ratio": blind.get("uniqueness_ratio"),
+            # 이번 실행에서 영상 능선과 DEM 능선이 어긋난 정도(게이트 통과 시 1.5° 이하)
+            "angular_sigma_deg": float(blind["rms_deg"]),
+            "sigma_source": "ridge_residual",
+            "alt_views": alt_views,
         }
         return self.status
 
@@ -142,5 +168,7 @@ class LocationSession:
                 "bbox_normalized": False,
             },
             use_skyline_calibration=False,
+            angular_sigma_deg=st.get("angular_sigma_deg"),
+            alt_views=st.get("alt_views"),
         )
         return result.get("location_estimation")

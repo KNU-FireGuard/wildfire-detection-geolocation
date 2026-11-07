@@ -11,8 +11,10 @@ TRUE_POSE = (99.2, 1.3, 0.8)
 W, H = 1920, 1080
 
 
-def config_entry(fixed_pose: bool = True, fov: float = TRUE_FOV) -> dict:
+def config_entry(fixed_pose: bool = True, fov: float = TRUE_FOV, validation_max_error_deg: float | None = None) -> dict:
     entry = {"key": "syn-fixed", "name": "합성고정", "camera_id": None, "fov_h_deg": fov}
+    if validation_max_error_deg is not None:
+        entry["uncertainty"] = {"validation_max_error_deg": validation_max_error_deg}
     if fixed_pose:
         entry["fixed_pose"] = {"pan": TRUE_POSE[0], "tilt": TRUE_POSE[1], "roll": TRUE_POSE[2]}
     return entry
@@ -67,8 +69,39 @@ class TestFixedPoseSession(LocationSessionCase):
             loc = session.locate(bbox)
             self.assertIsNotNone(loc)
             self.assertEqual(set(loc), {"latitude", "longitude", "error_range_m"})
-            self.assertIsNone(loc["error_range_m"])
+            # #59: 자세 각도 오차로 산출한 반경(m), 10m 단위
+            self.assertGreater(loc["error_range_m"], 0.0)
+            self.assertEqual(loc["error_range_m"] % 10, 0)
             self.assertLess(haversine_distance(loc["latitude"], loc["longitude"], la, lo), 30.0)
+
+
+class TestAngularSigma(LocationSessionCase):
+    """오차 반경에 쓰는 자세 각도 오차 σ (#59): 측정값이 있으면 측정값, 없으면 게이트 허용 상한"""
+
+    def _fixed(self, **cfg_kwargs):
+        from ai.fire_location_estimator import FireLocationEstimator
+        from ai.location_session import LocationSession
+
+        est = FireLocationEstimator(dem_provider=self.provider, skyline_extractor=NoCalibrationExtractor(),
+                                    camera_configs=[config_entry(**cfg_kwargs)])
+        session = LocationSession(self.camera, estimator=est)
+        return session, session.prepare(frame=None, frame_size=(W, H))
+
+    def test_fixed_pose_uses_validation_landmark_error(self) -> None:
+        _, status = self._fixed(validation_max_error_deg=1.16)
+        self.assertEqual(status["angular_sigma_deg"], 1.16)
+        self.assertEqual(status["sigma_source"], "validation_landmarks")
+
+    def test_fixed_pose_without_validation_uses_gate_limit(self) -> None:
+        _, status = self._fixed()
+        self.assertEqual(status["angular_sigma_deg"], 1.5)
+        self.assertEqual(status["sigma_source"], "gate_max_residual")
+
+    def test_larger_sigma_gives_larger_range_for_same_detection(self) -> None:
+        bbox, _ = self.ground_bbox(0.0, 1300.0)
+        small, _ = self._fixed(validation_max_error_deg=0.3)
+        large, _ = self._fixed(validation_max_error_deg=1.5)
+        self.assertLess(small.locate(bbox)["error_range_m"], large.locate(bbox)["error_range_m"])
 
 
 class TestDemUnavailable(LocationSessionCase):
@@ -149,6 +182,28 @@ class TestBlindPoseOnce(LocationSessionCase):
         status = session.prepare(frame=self.frame, frame_size=(W, H))
         self.assertEqual(status["fov_h_deg"], 60.0)
         self.assertIn("FOV_DEFAULT_USED", status["warnings"])
+
+    def test_blind_sigma_is_the_ridge_residual(self) -> None:
+        session, _ = self._session([config_entry(fixed_pose=False)])
+        status = session.prepare(frame=self.frame, frame_size=(W, H))
+        self.assertEqual(status["sigma_source"], "ridge_residual")
+        self.assertGreater(status["angular_sigma_deg"], 0.0)
+        self.assertLessEqual(status["angular_sigma_deg"], 1.5)  # 게이트 통과 자세의 잔차 상한
+        self.assertEqual(status["alt_views"], [])  # 화각을 아는 카메라는 화각 대체 자세 없음
+
+    def test_default_fov_also_solves_pose_at_plus_minus_10_percent(self) -> None:
+        from ai.ridge_detector import render_synthetic_cctv_frame
+
+        frame60, _ = render_synthetic_cctv_frame(self.provider, *TRUE_POSE, fov_h=60.0, add_osd=True)
+        session, counter = self._session([])
+        status = session.prepare(frame=frame60, frame_size=(W, H))
+        self.assertTrue(status["ready"], status)
+        # 기본 60°로 1회 + 54°·66°로 1회씩, 시작 시에만 (탐지마다 반복하지 않음)
+        self.assertEqual(counter.blind_calls, 3)
+        self.assertTrue(all(v["fov_h"] in (54.0, 66.0) for v in status["alt_views"]))
+        bbox, _ = self.ground_bbox(0.0, 1300.0, fov=60.0)
+        session.locate(bbox)
+        self.assertEqual(counter.blind_calls, 3)
 
 
 class RaisingEstimator:

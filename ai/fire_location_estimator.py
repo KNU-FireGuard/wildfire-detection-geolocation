@@ -316,6 +316,49 @@ class FireLocationEstimator:
             "camera_config": camera_config,
         }
 
+    @staticmethod
+    def _march_ray(
+        provider,
+        cam_lat: float,
+        cam_lon: float,
+        eye_alt: float,
+        bearing_deg: float,
+        slope_dz_per_m: float,
+        near_m: float = 200.0,
+        max_range_m: float = 5000.0,
+        step_size_m: float = 50.0,
+        binary_search_iters: int = 10,
+    ) -> tuple[str, float | None]:
+        """
+        광선과 DEM의 첫 교차 수평 거리: 50m 전진(Ray Marching) 후 이진 탐색
+        반환: ("OK", 거리) | ("TARGET_TOO_CLOSE", None) | ("NO_INTERSECTION", None)
+        - TARGET_TOO_CLOSE: near_m 지점에서 이미 지형 아래 (교차점이 near_m보다 가까움)
+        - NO_INTERSECTION: max_range_m까지 지형과 만나지 않음 (하늘)
+        """
+        def below_terrain(d: float) -> bool:
+            lat_d, lon_d = dest_point(cam_lat, cam_lon, bearing_deg, d)
+            drop = (d ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
+            return eye_alt + d * slope_dz_per_m <= float(provider.get_elevation(lat_d, lon_d)) - drop
+
+        if below_terrain(near_m):
+            return "TARGET_TOO_CLOSE", None
+        prev_d = curr_d = near_m
+        for _ in range(int((max_range_m - near_m) / step_size_m)):
+            curr_d += step_size_m
+            if below_terrain(curr_d):
+                break
+            prev_d = curr_d
+        else:
+            return "NO_INTERSECTION", None
+        low_d, high_d = prev_d, curr_d
+        for _ in range(binary_search_iters):
+            mid_d = (low_d + high_d) / 2.0
+            if below_terrain(mid_d):
+                high_d = mid_d
+            else:
+                low_d = mid_d
+        return "OK", (low_d + high_d) / 2.0
+
     def _estimate_location_core(
         self,
         bbox: list[float] | tuple[float, float, float, float] | dict[str, float | int],
@@ -327,8 +370,12 @@ class FireLocationEstimator:
         binary_search_iters: int = 10,
         bbox_format: str = "xyxy",
         bbox_normalized: bool | None = None,
+        angular_sigma_deg: float | None = None,
+        alt_views: list[dict] | None = None,
     ) -> dict:
         """
+        angular_sigma_deg: 자세 각도 오차(°), 주면 error_range_m 계산 (#59), 없으면 null
+        alt_views: 화각을 바꿔 구한 다른 자세 [{pan, tilt, roll, fov_h}], 그 교차점까지 오차 원에 포함
         Estimate wildfire ignition coordinates (lat, lon, altitude_m, distance_m)
         using 50m Ray Marching + 10-step Binary Search on DEMProvider.
         Supports:
@@ -592,12 +639,13 @@ class FireLocationEstimator:
                 },
             }
 
-        # 3. 3D DEM Ray Marching (50m step forward)
-        # If the ray is already below the terrain at near_m, the intersection lies closer than near_m:
-        # report it instead of returning a point near near_m as a valid location
-        lat_n, lon_n = dest_point(cam_lat, cam_lon, ray_bearing, near_m)
-        drop_n = (near_m ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
-        if eye_alt + near_m * slope_dz_per_m <= float(provider.get_elevation(lat_n, lon_n)) - drop_n:
+        # 3. 3D DEM Ray Marching (50m step forward) + 4. Binary Search, shared with the error range model (#59)
+        march_status, final_d = self._march_ray(
+            provider, cam_lat, cam_lon, eye_alt, ray_bearing, slope_dz_per_m,
+            near_m, max_range_m, step_size_m, binary_search_iters,
+        )
+        if march_status == "TARGET_TOO_CLOSE":
+            # The ray is already below the terrain at near_m: the intersection lies closer than near_m
             return {
                 "intersected": False,
                 "status": "TARGET_TOO_CLOSE",
@@ -612,26 +660,7 @@ class FireLocationEstimator:
                 "calibration": cal_info,
                 "location_estimation": None,
             }
-
-        prev_d = near_m
-        curr_d = near_m
-        hit = False
-        n_steps = int((max_range_m - near_m) / step_size_m)
-
-        for _ in range(n_steps):
-            curr_d += step_size_m
-            lat_c, lon_c = dest_point(cam_lat, cam_lon, ray_bearing, curr_d)
-            dem_z = float(provider.get_elevation(lat_c, lon_c))
-            drop = (curr_d ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
-            apparent_dem_z = dem_z - drop
-            ray_z = eye_alt + curr_d * slope_dz_per_m
-
-            if ray_z <= apparent_dem_z:
-                hit = True
-                break
-            prev_d = curr_d
-
-        if not hit:
+        if march_status == "NO_INTERSECTION":
             # Ray escaped to the sky without intersecting any terrain up to max_range_m
             return {
                 "intersected": False,
@@ -646,25 +675,16 @@ class FireLocationEstimator:
                 "calibration": cal_info,
                 "location_estimation": None,
             }
-
-        # 4. 10-step Binary Search for sub-decimeter surface intersection precision
-        low_d, high_d = prev_d, curr_d
-        for _ in range(binary_search_iters):
-            mid_d = (low_d + high_d) / 2.0
-            lat_m, lon_m = dest_point(cam_lat, cam_lon, ray_bearing, mid_d)
-            dem_z = float(provider.get_elevation(lat_m, lon_m))
-            drop = (mid_d ** 2) / (2.0 * R_EARTH) * (1.0 - K_REFRACTION)
-            apparent_dem_z = dem_z - drop
-            ray_z = eye_alt + mid_d * slope_dz_per_m
-
-            if ray_z <= apparent_dem_z:
-                high_d = mid_d
-            else:
-                low_d = mid_d
-
-        final_d = (low_d + high_d) / 2.0
         est_lat, est_lon = dest_point(cam_lat, cam_lon, ray_bearing, final_d)
         est_alt = float(provider.get_elevation(est_lat, est_lon))
+        error_range_m = None
+        if angular_sigma_deg is not None:
+            error_range_m = self._error_range_m(
+                provider, cam_lat, cam_lon, eye_alt, ray_bearing, ray_el_deg, final_d, est_lat, est_lon,
+                float(angular_sigma_deg), list(alt_views or []), (fire_x, fire_y), (width, height),
+                {"near_m": near_m, "max_range_m": max_range_m, "step_size_m": step_size_m,
+                 "binary_search_iters": binary_search_iters},
+            )
 
         return {
             "intersected": True,
@@ -680,10 +700,62 @@ class FireLocationEstimator:
             "location_estimation": {
                 "latitude": round(est_lat, 6),
                 "longitude": round(est_lon, 6),
-                # 오차 범위 산출 모델이 없어 null (임의 수식 금지, 후속 이슈에서 민감도 기반 산출)
-                "error_range_m": None,
+                "error_range_m": error_range_m,
             },
         }
+
+    def _error_range_m(
+        self,
+        provider,
+        cam_lat: float,
+        cam_lon: float,
+        eye_alt: float,
+        bearing_deg: float,
+        el_deg: float,
+        dist_m: float,
+        est_lat: float,
+        est_lon: float,
+        sigma_deg: float,
+        alt_views: list[dict],
+        fire_xy: tuple[float, float],
+        frame_wh: tuple[int, int],
+        march_kwargs: dict,
+    ) -> float:
+        """
+        위치 오차 반경(m, #59): 자세 각도 오차 σ를 광선 추적에 직접 넣어 교차점이 움직이는 범위
+        - 앞뒤: 고도각 ±σ로 다시 교차, 낮은 각도로 지형을 스치면 크게 움직임 (식 ΔD ≈ D·Δe/sinβ를 실제 지형으로 계산)
+        - 좌우: D·tanσ
+        - alt_views: 화각을 바꿔 구한 자세의 교차점까지 거리
+        - 다시 쏜 광선이 하늘로 빠지면 DEM 끝(max_range_m)까지, near_m 앞에서 막히면 near_m까지를 범위로 봄
+        - 모델 추정값이며 실측 검증 전
+        """
+        near_m = march_kwargs["near_m"]
+        max_range_m = march_kwargs["max_range_m"]
+
+        def along_ray(status: str, d: float | None) -> float:
+            if status == "OK":
+                return abs(float(d) - dist_m)
+            return max_range_m - dist_m if status == "NO_INTERSECTION" else dist_m - near_m
+
+        terms = [dist_m * math.tan(math.radians(sigma_deg))]
+        for sign in (1.0, -1.0):
+            slope = math.tan(math.radians(el_deg + sign * sigma_deg))
+            terms.append(along_ray(*self._march_ray(provider, cam_lat, cam_lon, eye_alt, bearing_deg, slope, **march_kwargs)))
+        width, height = frame_wh
+        for view in alt_views:
+            _, alt_bearing, alt_el = self.compute_3d_ray_vector(
+                fire_x=fire_xy[0], fire_y=fire_xy[1],
+                pan_deg=float(view["pan"]), tilt_deg=float(view["tilt"]), roll_deg=float(view.get("roll", 0.0)),
+                width=width, height=height, fov_h_deg=float(view["fov_h"]),
+            )
+            slope = math.tan(math.radians(alt_el))
+            status, d = self._march_ray(provider, cam_lat, cam_lon, eye_alt, alt_bearing, slope, **march_kwargs)
+            if status == "OK":
+                alt_lat, alt_lon = dest_point(cam_lat, cam_lon, alt_bearing, float(d))
+                terms.append(haversine_distance(alt_lat, alt_lon, est_lat, est_lon))
+            else:
+                terms.append(along_ray(status, d))
+        return float(math.ceil(max(terms) / 10.0) * 10.0)
 
 
 if __name__ == "__main__":
