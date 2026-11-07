@@ -17,7 +17,7 @@ function setup(attempts = { network: 0, media: 0 }) {
   const player = { loadSourceCalls: 0, loadSource() { this.loadSourceCalls++ }, startLoad() {}, recoverMediaError() {} }
   const context = {
     attempts, player, props: { url: 'https://example.test/live.m3u8', cameraId: 1 },
-    playing: { value: false }, error: { value: '' }, retrying: { value: 0 },
+    playing: { value: false }, hasPlayed: { value: false }, error: { value: '' },
     video: { value: { currentTime: 0 } }, lastTime: 0, retryTimer: null, networkRecoveryKind: null,
     decideRecovery, describeHlsError, trackPlaybackProgress,
     console: { warn() {} },
@@ -37,7 +37,6 @@ test('네트워크 오류 후 버퍼 영상만 진행되면 예약된 재연결�
   context.onTimeUpdate()
   assert.equal(context.playing.value, true)
   assert.equal(pending.size, 1)
-  assert.equal(context.retrying.value, 1)
   assert.equal(context.attempts.network, 1)
 
   context.onPlaying()
@@ -55,13 +54,11 @@ test('실패한 재생목록 대신 남아 있던 영상 조각만 받으면 재
   context.onPlaying()
   context.onFragmentLoaded()
   assert.equal(pending.size, 1)
-  assert.equal(context.retrying.value, 1)
   assert.equal(context.attempts.network, 1)
   assert.equal(player.loadSourceCalls, 0)
 
   context.onManifestLoaded()
   assert.equal(pending.size, 0)
-  assert.equal(context.retrying.value, 0)
   assert.equal(context.attempts.network, 0)
   assert.equal(player.loadSourceCalls, 0)
 })
@@ -72,7 +69,7 @@ test('실패한 영상 조각을 다시 받으면 예약된 재연결을 취소�
   context.onPlaying()
   context.onFragmentLoaded()
   assert.equal(pending.size, 0)
-  assert.equal(context.retrying.value, 0)
+  assert.equal(context.attempts.network, 0)
 })
 
 test('재생목록 단계 오류는 해당 단계가 성공할 때까지 다른 성공 이벤트로 해제하지 않는다', () => {
@@ -85,7 +82,7 @@ test('재생목록 단계 오류는 해당 단계가 성공할 때까지 다른 
 
   context.onLevelLoaded()
   assert.equal(pending.size, 0)
-  assert.equal(context.retrying.value, 0)
+  assert.equal(context.attempts.network, 0)
 })
 
 test('네트워크 재시도 소진 시 CCTV 주소 갱신 안내를 보여 준다', () => {

@@ -48,12 +48,13 @@ function mapFixture() {
   const overlays = []
   class Overlay { constructor(options) { this.options = options; overlays.push(this) } setMap() {} }
   const maps = { LatLng: class { constructor(latitude, longitude) { Object.assign(this, { latitude, longitude }) } }, Point: class {}, Marker: Overlay, Polyline: Overlay, Event: { addListener: () => ({}), removeListener() {} } }
-  return { maps, overlays }
+  const map = { getZoom: () => 7 }
+  return { maps, map, overlays }
 }
 
 test('화재 카메라 마커는 빨간색이고 다른 카메라 위에 표시된다', () => {
   const f = mapFixture()
-  const scene = createNaverScene(f.maps, {}, () => {})
+  const scene = createNaverScene(f.maps, f.map, () => {})
   const cameras = [{ id: 1, name: 'A', latitude: 36, longitude: 128 }, { id: 2, name: 'B', latitude: 37, longitude: 128 }]
   scene.render({ cameras, fireCameraIds: new Set([2]) })
   const [normal, fire] = f.overlays
@@ -79,6 +80,16 @@ test('대시보드는 새 화재를 배너로 알리고 지도에 화재 카메�
   assert.match(dash, /<FireAlertBanner/)
   assert.match(dash, /findNewFireEvents\(/)
   assert.match(dash, /:fire-camera-ids="fireCameraIds"/)
+})
+
+test('Test 진행 중 이벤트 조회를 갱신하고 지도에는 이벤트 목록을 전달한다', () => {
+  const panel = sfc('../src/components/TestRunPanel.vue')
+  const detail = sfc('../src/components/EventDetail.vue')
+  const dash = sfc('../src/views/DashboardView.vue')
+  assert.match(panel.scriptSetup.content, /emit\('events-updated'\)/)
+  assert.match(detail.template.content, /@events-updated="emit\('test-progress'\)"/)
+  assert.match(dash.template.content, /@test-progress="refreshTestEvents"/)
+  assert.match(dash.template.content, /:events="events"[^>]*:selected-event="selectedEvent"/)
 })
 
 test('이벤트 전체 목록은 카메라 ID 대신 카메라 이름을 보여준다', () => {

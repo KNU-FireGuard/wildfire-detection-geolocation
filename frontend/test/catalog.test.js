@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { fetchCameras, fetchEvents, fetchVideos, fetchEvent, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, loginAdmin, startTestRun, fetchTestRunStatus, openTestRunStream, acknowledgeEvent } from '../src/api/catalog.js'
+import { fetchCameras, fetchEvents, fetchVideos, fetchEvent, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, startTestRun, fetchTestRunStatus, openTestRunStream, acknowledgeEvent } from '../src/api/catalog.js'
 
 // feature/backend catalog.controller.js의 응답 규격에 대한 회귀 테스트입니다.
 const originalFetch = globalThis.fetch
@@ -168,38 +168,36 @@ test('관리자 토큰으로 CCTV 목록을 수동 갱신하고 서버 오류와
   await assert.rejects(refreshLiveCctvs('old'), error => error.code === 'unauthorized')
 })
 
-test('Test 실행 요청이 401이면 로그인 만료 오류로 구분한다', async () => {
-  globalThis.fetch = async () => Response.json({ error: '토큰 만료' }, { status: 401 })
-  await assert.rejects(startTestRun(3, 'old'), error => error.code === 'unauthorized')
+test('Test 실행 오류는 서버 메시지를 전달한다', async () => {
+  globalThis.fetch = async () => Response.json({ error: '카메라 분석이 이미 실행 중입니다.' }, { status: 409 })
+  await assert.rejects(startTestRun(3), /이미 실행 중/)
 })
 
-test('Test 실행과 상태 조회는 관리자 토큰과 카메라·실행 ID를 사용한다', async () => {
+test('Test 실행과 상태 조회는 로그인 없이 카메라·실행 ID를 사용한다', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
-    if (url === '/api/auth/login') return Response.json({ access_token: 'test-token' })
     if (url === '/api/cameras/3/test-runs') return Response.json({ id: 77, camera_id: 3, video_id: 12, status: 'ready', stream_url: '/api/test-runs/77/stream' }, { status: 202 })
     return Response.json({ id: 77, camera_id: 3, status: 'running', error: null })
   }
-  const token = await loginAdmin('admin', 'password')
-  const run = await startTestRun(3, token)
-  const status = await fetchTestRunStatus(run.id, token)
+  const run = await startTestRun(3)
+  const status = await fetchTestRunStatus(run.id)
   assert.equal(run.stream_url, '/api/test-runs/77/stream')
   assert.equal(status.status, 'running')
-  assert.equal(calls[1].options.headers.Authorization, 'Bearer test-token')
-  assert.equal(calls[2].url, '/api/test-runs/77')
-  assert.equal(calls[2].options.headers.Authorization, 'Bearer test-token')
+  assert.equal(calls[0].options.headers, undefined)
+  assert.equal(calls[1].url, '/api/test-runs/77')
+  assert.equal(calls[1].options, undefined)
 })
 
-test('MJPEG 영상 요청은 관리자 토큰을 전송하고 응답 형식을 검증한다', async () => {
+test('MJPEG 영상 요청은 로그인 없이 응답 형식을 검증한다', async () => {
   globalThis.fetch = async (_url, options) => {
-    assert.equal(options.headers.Authorization, 'Bearer test-token')
+    assert.equal(options.headers, undefined)
     return new Response('frame', { headers: { 'Content-Type': 'multipart/x-mixed-replace; boundary=frame' } })
   }
-  const response = await openTestRunStream('/api/test-runs/77/stream', 'test-token')
+  const response = await openTestRunStream('/api/test-runs/77/stream')
   assert.equal(response.status, 200)
   globalThis.fetch = async () => new Response('bad', { headers: { 'Content-Type': 'application/json' } })
-  await assert.rejects(openTestRunStream('/api/test-runs/77/stream', 'test-token'), /MJPEG/)
+  await assert.rejects(openTestRunStream('/api/test-runs/77/stream'), /MJPEG/)
 })
 
 test('AI 감시 상태는 카메라 ID와 마지막 프레임 시각을 유지한다', async () => {
