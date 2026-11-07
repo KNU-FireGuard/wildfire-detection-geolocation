@@ -45,13 +45,6 @@ export function createNaverScene(maps, map, onCameraSelect) {
       anchor: new maps.Point(size / 2, size),
     }
   }
-  const fireIcon = () => {
-    const size = Math.round(Math.max(24, Math.min(84, 24 + 10 * (map.getZoom() - 8))))
-    return {
-      content: `<div style="box-sizing:border-box;width:${size}px;height:${size}px;border:2px solid #ffffffee;border-radius:50%;background:#e0402e;box-shadow:0 0 0 6px rgba(255,106,87,.25),0 0 26px rgba(255,106,87,.65),0 8px 16px #0009"></div>`,
-      anchor: new maps.Point(size / 2, size / 2),
-    }
-  }
   const fireCenterIcon = () => ({
     content: '<div style="box-sizing:border-box;width:14px;height:14px;border:2px solid white;border-radius:50%;background:#e0402e;box-shadow:0 0 0 3px rgba(255,106,87,.25)"></div>',
     anchor: new maps.Point(7, 7),
@@ -80,19 +73,19 @@ export function createNaverScene(maps, map, onCameraSelect) {
     for (const event of visibleEvents) {
       const fire = event.estimatedLocation
       const range = errorRangeDisplay(fire)
-      if (range.mode === 'radius') {
+      // 오차가 커도 픽셀 마커로 대체하지 않고 SDK의 미터 반경 원으로 지도 축척에 맞춤
+      if (range.mode !== 'unknown') {
         overlays.push(new maps.Circle({
           map, center: position(fire), radius: fire.errorRadiusM,
-          strokeColor: '#e0402e', strokeOpacity: 0.9, strokeWeight: 2,
-          fillColor: '#e0402e', fillOpacity: 0.14, clickable: false, zIndex: 15,
+          strokeColor: '#e0402e', strokeOpacity: 1, strokeWeight: 2,
+          fillColor: '#e0402e', fillOpacity: 0.08, clickable: false, zIndex: 15,
         }))
       }
       const fireMarker = new maps.Marker({
         map, position: position(fire), title: `추정 산불 위치 · ${range.label}`, zIndex: selectedEvent && event.id === selectedEvent.id ? 31 : 30,
-        icon: range.mode === 'radius' ? fireCenterIcon() : fireIcon(),
+        icon: fireCenterIcon(),
       })
       overlays.push(fireMarker)
-      if (range.mode !== 'radius') listeners.push(maps.Event.addListener(map, 'zoom_changed', () => fireMarker.setIcon(fireIcon())))
     }
     const selectedFire = selectedEvent && visibleEvents.find(event => event.id === selectedEvent.id)?.estimatedLocation
     if (selectedFire && hasCoordinates(selectedCamera)) {

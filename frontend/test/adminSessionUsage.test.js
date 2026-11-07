@@ -12,10 +12,9 @@ test('Test 패널은 로그인 폼 없이 버튼에서 바로 분석을 시작�
   assert.doesNotMatch(template.content, /test-login|관리자 ID|비밀번호/)
 })
 
-test('CCTV 주소 갱신은 공용 관리자 세션의 토큰으로 호출하고 로그인한 뒤에는 입력란을 숨긴다', () => {
+test('대시보드의 이벤트 확인과 CCTV 갱신에는 로그인 폼이나 관리자 세션을 사용하지 않는다', () => {
   const { scriptSetup, template } = read('views/DashboardView.vue')
-  assert.match(scriptSetup.content, /ensureAdminToken\(loginAdmin,/)
-  assert.match(scriptSetup.content, /refreshLiveCctvs\(token\)/)
-  assert.match(scriptSetup.content, /code === 'unauthorized'[\s\S]*signOut\(\)/)
-  assert.match(template.content, /v-if="!isLoggedIn"[^>]*>[\s\S]*?name="username"/)
+  assert.doesNotMatch(scriptSetup.content, /ensureAdminToken|loginAdmin|useAdminSession/)
+  assert.match(scriptSetup.content, /refreshLiveCctvs\(\)/)
+  assert.doesNotMatch(template.content, /관리자 ID|비밀번호|로그인 후 확인/)
 })

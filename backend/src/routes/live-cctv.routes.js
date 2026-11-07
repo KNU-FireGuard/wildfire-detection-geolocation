@@ -1,5 +1,4 @@
 const express = require('express');
-const { requireAdmin } = require('../middleware/require-admin');
 const { requireAiCallback } = require('../middleware/require-ai-callback');
 const { catalog, monitor } = require('../services/live-cctv-runtime');
 const pool = require('../config/db');
@@ -10,7 +9,7 @@ router.get('/live-cctvs', async (req, res, next) => {
   try { res.json(await catalog.list()); } catch (error) { next(error); }
 });
 
-router.post('/live-cctvs/refresh', requireAdmin, async (req, res, next) => {
+router.post('/live-cctvs/refresh', async (req, res, next) => {
   try {
     await pool.query('SELECT provider_key FROM cameras LIMIT 0');
     await pool.query('SELECT camera_id FROM detection_events LIMIT 0');

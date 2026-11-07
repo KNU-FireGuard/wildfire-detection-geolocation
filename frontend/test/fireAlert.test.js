@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { parse } from '@vue/compiler-sfc'
-import { activeFireCameraIds, findNewFireEvents, applyAcknowledged } from '../src/utils/fireAlert.js'
+import { activeFireCameraIds, findNewDetectionEvents, applyAcknowledged, reconcileDetectionAlerts } from '../src/utils/fireAlert.js'
 import { cameraName } from '../src/utils/cameraName.js'
 import { createNaverScene } from '../src/maps/naverScene.js'
 
@@ -32,9 +32,9 @@ test('카메라 없는 이벤트는 화재 카메라에 넣지 않는다', () =>
 
 test('이미 본 이벤트를 제외한 알림 중인 새 화재 이벤트만 돌려주고 첫 조회에서는 알리지 않는다', () => {
   const events = [{ ...event(1, 10, 'fire', 5), alerting: true }, event(2, 11, 'smoke', 1), { ...event(3, 12, 'fire', 1), alerting: true }, { ...event(4, 13, 'fire', 1), alerting: false }]
-  assert.deepEqual(findNewFireEvents(null, events), [])
-  assert.deepEqual(findNewFireEvents(new Set([1, 2]), events).map(item => item.id), [3])
-  assert.deepEqual(findNewFireEvents(new Set([1, 2, 3, 4]), events), [])
+  assert.deepEqual(findNewDetectionEvents(null, events), [])
+  assert.deepEqual(findNewDetectionEvents(new Set([1, 2]), events).map(item => item.id), [3])
+  assert.deepEqual(findNewDetectionEvents(new Set([1, 2, 3, 4]), events), [])
 })
 
 test('카메라 이름을 찾고 없으면 안내 문구를 돌려준다', () => {
@@ -67,18 +67,18 @@ test('화재 카메라 마커는 빨간색이고 다른 카메라 위에 표시�
 
 const sfc = path => parse(readFileSync(new URL(path, import.meta.url), 'utf8')).descriptor
 
-test('화재 알림 배너는 role=alert로 카메라 이름과 이동·닫기 버튼을 보여준다', () => {
-  const template = sfc('../src/components/FireAlertBanner.vue').template.content
-  assert.match(template, /role="alert"/)
-  assert.match(template, /emit\('open'/)
-  assert.match(template, /emit\('dismiss'\)/)
-  assert.match(template, /emit\('acknowledge', events\.map/)
+test('화재 팝업은 alertdialog와 명시적인 확인·나중에 확인 버튼을 제공한다', () => {
+  const template = sfc('../src/components/DetectionAlertModal.vue').template.content
+  assert.match(template, /role="alertdialog"/)
+  assert.match(template, /확인 완료/)
+  assert.match(template, /나중에 확인/)
 })
 
-test('대시보드는 새 화재를 배너로 알리고 지도에 화재 카메라를 전달한다', () => {
+test('대시보드는 새 화재를 팝업으로 알리고 지도에 화재 카메라를 전달한다', () => {
   const dash = readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8')
-  assert.match(dash, /<FireAlertBanner/)
-  assert.match(dash, /findNewFireEvents\(/)
+  assert.match(dash, /<DetectionAlertModal/)
+  assert.doesNotMatch(dash, /FireAlertBanner/)
+  assert.match(dash, /findNewDetectionEvents\(/)
   assert.match(dash, /:fire-camera-ids="fireCameraIds"/)
 })
 
@@ -88,7 +88,7 @@ test('Test 진행 중 이벤트 조회를 갱신하고 지도에는 이벤트 �
   const dash = sfc('../src/views/DashboardView.vue')
   assert.match(panel.scriptSetup.content, /emit\('events-updated'\)/)
   assert.match(detail.template.content, /@events-updated="emit\('test-progress'\)"/)
-  assert.match(dash.template.content, /@test-progress="refreshTestEvents"/)
+  assert.match(dash.template.content, /@test-progress="refreshEvents"/)
   assert.match(dash.template.content, /:events="events"[^>]*:selected-event="selectedEvent"/)
 })
 
@@ -99,26 +99,36 @@ test('이벤트 전체 목록은 카메라 ID 대신 카메라 이름을 보여�
   assert.match(catalog, /row\.cameraName/)
 })
 
-test('이벤트 목록의 확인 대기 행에는 확인 버튼이 있고 대시보드는 관리자 로그인 후 확인한다', () => {
+test('이벤트 목록은 확인 버튼을 제공하고 대시보드는 로그인 없이 확인한다', () => {
   const list = sfc('../src/components/EventList.vue').template.content
   assert.match(list, /event\.status === 'UNCONFIRMED'/)
   assert.match(list, /emit\('acknowledge', event\.id\)/)
   const dash = readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8')
   assert.match(dash, /acknowledgeEvent\(/)
   assert.match(dash, /@acknowledge="acknowledge"/)
-  assert.match(dash, /ensureAdminToken\(loginAdmin/)
+  assert.doesNotMatch(dash, /ensureAdminToken|ackWaitingIds/)
   // 확인 직후 다음 갱신을 기다리지 않고 바로 빨간색을 끔
-  assert.match(dash, /applyAcknowledged\(events\.value, ids\)/)
+  assert.match(dash, /applyAcknowledged\(/)
+})
+
+test('팝업 대기는 최신 정보로 갱신하고 확인·종료된 이벤트를 제거하며 중복을 합친다', () => {
+  const old = { ...event(1, 10, 'fire', 1), alerting: true }
+  const updated = { ...old, confidence: .99 }
+  const fresh = { ...event(2, 11, 'fire', 0), alerting: true }
+  assert.deepEqual(reconcileDetectionAlerts([old], [updated, fresh], [fresh, old]).map(item => item.id), [2, 1])
+  assert.equal(reconcileDetectionAlerts([old], [updated])[0].confidence, .99)
+  assert.deepEqual(reconcileDetectionAlerts([old], [{ ...old, alerting: false }]), [])
+  assert.deepEqual(reconcileDetectionAlerts([old], []), [])
 })
 
 test('이미 알림 중인 화재가 있는 카메라에 재시작으로 생긴 새 화재 이벤트는 새 알림으로 보지 않는다', () => {
   const events = [{ ...event(1, 10, 'fire', 20), alerting: true }, { ...event(2, 10, 'fire', 1), alerting: true }, { ...event(3, 11, 'fire', 1), alerting: true }]
-  assert.deepEqual(findNewFireEvents(new Set([1]), events).map(item => item.id), [3])
+  assert.deepEqual(findNewDetectionEvents(new Set([1]), events).map(item => item.id), [3])
 })
 
 test('이전 이벤트가 이미 확인되었거나 알림이 끝났다면 같은 카메라의 새 화재는 새 알림이다', () => {
   const ended = [{ ...event(1, 10, 'fire', 90), alerting: false }, { ...event(2, 10, 'fire', 1), alerting: true }]
-  assert.deepEqual(findNewFireEvents(new Set([1]), ended).map(item => item.id), [2])
+  assert.deepEqual(findNewDetectionEvents(new Set([1]), ended).map(item => item.id), [2])
 })
 
 test('화재 이벤트를 확인하면 같은 카메라의 알림 중인 다른 화재 이벤트도 확인 완료로 바꾼다', () => {

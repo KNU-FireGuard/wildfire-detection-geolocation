@@ -26,10 +26,36 @@ before(async () => {
 });
 after(() => server && new Promise(resolve => server.close(resolve)));
 
-test('이벤트 확인은 관리자 토큰 없이 할 수 없고 DB도 변경하지 않는다', async () => {
+test('이벤트 확인은 로그인 없이 공개 API와 기존 주소에서 모두 처리한다', async () => {
+  query = async sql => /^\s*UPDATE/i.test(sql)
+    ? { rows: [] } : { rows: [{ id: 5, class: 'fire', acknowledged_at: '2026-11-04T01:00:00.000Z' }] };
+  for (const url of ['/events/5/acknowledge', '/admin/events/5/acknowledge']) {
+    const response = await fetch(base + url, { method: 'POST' });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).item.id, 5);
+  }
+});
+
+test('SMS 설정과 발송 내역은 로그인 없이 조회하거나 변경할 수 없다', async () => {
   query = () => assert.fail('unexpected DB query');
-  const response = await fetch(`${base}/admin/events/1/acknowledge`, { method: 'POST' });
-  assert.equal(response.status, 401);
+  for (const [url, method] of [['/admin/cameras', 'GET'], ['/admin/sms-logs', 'GET'], ['/admin/cameras/1/alert-phone', 'PATCH']]) {
+    assert.equal((await fetch(base + url, { method })).status, 401);
+  }
+});
+
+test('SMS 관리자 토큰이 만료되어도 공개 이벤트 확인은 독립적으로 처리한다', async () => {
+  query = async sql => /^\s*UPDATE/i.test(sql) ? { rows: [] } : { rows: [{ id: 5, acknowledged_at: '2026-11-04T01:00:00Z' }] };
+  const response = await fetch(`${base}/events/5/acknowledge`, { method: 'POST', headers: { Authorization: 'Bearer expired-or-invalid' } });
+  assert.equal(response.status, 200);
+});
+
+test('확인 저장에 실패하면 성공으로 응답하지 않고 서버 오류를 전달한다', async () => {
+  query = async () => { throw new Error('simulated database failure'); };
+  const original = console.error;
+  console.error = () => {};
+  try {
+    assert.equal((await fetch(`${base}/events/5/acknowledge`, { method: 'POST' })).status, 500);
+  } finally { console.error = original; }
 });
 
 test('이벤트 ID가 정수가 아니면 400을 돌려주고 DB를 조회하지 않는다', async () => {

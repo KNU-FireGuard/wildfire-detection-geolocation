@@ -91,7 +91,7 @@ docker compose exec -T db sh -c "psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $P
 ## 3 관리자 계정과 Backend
 
 - 새 터미널에서 실행
-- `npm run create-admin`은 최초 설정 시 한 번만 실행, 이후 실행할 때는 생략
+- `npm run create-admin`은 SMS 관리 사용 시 최초 한 번 실행, 대시보드·Test·이벤트 확인·CCTV 갱신에는 관리자 로그인 불필요
 - 생성 후 `.env`의 `ADMIN_INITIAL_PASSWORD` 값 삭제
 
 ```text
@@ -103,7 +103,8 @@ npm run dev
 
 - Backend 주소: `http://127.0.0.1:3000`
 - ITS 실영상 사용 시 루트 `.env`에 `ITS_CCTV_API_KEY=발급키` 설정 후 Backend 재시작
-- 대시보드의 CCTV 주소 갱신 버튼에서 관리자 계정으로 최초 목록 조회 또는 영상 주소 수동 갱신
+- 대시보드의 CCTV 주소 갱신 버튼에서 로그인 없이 최초 목록 조회 또는 영상 주소 수동 갱신
+- 새 화재·연기는 유형별 팝업으로 표시, 지도에서 보기·확인 완료·나중에 확인 선택, 팝업 닫기와 Esc는 이벤트 확인 상태를 바꾸지 않음
 - Test 카메라를 선택한 뒤 `Test 분석 시작`을 누르면 로그인 없이 등록 영상 분석 실행
 - Backend를 재시작하면 저장된 실시간 CCTV 6대를 자동 분석, 기본 작업자는 `ai/inference/live_runner.py`이며 `AI_LIVE_RUNNER_PATH`는 비워 둬도 됨
 - 실시간도 5fps·최근 20프레임 중 16회·불 0.3/연기 0.5 적용, Backend 로그의 `analysis_fps`·`dropped`·`timings`로 처리 속도와 단계별 소요 시간 확인
