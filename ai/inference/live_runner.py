@@ -1,4 +1,6 @@
 """HLS 수신 → 카메라별 5fps → 공유 YOLO → 16/20 확정 → 기존 탐지 API."""
+from __future__ import annotations
+
 import json
 import math
 import os
