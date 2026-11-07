@@ -47,7 +47,7 @@
 - ITS API 호출 없음, 서버 메모리의 6개 감시 상태 조회
 - `200` `{ "state": "waiting_for_ai", "cameras": [{ "camera_id": 9, "provider_key": "...", "name": "CCTV", "run_id": null, "state": "waiting_for_ai", "last_frame_at": null }] }`
 - 상태: `waiting_for_cctv` | `waiting_for_ai` | `starting` | `running` | `restarting` | `failed` | `stopped`
-- `AI_LIVE_RUNNER_PATH`가 없으면 실제 AI 프로세스 없이 `waiting_for_ai` 표시
+- `AI_LIVE_RUNNER_PATH`가 비어 있으면 기본 `ai/inference/live_runner.py` 실행, 지정한 파일이 없으면 `waiting_for_ai` 표시
 - Frontend는 30초마다 상태와 탐지 이벤트를 다시 조회, 상태 조회는 ITS 호출 한도를 사용하지 않음
 
 ### `POST /live-monitor/heartbeat`
@@ -63,6 +63,10 @@
 - Backend 시작 시 저장된 CCTV 6곳을 읽고 `AI_LIVE_RUNNER_PATH`의 Python 파일 한 개를 실행
 - Backend가 작업자의 표준 입력에 아래 JSON 한 개를 보내고 입력을 닫음
 - AI 작업자는 모델을 한 번 로드해 6곳을 지속 분석하고 위 heartbeat와 `POST /detections`에 JSON 전송
+- 기본 작업자는 카메라별 5fps·최근 20프레임 중 16회·불 0.3/연기 0.5·박스 IoU 0.2 기준 적용, HLS 조각 경계에서도 판정 유지
+- 프레임 대기열은 카메라별 최대 3개, 누락·재접속·큰 장면 변화 시 판정 초기화, 수신 후 1초 넘은 프레임은 폐기
+- 모델 경로는 `model_path`, 카메라 이름·좌표는 각 항목의 `name`, `latitude`, `longitude`로 전달, 위치는 이름이 일치하는 고정 자세 보정값이 있을 때만 산출하고 나머지는 null
+- 탐지 콜백은 카메라·클래스별 최신 결과로 병합, 5초 넘은 미전송 결과는 폐기, 실제 분석한 프레임에 대해서만 heartbeat 전송
 - AI 인증 토큰은 환경변수 `AI_CALLBACK_TOKEN`으로 전달, ITS API 키는 AI에 전달하지 않음
 - AI 작업자 종료 시 Backend가 최대 5분 간격까지 늘어나는 재시도 후 재실행, 서버 종료 시 작업자 종료
 
@@ -70,8 +74,9 @@
 {
   "result_url": "http://127.0.0.1:3000/api/detections",
   "heartbeat_url": "http://127.0.0.1:3000/api/live-monitor/heartbeat",
+  "model_path": "/project/ai/weights/yolo26s_final/weights/best.pt",
   "cameras": [
-    { "run_id": 123, "camera_id": 9, "source_url": "http://provider.example/cctv.m3u8" }
+    { "run_id": 123, "camera_id": 9, "source_url": "http://provider.example/cctv.m3u8", "name": "CCTV", "latitude": 36.4, "longitude": 128.6 }
   ]
 }
 ```
@@ -144,9 +149,11 @@
 
 ## 카메라별 Test
 
-- Frontend에서 호출하는 Test 실행·상태·영상 스트림 API는 관리자 JWT 필요
-- Header: `Authorization: Bearer <JWT>`
-- AI 콜백 API는 관리자 JWT 대신 `X-AI-Token` 사용
+- Frontend에서 호출하는 Test 실행·상태·영상 스트림 API는 로그인 없이 사용 가능
+- AI 콜백 API는 `X-AI-Token` 필요
+- Test 작업자는 영상 시각 기준 5fps로 분석하고 불 0.3·연기 0.5 confidence 기준을 각각 적용
+- 같은 클래스·박스 IoU 0.2 이상의 영역을 연결해 최근 20프레임 중 16회 이상 탐지 시 기존 탐지 JSON 전송, 첫 20프레임 이전에는 전송하지 않음
+- 확정 후에도 현재 프레임 탐지와 16/20 조건을 만족할 때만 갱신 전송, Backend의 이벤트 집계·fire 문자 발송 규칙은 동일
 
 ### `POST /cameras/:camera_id/test-runs`
 
