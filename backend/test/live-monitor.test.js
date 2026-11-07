@@ -62,6 +62,30 @@ function fakeRuns() {
   };
 }
 
+test('서버의 10초 종료 제한 전에 응답 없는 AI를 강제 종료한다', async () => {
+  const signals = [];
+  const monitor = createLiveMonitor({
+    catalog: { list: async () => ({ items: cameras }) },
+    canRun: async () => true, runManager: fakeRuns(),
+    finalizeEvents: async () => {}, getToken: () => 'test-token',
+    spawnImpl() {
+      const child = new EventEmitter();
+      child.stdin = new PassThrough();
+      child.kill = signal => {
+        signals.push(signal);
+        if (signal === 'SIGKILL') queueMicrotask(() => child.emit('close', 0));
+      };
+      return child;
+    },
+  });
+  await monitor.start();
+  const started = performance.now();
+  await monitor.stop();
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.ok(performance.now() - started < 9000, '서버 종료 제한 전에 정리할 여유가 있어야 합니다.');
+  assert.equal(monitor.status().state, 'stopped');
+});
+
 test('AI 실행 파일이 없으면 ITS 호출 없이 6개 카메라를 대기 상태로 표시한다', async () => {
   let lists = 0;
   const monitor = createLiveMonitor({

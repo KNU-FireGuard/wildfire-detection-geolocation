@@ -30,7 +30,7 @@ function createLiveMonitor({
   restartDelayMs = 10000,
   heartbeatTimeoutMs = 120000,
   watchdogIntervalMs = 30000,
-  terminationGraceMs = 10000,
+  terminationGraceMs = 5000,
 } = {}) {
   if (!catalog) throw new Error('ITS CCTV 목록이 필요합니다.');
   const resolvedRunnerPath = runnerPath ? path.resolve(PROJECT_ROOT, runnerPath) : '';
