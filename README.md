@@ -110,7 +110,8 @@ npm run dev
 - 실시간 확정 탐지는 위치 계산을 기다리지 않고 먼저 전송, 위치는 계산 후 같은 이벤트에 보완
 - 실시간 위치는 고정 자세가 없어도 능선·DEM으로 자동 추정, 화각 미등록 시 기본 60° 사용, Backend 로그의 `location_ready`·`reason`·`warnings`·`retry_in_s`로 준비·실패·재시도 확인
 - 화재 문자: 기존 DB는 `sql/init.sql` 재실행, 사이드 메뉴 `문자 알림 관리`에서 관리자 로그인 후 카메라별 번호 설정과 발송 내역 확인
-- `SMS_PROVIDER=console`(기본)은 실제 발송 없이 Backend 로그와 발송 내역만 기록
+- `.env.example`은 실제 발송용 `SMS_PROVIDER=solapi`로 설정, 로그만 확인하려면 `console`로 변경
+- `SMS_PROVIDER` 미설정 시에는 `console`로 동작하며 실제 발송 없이 Backend 로그와 발송 내역만 기록
 - 실제 발송은 [솔라피](https://solapi.com) 가입 후 `.env`에 `SMS_PROVIDER=solapi`, `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`, `SOLAPI_SENDER` 설정, Backend 재시작
 - 가입 본인인증 번호는 발신번호로 자동 등록, 가입 시 300P 무료(SMS 건당 18P), 소진되면 충전 필요
 
