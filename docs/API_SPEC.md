@@ -155,6 +155,7 @@
 
 - `acknowledged_at`: 운영자가 확인한 시각, `null`이면 확인 대기
 - `is_alerting`: 확인하지 않았고 마지막 탐지가 30분 안인 `fire` 이벤트이면 `true`, 마지막 탐지는 종료된 이벤트의 `ended_at`, 진행 중이면 `updated_at`
+- `is_popup_alerting`: 확인하지 않았고 마지막 탐지가 30분 안인 `fire`·`smoke` 이벤트이면 `true`, DB 시각으로 계산하며 Frontend는 브라우저 시각으로 재판정하지 않음
 - `updated_at`: 진행 중 이벤트에서는 마지막 탐지 시각, 확인 API는 값을 바꾸지 않음
 
 - 실시간 탐지 이벤트는 `video_id: null`, `camera_id: 카메라 ID`

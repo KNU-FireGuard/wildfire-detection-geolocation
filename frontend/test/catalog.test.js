@@ -225,6 +225,15 @@ test('서버의 알림 중(is_alerting) 값을 alerting으로 변환하고 값�
   assert.equal(events[1].alerting, false)
 })
 
+test('서버 팝업 판단은 연기에도 true·false 그대로 전달한다', async () => {
+  globalThis.fetch = async () => page([
+    { ...rawEvent, class: 'smoke', is_alerting: false, is_popup_alerting: true },
+    { ...rawEvent, id: 11, is_popup_alerting: false },
+    { ...rawEvent, id: 12 },
+  ])
+  assert.deepEqual((await fetchEvents()).map(event => event.popupAlerting), [true, false, null])
+})
+
 test('이벤트 확인은 로그인 없이 공개 주소에 POST하고 실패 메시지를 전달한다', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {

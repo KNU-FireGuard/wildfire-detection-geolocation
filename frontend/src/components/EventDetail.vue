@@ -56,7 +56,6 @@ const cameraStatusLabel = computed(() => {
           <dt>탐지 시각</dt><dd><time :datetime="event.detectedAt">{{ formatDetectedAt(event.detectedAt) }} <small>KST</small></time></dd>
           <dt>CCTV</dt><dd>{{ camera?.name ?? '카메라 정보 없음' }}</dd>
           <dt>탐지 유형</dt><dd>{{ formatType(event.type) }}</dd>
-          <dt>AI 신뢰도</dt><dd><span class="confidence-value">{{ formatConfidence(event.confidence) }}</span></dd>
           <dt>추정 위치</dt><dd>{{ event.estimatedLocation ? '위치 추정 완료' : '위치 추정 정보 없음' }}</dd>
         </dl>
         <button type="button" class="primary-button detail-toggle" :aria-expanded="showDetails" aria-controls="extended-detail" @click="showDetails = !showDetails"><DashboardIcon name="bell" :size="18" />{{ showDetails ? '상세 정보 접기' : '상세 정보 보기' }}<DashboardIcon name="arrow" :size="18" /></button>

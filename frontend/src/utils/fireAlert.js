@@ -11,6 +11,7 @@ export function activeFireCameraIds(events) {
 
 function isPopupDetection(event, now) {
   if (event.status === 'CONFIRMED' || event.acknowledgedAt) return false
+  if (typeof event.popupAlerting === 'boolean') return event.popupAlerting
   if (event.type === 'fire') return isAlertingFire(event)
   // Backend의 is_alerting은 fire 전용이므로 연기는 확인 여부와 마지막 탐지 시각으로 판단
   if (event.type !== 'smoke') return false
