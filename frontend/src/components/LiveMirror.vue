@@ -11,6 +11,7 @@ const props = defineProps({
 })
 const target = ref(null)
 const playing = ref(false)
+const hasPlayed = ref(false)
 const captureFailed = ref(false)
 const source = computed(() => getLiveVideo(props.cameraId))
 const canCapture = computed(() => typeof source.value?.captureStream === 'function')
@@ -20,6 +21,7 @@ watch([target, source], ([element, from]) => {
   detach()
   detach = () => {}
   playing.value = false
+  hasPlayed.value = false
   if (!element) return
   if (!from || typeof from.captureStream !== 'function') {
     element.srcObject = null
@@ -48,8 +50,8 @@ onBeforeUnmount(() => {
 <template>
   <LiveVideo v-if="(source && !canCapture) || captureFailed" :url="url" />
   <div v-else class="mirror">
-    <video ref="target" autoplay muted playsinline @playing="playing = true" @waiting="playing = false" />
-    <p v-if="!playing" class="stream-status" role="status">CCTV 영상 연결 중…</p>
+    <video ref="target" autoplay muted playsinline @playing="playing = true; hasPlayed = true" @waiting="playing = false" />
+    <p v-if="!hasPlayed && !playing" class="stream-status" role="status">CCTV 영상 연결 중…</p>
   </div>
 </template>
 

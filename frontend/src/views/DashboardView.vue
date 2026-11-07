@@ -25,6 +25,8 @@ const events = ref([])
 const videos = ref([])
 const selectedEventId = ref(null)
 const selectedCameraId = ref(null)
+const mapFocusRequest = ref(null)
+let mapFocusSequence = 0
 const mapVisible = ref(true)
 const isLoading = ref(true)
 const loadError = ref('')
@@ -41,6 +43,8 @@ let requestController
 let clockInterval
 let refreshInterval
 let loading = false
+let refreshingTestEvents = false
+let dataRevision = 0
 let linkApplied = false
 let knownEventIds = null
 const fireAlerts = ref([])
@@ -82,6 +86,7 @@ async function runAcknowledge(ids) {
   try {
     if (dataSource === 'api') for (const id of ids) await acknowledgeEvent(id, adminToken.value)
     events.value = applyAcknowledged(events.value, ids)
+    dataRevision++
     fireAlerts.value = fireAlerts.value.filter(alert => events.value.find(event => event.id === alert.id)?.alerting)
     ackWaitingIds.value = []
     if (dataSource === 'api') await loadData({ silent: true })
@@ -104,12 +109,22 @@ const pendingCount = computed(() => events.value.some(event => event.status != n
 function selectEvent(id) {
   selectedCameraId.value = null
   selectedEventId.value = id
+  mapFocusRequest.value = { kind: 'event', id, sequence: ++mapFocusSequence }
 }
 function selectCamera(id) {
   selectedCameraId.value = id
   const latest = events.value.filter(event => event.cameraId === id)
     .reduce((current, event) => !current || Date.parse(event.detectedAt) > Date.parse(current.detectedAt) ? event : current, null)
   selectedEventId.value = latest?.id ?? null
+  mapFocusRequest.value = { kind: 'camera', id, sequence: ++mapFocusSequence }
+}
+function finishMapFocus(sequence) {
+  if (mapFocusRequest.value?.sequence === sequence) mapFocusRequest.value = null
+}
+function closeCctv() {
+  selectedCameraId.value = null
+  selectedEventId.value = null
+  mapFocusRequest.value = null
 }
 function selectLiveTile(id) {
   if (id === null) {
@@ -120,6 +135,7 @@ function selectLiveTile(id) {
   selectCamera(id)
 }
 function applyData(nextCameras, nextEvents, nextVideos = []) {
+  dataRevision++
   const selection = retainSelection(selectedCameraId.value, selectedEventId.value, nextCameras, nextEvents)
   cameras.value = nextCameras
   events.value = nextEvents
@@ -133,9 +149,26 @@ function applyData(nextCameras, nextEvents, nextVideos = []) {
     playAlertTone()
   }
 }
+async function refreshTestEvents() {
+  if (dataSource !== 'api' || loading || refreshingTestEvents || ackBusy.value) return
+  refreshingTestEvents = true
+  const revision = dataRevision
+  try {
+    const nextEvents = await fetchEvents()
+    if (revision === dataRevision && !loading && !ackBusy.value) {
+      applyData(cameras.value, nextEvents, videos.value)
+      refreshError.value = ''
+    }
+  } catch (error) {
+    if (revision === dataRevision) refreshError.value = `최신 이벤트를 가져오지 못했습니다. ${error.message}`
+  } finally {
+    refreshingTestEvents = false
+  }
+}
 async function loadData({ silent = false } = {}) {
   if (loading) return
   loading = true
+  const revision = ++dataRevision
   if (!silent) {
     isLoading.value = true
     loadError.value = ''
@@ -169,6 +202,7 @@ async function loadData({ silent = false } = {}) {
       monitorState: states.get(camera.id)?.state ?? 'unknown',
       lastFrameAt: states.get(camera.id)?.last_frame_at ?? null,
     }))
+    if (revision !== dataRevision) return
     applyData([...nextCameras.filter(camera => camera.sourceType !== 'live'), ...liveCameras], nextEvents, nextVideos)
     refreshError.value = ''
     // 카메라 목록에서 넘어온 경우 첫 조회 뒤 한 번만 해당 카메라를 선택
@@ -264,8 +298,8 @@ onBeforeUnmount(() => {
         </form>
         <p v-if="ackError" class="refresh-error" role="alert">{{ ackError }}</p>
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
-          <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" :fire-camera-ids="fireCameraIds" @select-camera="selectCamera" />
-          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror />
+          <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" :focus-request="mapFocusRequest" :fire-camera-ids="fireCameraIds" @select-camera="selectCamera" @focus-applied="finishMapFocus" />
+          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror closable @close="closeCctv" @test-progress="refreshTestEvents" />
           <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
           <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" @select="selectEvent" @acknowledge="acknowledge" />
         </section>

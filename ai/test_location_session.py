@@ -155,13 +155,54 @@ class TestBlindPoseOnce(LocationSessionCase):
 
         cls.frame, _ = render_synthetic_cctv_frame(cls.provider, *TRUE_POSE, fov_h=TRUE_FOV, add_osd=True)
 
-    def _session(self, configs):
+    def _session(self, configs, **session_options):
         from ai.fire_location_estimator import FireLocationEstimator
         from ai.location_session import LocationSession
 
         counter = CountingProvider(self.provider)
         est = FireLocationEstimator(dem_provider=counter, camera_configs=configs)
-        return LocationSession(self.camera, estimator=est), counter
+        return LocationSession(self.camera, estimator=est, **session_options), counter
+
+    def test_changed_live_view_can_reestimate_without_reusing_fixed_pose(self) -> None:
+        session, counter = self._session([config_entry(fixed_pose=True)], allow_fixed_pose=False)
+        status = session.prepare(frame=self.frame, frame_size=(W, H))
+        self.assertTrue(status["ready"], status)
+        self.assertEqual(status["mode"], "blind_360_once")
+        self.assertEqual(counter.blind_calls, 1)
+
+    def test_live_worker_without_pose_uses_real_skyline_matching_and_ray_casting(self) -> None:
+        import time
+        from unittest.mock import patch
+        from ai.fire_location_estimator import FireLocationEstimator
+        from ai.inference.backend_connect import detection_payload
+        from ai.inference.live_runner import AnalysisContext, LocationTask, LocationWorker, Packet
+        from ai.location_session import LocationSession
+        from ai.ridge_detector import render_synthetic_cctv_frame
+
+        frame, _ = render_synthetic_cctv_frame(self.provider, *TRUE_POSE, fov_h=60, add_osd=True)
+        counter = CountingProvider(self.provider)
+        estimator = FireLocationEstimator(dem_provider=counter, camera_configs=[])
+        camera = {"camera_id": 8, "run_id": 9, "name": "보정 없는 실시간 카메라",
+                  "latitude": self.provider.cam_lat, "longitude": self.provider.cam_lon}
+        emitted = []
+        worker = LocationWorker(lambda task, location: emitted.append(location))
+        context = AnalysisContext()
+
+        def create_session(metadata, **kwargs):
+            return LocationSession(metadata, estimator=estimator, **kwargs)
+
+        with patch('ai.location_session.LocationSession', side_effect=create_session):
+            first = Packet(0, 1, 0, time.monotonic(), frame)
+            worker.observe(camera, first, context)
+            worker.run_once()
+            bbox, expected = self.ground_bbox(0, 1300, fov=60)
+            payload = detection_payload(9, 8, 'fire', .9, bbox)
+            current = Packet(4, 1, 20, time.monotonic(), frame)
+            worker.submit(LocationTask(camera, current, context, payload))
+            worker.run_once()
+        self.assertEqual(counter.blind_calls, 3)
+        self.assertEqual(len(emitted), 1)
+        self.assertLess(haversine_distance(emitted[0]['latitude'], emitted[0]['longitude'], *expected), 100)
 
     def test_configured_fov_without_pose_estimates_pose_once(self) -> None:
         session, counter = self._session([config_entry(fixed_pose=False)])

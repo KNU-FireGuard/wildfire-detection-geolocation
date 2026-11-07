@@ -221,6 +221,23 @@ async function withAlertSpy(fn) {
   try { await fn(alerts); } finally { fireAlert.notifyFireDetected = original; db.updateRows = null; db.alertingRows = []; }
 }
 
+test('실시간 탐지를 위치 없이 먼저 저장한 뒤 같은 실행의 위치를 보완해도 이벤트·문자는 한 번만 생성한다', async () => {
+  await withAlertSpy(async alerts => {
+    const liveRun = testRuns.createRun({ cameraId: 11, videoId: null });
+    const body = { ...payload, run_id: liveRun.id, camera_id: 11 };
+    const before = queryCalls.length;
+    assert.equal((await postDetection(body)).status, 202);
+    assert.equal(alerts.length, 1, '위치 계산을 기다리지 않고 화재 알림을 요청한다');
+    const location = { latitude: 36.4, longitude: 128.6, error_range_m: 100 };
+    assert.equal((await postDetection({ ...body, location_estimation: location })).status, 202);
+    const calls = queryCalls.slice(before);
+    assert.equal(calls.filter(call => /INSERT INTO detection_events/.test(call.sql)).length, 1);
+    const update = calls.find(call => /UPDATE detection_events/.test(call.sql));
+    assert.deepEqual(update.params.slice(2), [36.4, 128.6, 100]);
+    assert.equal(alerts.length, 1, '위치 보완은 추가 문자를 요청하지 않는다');
+  });
+});
+
 test('같은 카메라에 확인하지 않은 화재가 알림 중이면 새 실행의 fire 이벤트는 만들되 문자는 보내지 않는다', async () => {
   await withAlertSpy(async alerts => {
     db.alertingRows = [{ '?column?': 1 }];

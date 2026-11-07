@@ -104,8 +104,11 @@ npm run dev
 - Backend 주소: `http://127.0.0.1:3000`
 - ITS 실영상 사용 시 루트 `.env`에 `ITS_CCTV_API_KEY=발급키` 설정 후 Backend 재시작
 - 대시보드의 CCTV 주소 갱신 버튼에서 관리자 계정으로 최초 목록 조회 또는 영상 주소 수동 갱신
-- Test 카메라를 선택한 뒤 `Test 분석 시작`에서 관리자 계정으로 등록 영상 분석 실행
-- AI 실시간 작업자가 준비되면 `.env`의 `AI_LIVE_RUNNER_PATH`에 저장소 루트 기준 Python 파일 경로 입력 후 Backend 재시작
+- Test 카메라를 선택한 뒤 `Test 분석 시작`을 누르면 로그인 없이 등록 영상 분석 실행
+- Backend를 재시작하면 저장된 실시간 CCTV 6대를 자동 분석, 기본 작업자는 `ai/inference/live_runner.py`이며 `AI_LIVE_RUNNER_PATH`는 비워 둬도 됨
+- 실시간도 5fps·최근 20프레임 중 16회·불 0.3/연기 0.5 적용, Backend 로그의 `analysis_fps`·`dropped`·`timings`로 처리 속도와 단계별 소요 시간 확인
+- 실시간 확정 탐지는 위치 계산을 기다리지 않고 먼저 전송, 위치는 계산 후 같은 이벤트에 보완
+- 실시간 위치는 고정 자세가 없어도 능선·DEM으로 자동 추정, 화각 미등록 시 기본 60° 사용, Backend 로그의 `location_ready`·`reason`·`warnings`·`retry_in_s`로 준비·실패·재시도 확인
 - 화재 문자: 기존 DB는 `sql/init.sql` 재실행, 사이드 메뉴 `문자 알림 관리`에서 관리자 로그인 후 카메라별 번호 설정과 발송 내역 확인
 - `SMS_PROVIDER=console`(기본)은 실제 발송 없이 Backend 로그와 발송 내역만 기록
 - 실제 발송은 [솔라피](https://solapi.com) 가입 후 `.env`에 `SMS_PROVIDER=solapi`, `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`, `SOLAPI_SENDER` 설정, Backend 재시작

@@ -106,3 +106,18 @@ test('영상을 받아 오는 동안에도 사용자에게 내부 용어 대신 
   unregisterLiveVideo(14, tile)
 })
 
+test('한 번 재생된 확대 영상은 일시적으로 기다려도 연결 안내로 덮지 않는다', async () => {
+  const tile = { captureStream: () => ({ name: 'live' }) }
+  registerLiveVideo(15, tile)
+  const { root, app } = mount({ cameraId: 15, url: 'https://example.test/15.m3u8' })
+  await settle()
+  const [video] = findAll(root, 'video')
+  video.props.onPlaying()
+  await nextTick()
+  video.props.onWaiting()
+  await nextTick()
+  assert.doesNotMatch(allText(root), /CCTV 영상 연결 중/)
+  app.unmount()
+  unregisterLiveVideo(15, tile)
+})
+

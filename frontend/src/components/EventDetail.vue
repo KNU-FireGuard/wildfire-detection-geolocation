@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, ref } from 'vue'
 import DashboardIcon from './DashboardIcon.vue'
 import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
+import { errorRangeDisplay } from '../maps/naverScene'
 const LiveVideo = defineAsyncComponent(() => import('./LiveVideo.vue'))
 const LiveMirror = defineAsyncComponent(() => import('./LiveMirror.vue'))
 const TestRunPanel = defineAsyncComponent(() => import('./TestRunPanel.vue'))
@@ -11,8 +12,11 @@ const props = defineProps({
   videos: { type: Array, default: () => [] },
   // true이면 지도 아래 실시간 CCTV 영상에서 재생 중인 같은 영상을 공유하고 영상 서버에 다시 접속하지 않음
   mirror: { type: Boolean, default: false },
+  closable: { type: Boolean, default: false },
 })
+const emit = defineEmits(['test-progress', 'close'])
 const showDetails = ref(false)
+const rangeDisplay = computed(() => errorRangeDisplay(props.event?.estimatedLocation))
 const testFrameUrl = ref('')
 const cameraStatusLabel = computed(() => {
   if (props.camera?.sourceType === 'live') return ({
@@ -28,7 +32,10 @@ const cameraStatusLabel = computed(() => {
   <section class="dashboard-panel" aria-labelledby="detail-title">
     <div class="panel-heading video-heading">
       <h2 id="detail-title">{{ camera?.name ?? 'CCTV' }} <span class="title-caption">영상</span></h2>
-      <span class="camera-status" :class="{ online: camera?.monitorState === 'running' || camera?.status === 'ONLINE' }"><i />{{ cameraStatusLabel }}</span>
+      <div class="video-actions">
+        <span class="camera-status" :class="{ online: camera?.monitorState === 'running' || camera?.status === 'ONLINE' }"><i />{{ cameraStatusLabel }}</span>
+        <button v-if="closable" type="button" class="close-cctv" @click="emit('close')">CCTV 닫기</button>
+      </div>
     </div>
     <div class="video-placeholder" aria-label="CCTV 영상">
       <template v-if="camera?.sourceType === 'live' && camera.streamUrl">
@@ -40,7 +47,7 @@ const cameraStatusLabel = computed(() => {
       <div v-else-if="camera?.sourceType === 'test'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>Test 분석을 시작하면 탐지 영상이 표시됩니다.</strong></div>
       <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong></div>
     </div>
-    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" @frame="testFrameUrl = $event" />
+    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" @frame="testFrameUrl = $event" @events-updated="emit('test-progress')" />
     <div class="event-info" aria-live="polite">
       <div class="info-heading"><h3>탐지 이벤트 정보</h3><span v-if="event" class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span></div>
       <p v-if="!event" class="empty-message">이벤트를 선택하면 상세 정보를 확인할 수 있습니다.</p>
@@ -68,7 +75,7 @@ const cameraStatusLabel = computed(() => {
           <h4>Detection Event 정보</h4>
           <dl class="extended-info"><dt>Event ID</dt><dd>{{ event.id }}</dd><dt>탐지 시각 (KST)</dt><dd>{{ formatDetectedAt(event.detectedAt) }}</dd><dt>탐지 유형</dt><dd>{{ formatType(event.type) }}</dd><dt>AI 신뢰도</dt><dd>{{ formatConfidence(event.confidence) }}</dd><dt>이벤트 상태</dt><dd>{{ formatStatus(event.status) }}</dd></dl>
           <h4>Estimated Location</h4>
-          <dl v-if="event.estimatedLocation" class="extended-info"><dt>추정 위도</dt><dd>{{ event.estimatedLocation.latitude }}</dd><dt>추정 경도</dt><dd>{{ event.estimatedLocation.longitude }}</dd><dt>추정 주소</dt><dd>{{ event.estimatedLocation.address || '추정 주소 정보 없음' }}</dd><dt>오차 반경</dt><dd>{{ event.estimatedLocation.errorRadiusM == null ? '정보 없음' : `${event.estimatedLocation.errorRadiusM} m` }}</dd></dl>
+          <dl v-if="event.estimatedLocation" class="extended-info"><dt>추정 위도</dt><dd>{{ event.estimatedLocation.latitude }}</dd><dt>추정 경도</dt><dd>{{ event.estimatedLocation.longitude }}</dd><dt>추정 주소</dt><dd>{{ event.estimatedLocation.address || '추정 주소 정보 없음' }}</dd><dt>오차 범위</dt><dd>{{ rangeDisplay.label }}</dd></dl>
           <p v-else class="empty-message">위치 추정 정보 없음</p>
         </div>
       </template>
@@ -77,7 +84,7 @@ const cameraStatusLabel = computed(() => {
 </template>
 
 <style scoped>
-.video-heading { margin-bottom: 15px; }.title-caption { font-size: 13px; font-weight: 400; color: var(--text-3); margin-left: 6px; }
+.video-heading { margin-bottom: 15px; align-items: flex-start; }.title-caption { font-size: 13px; font-weight: 400; color: var(--text-3); margin-left: 6px; }.video-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }.close-cctv { border: 1px solid var(--line-strong); border-radius: 8px; padding: 5px 9px; background: var(--surface-2); color: var(--text-2); font-size: 11px; white-space: nowrap; cursor: pointer; }.close-cctv:hover { border-color: var(--accent); color: var(--text); }
 .camera-status { display: flex; align-items: center; gap: 7px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); font-size: 11px; color: var(--text-2); white-space: nowrap; }.camera-status i { width: 7px; height: 7px; background: var(--text-3); border-radius: 50%; }.camera-status.online i { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .video-placeholder { position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #05080c; color: var(--text); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
 .video-placeholder video, .video-placeholder .test-frame { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #05080c; }.video-message { min-height: 220px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 30px; text-align: center; }.video-icon { display: grid; place-items: center; width: 63px; height: 63px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text-2); border-radius: 50%; margin-bottom: 15px; }.video-message strong { font-size: 15px; font-weight: 600; }.video-message p { font-size: 12px; color: var(--text-2); margin: 9px 0 0; }

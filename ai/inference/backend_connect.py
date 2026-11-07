@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import queue
 import sys
@@ -12,6 +13,10 @@ AI_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = AI_DIR / "weights" / "yolo26s_final" / "weights" / "best.pt"
 BOUNDARY = "frame"
 FRAME_QUEUE_SIZE = 2
+
+if str(AI_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(AI_DIR.parent))
+from ai.inference.temporal_detection import FrameSampler, TemporalDetectionGate
 
 
 def pick_device():
@@ -32,10 +37,10 @@ def parse_args(argv=None):
     parser.add_argument("--video-url", required=True, help="Annotated MJPEG upload URL")
     parser.add_argument("--result-url", required=True, help="Detection JSON API URL")
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
-    parser.add_argument("--confidence", type=float, default=0.25)
+    parser.add_argument("--confidence", type=float, default=0.3, help="Minimum fire confidence")
+    parser.add_argument("--smoke-confidence", type=float, default=0.5, help="Minimum smoke confidence")
     parser.add_argument("--iou", type=float, default=0.45)
     parser.add_argument("--image-size", type=int, default=640)
-    parser.add_argument("--vid-stride", type=int, default=6, help="Analyze every Nth frame")
     parser.add_argument("--stream-width", type=int, default=960, help="Max width of streamed frames (0 = original)")
     parser.add_argument("--jpeg-quality", type=int, default=80)
     parser.add_argument("--device", default=None, help="cuda:0, mps, cpu (default: auto)")
@@ -51,12 +56,10 @@ def parse_args(argv=None):
         parser.error(f"Video file not found: {args.source_path}")
     if not args.model_path.is_file():
         parser.error(f"Model file not found: {args.model_path}")
-    if not 0 <= args.confidence <= 1 or not 0 <= args.iou <= 1:
-        parser.error("--confidence and --iou must be between 0 and 1")
+    if not 0 <= args.confidence <= 1 or not 0 <= args.smoke_confidence <= 1 or not 0 <= args.iou <= 1:
+        parser.error("--confidence, --smoke-confidence and --iou must be between 0 and 1")
     if args.image_size <= 0:
         parser.error("--image-size must be positive")
-    if args.vid_stride <= 0:
-        parser.error("--vid-stride must be positive")
     if args.stream_width < 0:
         parser.error("--stream-width must be zero or positive")
     if not 1 <= args.jpeg_quality <= 100:
@@ -126,32 +129,47 @@ def prepare_location(session, result):
     return status
 
 
-def frame_detections(result, names, run_id, camera_id, session):
+def frame_detections(result, names, run_id, camera_id, session, fire_confidence=0.3, smoke_confidence=0.5,
+                     gate=None, timestamp=None):
     """한 프레임의 fire·smoke box를 탐지 JSON 목록으로 변환, 세션이 있으면 위치 포함"""
     payloads = []
-    if result.boxes is None:
-        return payloads
-    for box in result.boxes:
+    for box in result.boxes if result.boxes is not None else []:
         class_name = str(names[int(box.cls.item())]).lower()
         if class_name not in {"fire", "smoke"}:
             continue
+        confidence = float(box.conf.item())
+        if confidence < (fire_confidence if class_name == "fire" else smoke_confidence):
+            continue
         coordinates = box.xyxy[0].tolist()
-        location = session.locate(coordinates) if session is not None else None
         payloads.append(
             detection_payload(
                 run_id=run_id,
                 camera_id=camera_id,
                 class_name=class_name,
-                confidence=box.conf.item(),
+                confidence=confidence,
                 coordinates=coordinates,
-                location=location,
             )
         )
+    if gate is not None:
+        candidates = [
+            {"class": payload["detection"]["class"],
+             "bbox": tuple(payload["detection"]["bbox"][key] for key in ("x1", "y1", "x2", "y2"))}
+            for payload in payloads
+        ]
+        payloads = [payloads[index] for index in gate.update(timestamp, candidates)]
+    if session is not None:
+        for payload in payloads:
+            bbox = payload["detection"]["bbox"]
+            payload["location_estimation"] = session.locate([bbox[key] for key in ("x1", "y1", "x2", "y2")])
     return payloads
 
 
-def send_detections(model, result, args, headers, detection_count, session=None):
-    for payload in frame_detections(result, model.names, args.run_id, args.camera_id, session):
+def send_detections(model, result, args, headers, detection_count, session=None, gate=None, timestamp=None):
+    for payload in frame_detections(
+        result, model.names, args.run_id, args.camera_id, session,
+        fire_confidence=args.confidence, smoke_confidence=args.smoke_confidence,
+        gate=gate, timestamp=timestamp,
+    ):
         response = requests.post(
             args.result_url,
             headers=headers,
@@ -160,6 +178,51 @@ def send_detections(model, result, args, headers, detection_count, session=None)
         )
         response.raise_for_status()
         detection_count[0] += 1
+
+
+def filter_result_boxes(result, names, fire_confidence, smoke_confidence):
+    """영상 박스와 탐지 JSON에 동일한 클래스별 confidence 기준 적용."""
+    if result.boxes is None:
+        return
+    boxes = result.boxes
+    keep = boxes.conf > 1  # 클래스별 조건을 합칠 빈 마스크
+    entries = names.items() if isinstance(names, dict) else enumerate(names)
+    thresholds = {"fire": fire_confidence, "smoke": smoke_confidence}
+    for class_id, name in entries:
+        threshold = thresholds.get(str(name).lower())
+        if threshold is not None:
+            keep |= (boxes.cls == class_id) & (boxes.conf >= threshold)
+    result.update(boxes=boxes.data[keep])
+
+
+def sampled_video_frames(source_path, stop):
+    """MP4의 영상 시각 기준 5fps 선택, 선택하지 않은 프레임은 YOLO에 전달하지 않음."""
+    import cv2
+
+    capture = cv2.VideoCapture(str(source_path))
+    try:
+        if not capture.isOpened():
+            raise RuntimeError("Failed to open source video")
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        if not math.isfinite(fps) or fps < 5:
+            raise RuntimeError("5fps analysis requires source video FPS >= 5")
+        sampler = FrameSampler()
+        index = 0
+        previous_timestamp = None
+        while not stop.is_set():
+            ok, frame = capture.read()
+            if not ok:
+                break
+            timestamp = capture.get(cv2.CAP_PROP_POS_MSEC) / 1000
+            # 일부 MP4 디코더는 POS_MSEC를 제공하지 않음: 명시된 원본 FPS로 복원
+            if not math.isfinite(timestamp) or timestamp < 0 or (previous_timestamp is not None and timestamp <= previous_timestamp):
+                timestamp = index / fps
+            previous_timestamp = timestamp
+            index += 1
+            if sampler.accept(timestamp):
+                yield timestamp, frame
+    finally:
+        capture.release()
 
 
 def infer_frames(model, args, headers, detection_count, frames, stop, session=None):
@@ -174,27 +237,43 @@ def infer_frames(model, args, headers, detection_count, frames, stop, session=No
         return False
 
     try:
-        results = model.predict(
-            source=str(args.source_path),
-            conf=args.confidence,
-            iou=args.iou,
-            imgsz=args.image_size,
-            vid_stride=args.vid_stride,
-            device=args.device,
-            stream=True,
-            save=False,
-            show=False,
-            verbose=False,
-        )
+        import cv2
+
+        gate = TemporalDetectionGate()
         prepared = False
-        for result in results:
+        previous_scene = None
+        previous_shape = None
+        for timestamp, frame in sampled_video_frames(args.source_path, stop):
+            # 큰 장면 전환·해상도 변경 시 이전 시점의 탐지 투표를 이어붙이지 않음
+            scene = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (32, 18))
+            scene_changed = previous_scene is not None and (
+                frame.shape != previous_shape
+                or cv2.absdiff(scene, previous_scene).mean() / 255 > 0.25
+            )
+            if scene_changed:
+                gate.reset()
+                # 고정 프리셋 자세를 다른 시점에 재사용하면 잘못된 위치가 나올 수 있음
+                session = None
+                print("Scene changed: reset detection window; location disabled for this run", flush=True)
+            previous_scene, previous_shape = scene, frame.shape
+            result = model.predict(
+                source=frame,
+                conf=min(args.confidence, args.smoke_confidence),
+                iou=args.iou,
+                imgsz=args.image_size,
+                device=args.device,
+                save=False,
+                show=False,
+                verbose=False,
+            )[0]
+            filter_result_boxes(result, model.names, args.confidence, args.smoke_confidence)
             if not prepared:
                 # 위치 추정 자세는 첫 분석 프레임에서 1회 결정, 실패하면 이후 위치는 null
                 prepared = True
                 status = prepare_location(session, result)
                 if status is None or not status.get("ready"):
                     session = None
-            send_detections(model, result, args, headers, detection_count, session)
+            send_detections(model, result, args, headers, detection_count, session, gate, timestamp)
             if not put(result):
                 return
         put(None)

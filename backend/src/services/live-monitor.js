@@ -19,7 +19,7 @@ async function fileIsReadable(file) {
 
 function createLiveMonitor({
   catalog,
-  runnerPath = process.env.AI_LIVE_RUNNER_PATH || '',
+  runnerPath = process.env.AI_LIVE_RUNNER_PATH || 'ai/inference/live_runner.py',
   python = process.env.PYTHON_EXECUTABLE || (process.platform === 'win32' ? 'python' : 'python3'),
   spawnImpl = spawn,
   canRun = fileIsReadable,
@@ -123,8 +123,10 @@ function createLiveMonitor({
     const configuration = {
       result_url: `${baseUrl}/detections`,
       heartbeat_url: `${baseUrl}/live-monitor/heartbeat`,
+      model_path: path.resolve(PROJECT_ROOT, process.env.AI_MODEL_PATH || 'ai/weights/yolo26s_final/weights/best.pt'),
       cameras: slots.map(slot => ({
         run_id: slot.run.id, camera_id: slot.cameraId, source_url: slot.streamUrl,
+        name: slot.name, latitude: slot.latitude, longitude: slot.longitude,
       })),
     };
     let child;
@@ -140,7 +142,7 @@ function createLiveMonitor({
     worker = child;
     overall = 'starting';
     child.stdout?.resume();
-    child.stderr?.resume();
+    child.stderr?.on('data', chunk => process.stderr.write(`[AI live] ${chunk}`));
     child.stdin?.on('error', () => child.kill('SIGTERM'));
     child.stdin?.end(JSON.stringify(configuration));
     child.once('spawn', () => {
@@ -174,6 +176,7 @@ function createLiveMonitor({
       && typeof item.streamUrl === 'string' && /^https?:\/\//.test(item.streamUrl));
     const next = valid ? items.map(item => ({
       cameraId: item.cameraId, providerKey: item.providerKey, name: item.name,
+      latitude: item.latitude ?? null, longitude: item.longitude ?? null,
       streamUrl: item.streamUrl, run: null, state: 'waiting_for_ai', lastFrameAt: null,
     })) : [];
     const same = JSON.stringify(slots.map(({ cameraId, streamUrl }) => [cameraId, streamUrl]))

@@ -19,7 +19,7 @@ test('재생을 시작하거나 버퍼링할 때 연결 상태를 바꾼다', ()
   const { descriptor } = parse(source)
   assert.match(descriptor.template.content, /@playing="onPlaying"/)
   assert.match(descriptor.template.content, /@waiting="playing = false"/)
-  assert.match(descriptor.template.content, /v-if="!playing && !error"[^>]*role="status"/)
+  assert.match(descriptor.template.content, /v-if="!hasPlayed && !playing && !error"[^>]*role="status"/)
 })
 
 test('재생이 시작되면 이전 오류를 지우고 재생 중인 영상은 오류 표시가 가리지 않는다', () => {
@@ -41,7 +41,7 @@ test('치명적 오류는 자동 복구를 시도하고 실제 원인을 표시�
   assert.doesNotMatch(script, /CORS 설정을 확인하세요/)
 })
 
-test('연결 오류가 나도 영상이 실제로 재생 중이면 영상을 가리지 않고 모서리 알림만 표시한다', () => {
+test('연결 오류가 나도 영상이 재생 중이면 재연결 문구를 표시하지 않는다', () => {
   const { descriptor } = parse(readFileSync(new URL('../src/components/LiveVideo.vue', import.meta.url), 'utf8'))
   const script = descriptor.scriptSetup.content
   const handler = script.slice(script.indexOf('function handleHlsError'), script.indexOf('watch(() => [props.url'))
@@ -49,9 +49,9 @@ test('연결 오류가 나도 영상이 실제로 재생 중이면 영상을 가
   // 재생 여부는 영상 이벤트(playing·waiting)로만 정하고 오류 처리에서 바꾸지 않음
   assert.doesNotMatch(handler, /playing\.value\s*=/)
   const template = descriptor.template.content
-  assert.match(template, /v-if="playing && \(retrying \|\| error\)"[^>]*class="stream-badge"/)
+  assert.doesNotMatch(template, /재연결 중|stream-badge/)
+  assert.doesNotMatch(template, /v-if="!playing && !error"/)
   assert.match(template, /v-if="error && !playing"[^>]*class="stream-error"/)
-  assert.match(descriptor.styles[0].content, /\.stream-badge\s*\{[^}]*position:\s*absolute/)
 })
 
 test('오류 기록은 치명적 오류에서만 남겨 일시적 경고로 콘솔이 넘치지 않게 한다', () => {

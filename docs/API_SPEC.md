@@ -47,7 +47,7 @@
 - ITS API 호출 없음, 서버 메모리의 6개 감시 상태 조회
 - `200` `{ "state": "waiting_for_ai", "cameras": [{ "camera_id": 9, "provider_key": "...", "name": "CCTV", "run_id": null, "state": "waiting_for_ai", "last_frame_at": null }] }`
 - 상태: `waiting_for_cctv` | `waiting_for_ai` | `starting` | `running` | `restarting` | `failed` | `stopped`
-- `AI_LIVE_RUNNER_PATH`가 없으면 실제 AI 프로세스 없이 `waiting_for_ai` 표시
+- `AI_LIVE_RUNNER_PATH`가 비어 있으면 기본 `ai/inference/live_runner.py` 실행, 지정한 파일이 없으면 `waiting_for_ai` 표시
 - Frontend는 30초마다 상태와 탐지 이벤트를 다시 조회, 상태 조회는 ITS 호출 한도를 사용하지 않음
 
 ### `POST /live-monitor/heartbeat`
@@ -61,8 +61,24 @@
 ### 실시간 AI 작업자 입력 계약
 
 - Backend 시작 시 저장된 CCTV 6곳을 읽고 `AI_LIVE_RUNNER_PATH`의 Python 파일 한 개를 실행
-- Backend가 작업자의 표준 입력에 아래 JSON 한 개를 보내고 입력을 닫음
+- Backend가 작업자의 표준 입력에 UTF-8 JSON 한 개를 보내고 입력을 닫음, AI는 시스템 문자 인코딩과 관계없이 UTF-8로 읽음
 - AI 작업자는 모델을 한 번 로드해 6곳을 지속 분석하고 위 heartbeat와 `POST /detections`에 JSON 전송
+- 기본 작업자는 카메라별 5fps·최근 20프레임 중 16회·불 0.3/연기 0.5·박스 IoU 0.2 기준 적용, HLS 조각 경계에서도 판정 유지
+- 프레임 대기열은 카메라별 최대 3개, 누락·재접속·큰 장면 변화 시 판정 초기화, 대기열 등록 후 1초 넘은 프레임은 추론 전·후 폐기
+- 디코더 시각이 누락·반복되면 마지막 영상 시각과 원본 FPS로 복원, 양수 시각이 역행하면 재접속하여 판정 초기화, 첫 영상 시각과 시각 복원 횟수를 로그로 기록
+- 모델 경로는 `model_path`, 카메라 이름·좌표는 각 항목의 `name`, `latitude`, `longitude`로 전달, 위경도가 없으면 위치 추정 생략
+- 위치는 이름이 일치하는 고정 자세 보정값을 우선 사용, 없으면 기존 `LocationSession`의 영상 능선·DEM 기반 360° 자세 추정 실행, 품질 게이트를 통과한 자세로만 좌표 산출
+- 화각 설정이 없으면 기본 60°와 `FOV_DEFAULT_USED` 경고 사용, 54°·66° 대체 자세는 기존 오차 범위 평가에 반영하며 실제 화각 자동 측정은 미지원
+- 확정 탐지는 `location_estimation: null`로 먼저 전송, Backend가 수락한 표본만 별도 위치 작업자에서 계산해 같은 `run_id`·클래스의 기존 이벤트 보완, 위치 계산 실패가 탐지·문자 알림을 막지 않음
+- 위치 작업자는 첫 분석 프레임부터 DEM을 백그라운드에서 준비, 준비 요청은 카메라별 1개·위치 요청은 카메라·클래스별 최신 1개로 제한, 확정 탐지의 위치 보완을 다른 카메라의 사전 준비보다 우선
+- DEM 준비·능선 미검출·정합 품질 실패는 최신 프레임으로 30·60·120·240·300초 간격 재시도, 이후 최대 300초 간격 유지, 좌표 없음은 재시도 생략
+- 큰 장면 변화·해상도 변경·재접속 시 이전 자세와 대기 결과 무효화, 연속 10개 분석 프레임·영상 시각 1.8초 이상 안정된 뒤 기존 고정 자세를 재사용하지 않고 자동 재추정, 단순 프레임 누락은 탐지 투표만 초기화하고 같은 자세 유지
+- 최초 탐지와 위치 보완은 각각 카메라·클래스별 최신 콜백으로 병합, 프레임 대기열 등록 시각부터 5초가 지난 결과는 위치 계산 전·후와 HTTP 전송 직전에 폐기, 위치 계산 후 유효시간을 새로 시작하지 않음
+- 누락·재접속·장면 전환 전의 대기 중인 탐지·위치 결과는 무효화, 이미 전송 중인 HTTP 요청은 취소하지 않음
+- 실제 분석한 프레임에 대해서만 heartbeat 전송, 30초마다 `analysis_fps`·`dropped`와 추론·대기·DEM 준비·위치 계산·전송 소요 시간의 횟수·평균·최댓값(`timings`, ms)을 로그로 기록
+- 위 유효시간·소요 시간은 로컬 대기열 등록 이후 기준이며 HLS 원본 촬영 시각부터의 전체 지연은 별도 계측 필요
+- `location_ready`, `mode`, `reason`, `warnings`, `retry_in_s`로 위치 준비 상태 기록, 야간·가림·능선 부족·정합 실패 시 위치는 null이며 화재 탐지와 알림은 계속 진행
+- 위치 null은 기존 이벤트 좌표를 삭제하지 않으며 새 위치 보완 시 갱신하는 기존 Backend 저장 정책 유지, 큰 장면 변화 감지는 완전한 PTZ·줌 추적을 대체하지 않음
 - AI 인증 토큰은 환경변수 `AI_CALLBACK_TOKEN`으로 전달, ITS API 키는 AI에 전달하지 않음
 - AI 작업자 종료 시 Backend가 최대 5분 간격까지 늘어나는 재시도 후 재실행, 서버 종료 시 작업자 종료
 
@@ -70,8 +86,9 @@
 {
   "result_url": "http://127.0.0.1:3000/api/detections",
   "heartbeat_url": "http://127.0.0.1:3000/api/live-monitor/heartbeat",
+  "model_path": "/project/ai/weights/yolo26s_final/weights/best.pt",
   "cameras": [
-    { "run_id": 123, "camera_id": 9, "source_url": "http://provider.example/cctv.m3u8" }
+    { "run_id": 123, "camera_id": 9, "source_url": "http://provider.example/cctv.m3u8", "name": "CCTV", "latitude": 36.4, "longitude": 128.6 }
   ]
 }
 ```
@@ -144,9 +161,11 @@
 
 ## 카메라별 Test
 
-- Frontend에서 호출하는 Test 실행·상태·영상 스트림 API는 관리자 JWT 필요
-- Header: `Authorization: Bearer <JWT>`
-- AI 콜백 API는 관리자 JWT 대신 `X-AI-Token` 사용
+- Frontend에서 호출하는 Test 실행·상태·영상 스트림 API는 로그인 없이 사용 가능
+- AI 콜백 API는 `X-AI-Token` 필요
+- Test 작업자는 영상 시각 기준 5fps로 분석하고 불 0.3·연기 0.5 confidence 기준을 각각 적용
+- 같은 클래스·박스 IoU 0.2 이상의 영역을 연결해 최근 20프레임 중 16회 이상 탐지 시 기존 탐지 JSON 전송, 첫 20프레임 이전에는 전송하지 않음
+- 확정 후에도 현재 프레임 탐지와 16/20 조건을 만족할 때만 갱신 전송, Backend의 이벤트 집계·fire 문자 발송 규칙은 동일
 
 ### `POST /cameras/:camera_id/test-runs`
 

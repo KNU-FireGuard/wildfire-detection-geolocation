@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import Hls from 'hls.js'
 import { registerLiveVideo, unregisterLiveVideo } from '../composables/liveVideoRegistry'
-import { MAX_NETWORK_RETRIES, decideRecovery, describeHlsError } from '../utils/hlsRecovery'
+import { decideRecovery, describeHlsError } from '../utils/hlsRecovery'
 import { trackPlaybackProgress } from '../utils/playbackProgress'
 
 // cameraId를 주면 지도 아래 실시간 CCTV 영상의 이 video 요소를 우측 패널이 공유할 수 있게 등록합니다.
@@ -13,7 +13,7 @@ const props = defineProps({
 const video = ref(null)
 const error = ref('')
 const playing = ref(false)
-const retrying = ref(0)
+const hasPlayed = ref(false)
 let player
 let retryTimer
 let networkRecoveryKind = null
@@ -27,10 +27,10 @@ function dispose() {
   lastTime = 0
   attempts.network = 0
   attempts.media = 0
-  retrying.value = 0
   player?.destroy()
   player = null
   playing.value = false
+  hasPlayed.value = false
   if (video.value) {
     video.value.pause()
     video.value.removeAttribute('src')
@@ -41,11 +41,11 @@ function dispose() {
 // 버퍼에 남은 영상만 재생될 수 있으므로 네트워크 복구 중에는 재시도를 유지합니다.
 function onPlaying() {
   playing.value = true
+  hasPlayed.value = true
   if (networkRecoveryKind) return
   clearTimeout(retryTimer)
   retryTimer = null
   error.value = ''
-  retrying.value = 0
   attempts.network = 0
   attempts.media = 0
 }
@@ -79,7 +79,6 @@ function handleHlsError(detail) {
   if (next.action === 'retry') {
     networkRecoveryKind = recoveryKind
     attempts.network += 1
-    retrying.value = attempts.network
     clearTimeout(retryTimer)
     // 재생목록 자체를 못 받은 경우에는 startLoad만으로 다시 받지 못하므로 주소를 다시 불러옵니다.
     const reload = /^manifest/.test(detail.details ?? '') ? () => player?.loadSource(props.url) : () => player?.startLoad()
@@ -94,7 +93,6 @@ function handleHlsError(detail) {
     clearTimeout(retryTimer)
     retryTimer = null
     if (detail.type === 'networkError') networkRecoveryKind = recoveryKind
-    retrying.value = 0
     const guidance = detail.type === 'networkError' ? ' 계속 실패하면 CCTV 주소 갱신을 시도하세요.' : ''
     error.value = `영상 연결에 실패했습니다. (${describeHlsError(detail)})${guidance}`
   }
@@ -106,7 +104,7 @@ watch(() => [props.url, video.value], ([url, element]) => {
   if (!url || !element) return
   // hls.js(MSE)를 우선 사용: 브라우저 기본 HLS로 받은 교차 출처 영상은 captureStream으로 공유할 수 없음
   if (Hls.isSupported()) {
-    player = new Hls({ enableWorker: true, liveSyncDurationCount: 2 })
+    player = new Hls({ enableWorker: true, liveSyncDurationCount: 3 })
     player.on(Hls.Events.ERROR, (_event, detail) => handleHlsError(detail))
     player.on(Hls.Events.MANIFEST_LOADED, onManifestLoaded)
     player.on(Hls.Events.LEVEL_LOADED, onLevelLoaded)
@@ -131,9 +129,8 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <video ref="video" autoplay muted playsinline preload="auto" @playing="onPlaying" @timeupdate="onTimeUpdate" @waiting="playing = false" @error="playing = false; error = '영상 연결에 실패했습니다. (재생 오류)'">이 브라우저는 영상을 재생할 수 없습니다.</video>
-    <p v-if="!playing && !error" class="stream-status" role="status">{{ retrying ? `CCTV 영상 재연결 중… (${retrying}/${MAX_NETWORK_RETRIES})` : 'CCTV 영상 연결 중…' }}</p>
+    <p v-if="!hasPlayed && !playing && !error" class="stream-status" role="status">CCTV 영상 연결 중…</p>
     <p v-if="error && !playing" class="stream-error" role="alert">{{ error }}</p>
-    <p v-if="playing && (retrying || error)" class="stream-badge" role="status">{{ retrying ? `연결 끊김 · 재연결 중 (${retrying}/${MAX_NETWORK_RETRIES})` : '연결 끊김 · 영상이 곧 멈출 수 있습니다' }}</p>
   </div>
 </template>
 
@@ -141,6 +138,5 @@ onBeforeUnmount(() => {
 div { position: relative; }
 video { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; max-height: 420px; background: #05080c; }
 .stream-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--text-2); background: #05080c; font-size: 12px; letter-spacing: 0.2px; }
-.stream-badge { position: absolute; top: 8px; right: 8px; margin: 0; padding: 4px 10px; border: 1px solid rgba(246, 189, 74, 0.35); border-radius: 999px; color: var(--warn); background: var(--glass); backdrop-filter: blur(6px); font-size: 11px; pointer-events: none; }
 .stream-error { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 8px 12px; box-sizing: border-box; color: var(--fire); background: #05080c; font-size: 12px; text-align: center; }
 </style>

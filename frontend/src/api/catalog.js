@@ -167,12 +167,11 @@ export async function loginAdmin(username, password) {
   return token
 }
 
-export async function startTestRun(cameraId, token) {
+export async function startTestRun(cameraId) {
   if (!Number.isSafeInteger(cameraId) || cameraId < 1) throw new Error('올바른 카메라 번호가 아닙니다.')
   const response = await fetch(`/api/cameras/${cameraId}/test-runs`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    method: 'POST',
   })
-  if (response.status === 401) throw unauthorizedError()
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || `Test 실행에 실패했습니다. (HTTP ${response.status})`)
@@ -183,9 +182,9 @@ export async function startTestRun(cameraId, token) {
   return result
 }
 
-export async function fetchTestRunStatus(runId, token) {
+export async function fetchTestRunStatus(runId) {
   if (!Number.isSafeInteger(runId) || runId < 1) throw new Error('올바른 실행 번호가 아닙니다.')
-  const response = await fetch(`/api/test-runs/${runId}`, { headers: { Authorization: `Bearer ${token}` } })
+  const response = await fetch(`/api/test-runs/${runId}`)
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || `Test 상태 조회에 실패했습니다. (HTTP ${response.status})`)
@@ -197,9 +196,9 @@ export async function fetchTestRunStatus(runId, token) {
   return result
 }
 
-export async function openTestRunStream(url, token, signal) {
+export async function openTestRunStream(url, signal) {
   if (!/^\/api\/test-runs\/[1-9]\d*\/stream$/.test(url)) throw new Error('Test 영상 주소가 올바르지 않습니다.')
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal })
+  const response = await fetch(url, { signal })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || `분석 영상 연결에 실패했습니다. (HTTP ${response.status})`)
