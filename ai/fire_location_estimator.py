@@ -370,8 +370,12 @@ class FireLocationEstimator:
         binary_search_iters: int = 10,
         bbox_format: str = "xyxy",
         bbox_normalized: bool | None = None,
+        angular_sigma_deg: float | None = None,
+        alt_views: list[dict] | None = None,
     ) -> dict:
         """
+        angular_sigma_deg: 자세 각도 오차(°), 주면 error_range_m 계산 (#59), 없으면 null
+        alt_views: 화각을 바꿔 구한 다른 자세 [{pan, tilt, roll, fov_h}], 그 교차점까지 오차 원에 포함
         Estimate wildfire ignition coordinates (lat, lon, altitude_m, distance_m)
         using 50m Ray Marching + 10-step Binary Search on DEMProvider.
         Supports:
@@ -673,6 +677,14 @@ class FireLocationEstimator:
             }
         est_lat, est_lon = dest_point(cam_lat, cam_lon, ray_bearing, final_d)
         est_alt = float(provider.get_elevation(est_lat, est_lon))
+        error_range_m = None
+        if angular_sigma_deg is not None:
+            error_range_m = self._error_range_m(
+                provider, cam_lat, cam_lon, eye_alt, ray_bearing, ray_el_deg, final_d, est_lat, est_lon,
+                float(angular_sigma_deg), list(alt_views or []), (fire_x, fire_y), (width, height),
+                {"near_m": near_m, "max_range_m": max_range_m, "step_size_m": step_size_m,
+                 "binary_search_iters": binary_search_iters},
+            )
 
         return {
             "intersected": True,
@@ -688,10 +700,62 @@ class FireLocationEstimator:
             "location_estimation": {
                 "latitude": round(est_lat, 6),
                 "longitude": round(est_lon, 6),
-                # 오차 범위 산출 모델이 없어 null (임의 수식 금지, 후속 이슈에서 민감도 기반 산출)
-                "error_range_m": None,
+                "error_range_m": error_range_m,
             },
         }
+
+    def _error_range_m(
+        self,
+        provider,
+        cam_lat: float,
+        cam_lon: float,
+        eye_alt: float,
+        bearing_deg: float,
+        el_deg: float,
+        dist_m: float,
+        est_lat: float,
+        est_lon: float,
+        sigma_deg: float,
+        alt_views: list[dict],
+        fire_xy: tuple[float, float],
+        frame_wh: tuple[int, int],
+        march_kwargs: dict,
+    ) -> float:
+        """
+        위치 오차 반경(m, #59): 자세 각도 오차 σ를 광선 추적에 직접 넣어 교차점이 움직이는 범위
+        - 앞뒤: 고도각 ±σ로 다시 교차, 낮은 각도로 지형을 스치면 크게 움직임 (식 ΔD ≈ D·Δe/sinβ를 실제 지형으로 계산)
+        - 좌우: D·tanσ
+        - alt_views: 화각을 바꿔 구한 자세의 교차점까지 거리
+        - 다시 쏜 광선이 하늘로 빠지면 DEM 끝(max_range_m)까지, near_m 앞에서 막히면 near_m까지를 범위로 봄
+        - 모델 추정값이며 실측 검증 전
+        """
+        near_m = march_kwargs["near_m"]
+        max_range_m = march_kwargs["max_range_m"]
+
+        def along_ray(status: str, d: float | None) -> float:
+            if status == "OK":
+                return abs(float(d) - dist_m)
+            return max_range_m - dist_m if status == "NO_INTERSECTION" else dist_m - near_m
+
+        terms = [dist_m * math.tan(math.radians(sigma_deg))]
+        for sign in (1.0, -1.0):
+            slope = math.tan(math.radians(el_deg + sign * sigma_deg))
+            terms.append(along_ray(*self._march_ray(provider, cam_lat, cam_lon, eye_alt, bearing_deg, slope, **march_kwargs)))
+        width, height = frame_wh
+        for view in alt_views:
+            _, alt_bearing, alt_el = self.compute_3d_ray_vector(
+                fire_x=fire_xy[0], fire_y=fire_xy[1],
+                pan_deg=float(view["pan"]), tilt_deg=float(view["tilt"]), roll_deg=float(view.get("roll", 0.0)),
+                width=width, height=height, fov_h_deg=float(view["fov_h"]),
+            )
+            slope = math.tan(math.radians(alt_el))
+            status, d = self._march_ray(provider, cam_lat, cam_lon, eye_alt, alt_bearing, slope, **march_kwargs)
+            if status == "OK":
+                alt_lat, alt_lon = dest_point(cam_lat, cam_lon, alt_bearing, float(d))
+                terms.append(haversine_distance(alt_lat, alt_lon, est_lat, est_lon))
+            else:
+                terms.append(along_ray(status, d))
+        return float(math.ceil(max(terms) / 10.0) * 10.0)
 
 
 if __name__ == "__main__":
