@@ -105,6 +105,8 @@ test('Test API는 로그인 없이 시작·조회·영상 중계를 허용하고
   const child = spawned.at(-1);
   assert.ok(child);
   assert.ok(child.args.includes('--run-id'));
+  assert.ok(child.args.includes('--capture-url'));
+  assert.ok(child.args.includes(`http://127.0.0.1:3000/api/test-runs/${run.id}/captures`));
   assert.ok(child.args.includes(String(run.id)));
   assert.ok(child.args.includes('--camera-id'));
   assert.ok(child.args.includes('http://127.0.0.1:3000/api/detections'));
@@ -194,6 +196,16 @@ test('Test API는 로그인 없이 시작·조회·영상 중계를 허용하고
     && /ended_at = GREATEST\(started_at, updated_at\)/.test(call.sql)
     && /id = ANY\(\$1::INTEGER\[\]\)/.test(call.sql)
   )));
+});
+
+test('캡처 방식은 MJPEG 업로드 없이 정상 종료할 수 있다', async () => {
+  const response = await fetch(`${base}/cameras/1/test-runs`, { method: 'POST' });
+  assert.equal(response.status, 202);
+  const run = await response.json();
+  assert.equal(run.video_id, 7);
+  spawned.at(-1).child.emit('close', 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await (await fetch(`${base}/test-runs/${run.id}`)).json()).status, 'completed');
 });
 
 test('DB에 위경도가 없는 카메라는 위치 인자를 넘기지 않는다', async () => {

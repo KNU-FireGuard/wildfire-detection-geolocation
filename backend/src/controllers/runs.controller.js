@@ -73,7 +73,7 @@ function attachProcess(run, child) {
 
     if (run.status === 'failed') {
       testRuns.closeSubscribers(run);
-    } else if (code === 0 && run.videoFinished) {
+    } else if (code === 0 && (run.videoFinished || run.captureOnly)) {
       run.status = 'completed';
       run.error = null;
     } else if (run.status !== 'failed') {
@@ -106,6 +106,7 @@ function launchAi(run, sourcePath, camera) {
     '--source-path', sourcePath,
     '--video-url', `${baseUrl}/test-runs/${run.id}/video`,
     '--result-url', `${baseUrl}/detections`,
+    '--capture-url', `${baseUrl}/test-runs/${run.id}/captures`,
     '--model-path', modelPath,
     ...cameraArgs(camera),
   ];
@@ -153,6 +154,7 @@ async function startTestRun(req, res) {
     videoId: rows[0].video_id,
     filePath: sourcePath,
   });
+  run.captureOnly = true;
   launchAi(run, sourcePath, rows[0]);
 
   return res.status(202).json({

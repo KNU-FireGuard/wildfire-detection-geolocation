@@ -14,6 +14,18 @@ DEFAULT_MODEL_PATH = AI_DIR / "weights" / "yolo26s_final" / "weights" / "best.pt
 BOUNDARY = "frame"
 FRAME_QUEUE_SIZE = 2
 
+
+class CaptureSchedule:
+    def __init__(self):
+        self.last_saved = {}
+
+    def due(self, class_name, timestamp):
+        previous = self.last_saved.get(class_name)
+        return previous is None or round(timestamp * 1000) - previous >= 5000
+
+    def saved(self, class_name, timestamp):
+        self.last_saved[class_name] = round(timestamp * 1000)
+
 if str(AI_DIR.parent) not in sys.path:
     sys.path.insert(0, str(AI_DIR.parent))
 from ai.inference.temporal_detection import FrameSampler, TemporalDetectionGate
@@ -36,6 +48,7 @@ def parse_args(argv=None):
     parser.add_argument("--source-path", type=Path, required=True)
     parser.add_argument("--video-url", required=True, help="Annotated MJPEG upload URL")
     parser.add_argument("--result-url", required=True, help="Detection JSON API URL")
+    parser.add_argument("--capture-url", help="If set, save confirmed JPEG captures instead of uploading MJPEG")
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
     parser.add_argument("--confidence", type=float, default=0.3, help="Minimum fire confidence")
     parser.add_argument("--smoke-confidence", type=float, default=0.5, help="Minimum smoke confidence")
@@ -164,7 +177,8 @@ def frame_detections(result, names, run_id, camera_id, session, fire_confidence=
     return payloads
 
 
-def send_detections(model, result, args, headers, detection_count, session=None, gate=None, timestamp=None):
+def send_detections(model, result, args, headers, detection_count, session=None, gate=None, timestamp=None,
+                    capture_schedule=None):
     for payload in frame_detections(
         result, model.names, args.run_id, args.camera_id, session,
         fire_confidence=args.confidence, smoke_confidence=args.smoke_confidence,
@@ -178,6 +192,20 @@ def send_detections(model, result, args, headers, detection_count, session=None,
         )
         response.raise_for_status()
         detection_count[0] += 1
+        capture_url = getattr(args, 'capture_url', None)
+        class_name = payload['detection']['class']
+        if capture_url and capture_schedule is not None and capture_schedule.due(class_name, timestamp):
+            try:
+                jpeg = encode_frame(result, args.stream_width, args.jpeg_quality)
+                capture_response = requests.post(
+                    f"{capture_url}/{class_name}",
+                    headers={**headers, 'Content-Type': 'image/jpeg', 'X-Video-Time-Ms': str(round(timestamp * 1000))},
+                    data=jpeg, timeout=(5, 10),
+                )
+                capture_response.raise_for_status()
+                capture_schedule.saved(class_name, timestamp)
+            except Exception as exc:
+                print(f"Capture save failed: {type(exc).__name__}: {exc}", flush=True)
 
 
 def filter_result_boxes(result, names, fire_confidence, smoke_confidence):
@@ -228,6 +256,8 @@ def sampled_video_frames(source_path, stop):
 def infer_frames(model, args, headers, detection_count, frames, stop, session=None):
     # Producer thread: decode and inference run here while the consumer encodes and uploads.
     def put(item):
+        if frames is None:
+            return True
         while not stop.is_set():
             try:
                 frames.put(item, timeout=0.5)
@@ -240,6 +270,7 @@ def infer_frames(model, args, headers, detection_count, frames, stop, session=No
         import cv2
 
         gate = TemporalDetectionGate()
+        capture_schedule = CaptureSchedule()
         prepared = False
         previous_scene = None
         previous_shape = None
@@ -273,11 +304,13 @@ def infer_frames(model, args, headers, detection_count, frames, stop, session=No
                 status = prepare_location(session, result)
                 if status is None or not status.get("ready"):
                     session = None
-            send_detections(model, result, args, headers, detection_count, session, gate, timestamp)
+            send_detections(model, result, args, headers, detection_count, session, gate, timestamp, capture_schedule)
             if not put(result):
                 return
         put(None)
     except BaseException as error:
+        if frames is None:
+            raise
         put(error)
 
 
@@ -344,6 +377,11 @@ def main():
     model = YOLO(str(args.model_path))
     session = create_location_session(args)
     detection_count = [0]
+
+    if args.capture_url:
+        infer_frames(model, args, headers, detection_count, None, threading.Event(), session)
+        print(f"Run ID: {args.run_id}; detections sent: {detection_count[0]}; capture analysis completed", flush=True)
+        return
 
     response = requests.post(
         args.video_url,

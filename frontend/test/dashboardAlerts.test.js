@@ -24,14 +24,21 @@ for (const [name, file] of Object.entries({ retainSelection: 'dashboardSelection
 }
 replacements["'../utils/fireAlert'"] = `'${new URL('../src/utils/fireAlert.js', import.meta.url).href}'`
 for (const file of ['cameras', 'events']) replacements[`'../mocks/${file}'`] = `'${new URL(`../src/mocks/${file}.js`, import.meta.url).href}'`
-for (const name of ['DashboardIcon', 'MonitoringMap', 'EventDetail', 'LiveCctvWall']) {
+for (const name of ['DashboardIcon', 'MonitoringMap', 'LiveCctvWall']) {
   replacements[`import ${name} from '../components/${name}.vue'`] = `const ${name} = { inheritAttrs: false, render: () => null }`
 }
+replacements["import EventDetail from '../components/EventDetail.vue'"] = `const EventDetail = {
+  inheritAttrs: false, props: ['event', 'camera', 'videos'], emits: ['test-started'],
+  setup(props, {emit}) {
+    globalThis.__dashboardAlertsTest.detail = {props, start: run => emit('test-started', run)};
+    return () => null;
+  }
+}`
 for (const [name, key] of [['DetectionAlertModal', 'modal'], ['EventList', 'list']]) {
   replacements[`import ${name} from '../components/${name}.vue'`] = `
     const ${name} = { inheritAttrs: false, props: ['events', 'cameras', 'busy', 'error', 'ackBusy'],
-      emits: ['acknowledge', 'dismiss', 'open'], setup(props, { emit }) {
-        globalThis.__dashboardAlertsTest.${key} = { props, open: id => emit('open', id), acknowledge: ids => emit('acknowledge', ids) };
+      emits: ['acknowledge', 'dismiss', 'open', 'select'], setup(props, { emit }) {
+        globalThis.__dashboardAlertsTest.${key} = { props, select: id => emit('select', id), open: id => emit('open', id), acknowledge: ids => emit('acknowledge', ids) };
         return () => null;
       } };
   `
@@ -56,6 +63,22 @@ async function setup(initial = []) {
   async function poll() { [...intervals.values()].find(timer => timer.delay === 5000).callback(); await settle() }
   return { ...view, state, intervals, poll, dispose() { view.app.unmount(); Object.assign(globalThis, originals); delete globalThis.__dashboardAlertsTest } }
 }
+
+test('과거 이벤트에서 Test를 시작해도 카메라는 유지하고 새 실행 이벤트를 상세에 표시한다', async () => {
+  const view = await setup([{ ...fire(1, 10), videoId: 7 }])
+  try {
+    view.state.list.select(1)
+    await settle()
+    assert.equal(view.state.detail.props.event.id, 1)
+    view.state.detail.start({ id: 77, camera_id: 10, video_id: 7 })
+    await settle()
+    assert.equal(view.state.detail.props.camera.id, 10)
+    assert.equal(view.state.detail.props.event, null)
+    view.state.events = [{ ...fire(2, 10), videoId: 7 }, ...view.state.events]
+    await view.poll()
+    assert.equal(view.state.detail.props.event.id, 2)
+  } finally { view.dispose() }
+})
 
 test('이벤트만 5초마다 갱신해 새 화재를 팝업에 넣고 이미 본 이벤트는 반복 알리지 않는다', async () => {
   const view = await setup([fire(1)])

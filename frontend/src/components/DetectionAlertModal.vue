@@ -56,6 +56,10 @@ onBeforeUnmount(() => { dialog.value?.close(); restoreScroll() })
           <p class="alert-count" aria-live="polite">새로 수신한 {{ alertLabel }} <strong>{{ count }}건</strong></p>
           <ul class="alert-events">
             <li v-for="(event, index) in events" :key="event.id">
+              <a v-if="event.latestCapture" :href="`/events/${event.id}`" class="capture-preview">
+                <img :src="event.latestCapture.image_url" :alt="`영상 ${(event.latestCapture.video_time_ms / 1000).toFixed(1)}초 확정 탐지 캡처`">
+                <span>영상 {{ (event.latestCapture.video_time_ms / 1000).toFixed(1) }}초</span>
+              </a>
               <div class="alert-camera"><span class="camera-icon"><DashboardIcon name="camera" :size="23" /></span><div><span class="event-type" :class="event.type"><DashboardIcon :name="event.type" :size="13" />{{ formatType(event.type) }}</span><strong>{{ cameraName(event.cameraId, cameras) }}</strong><time :datetime="event.detectedAt">{{ formatDetectedAt(event.detectedAt) }} KST</time><span class="alert-confidence">AI 신뢰도 {{ formatConfidence(event.confidence) }}</span></div></div>
               <button type="button" class="view-event" :autofocus="index === 0" :disabled="busy" @click="emit('open', event.id)">지도에서 보기 <span aria-hidden="true">↗</span></button>
             </li>
@@ -73,6 +77,7 @@ onBeforeUnmount(() => { dialog.value?.close(); restoreScroll() })
 </template>
 
 <style scoped>
+.capture-preview { display: block; width: 140px; flex-shrink: 0; color: var(--text); font-size: 11px; }.capture-preview img { width: 100%; display: block; border-radius: 6px; }
 .detection-alert-modal { --alert-color: var(--fire, #ff6a57); --alert-rgb: 255,106,87; width: min(680px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); padding: 0; border: 1px solid rgba(var(--alert-rgb),.55); border-radius: 20px; background: var(--surface, #151f2d); color: var(--text, #f4f7fc); box-shadow: 0 24px 100px #000b; }
 .detection-alert-modal.smoke-alert { --alert-color: var(--warn, #f6bd4a); --alert-rgb: 246,189,74; }
 .detection-alert-modal[open] { display: flex; flex-direction: column; animation: alert-enter .16s ease-out; }

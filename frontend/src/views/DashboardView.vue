@@ -46,6 +46,12 @@ let dataRevision = 0
 let linkApplied = false
 let knownEventIds = null
 const detectionAlerts = ref([])
+let testSelection = null
+function handleTestStarted(run) {
+  selectedCameraId.value = run.camera_id
+  selectedEventId.value = null
+  testSelection = { cameraId: run.camera_id, videoId: run.video_id, previousIds: new Set(events.value.map(event => event.id)) }
+}
 // 확인하지 않은 화재 카메라가 바뀔 때만 지도를 다시 그리도록 문자열 키를 거쳐 집합을 만듦
 const fireKey = computed(() => [...activeFireCameraIds(events.value)].sort((a, b) => a - b).join(','))
 const fireCameraIds = computed(() => new Set(fireKey.value ? fireKey.value.split(',').map(Number) : []))
@@ -127,6 +133,11 @@ function applyData(nextCameras, nextEvents, nextVideos = []) {
   videos.value = nextVideos
   selectedCameraId.value = selection.cameraId
   selectedEventId.value = selection.eventId
+  if (testSelection && selectedCameraId.value === testSelection.cameraId && selectedEventId.value == null) {
+    const current = nextEvents.find(event => event.cameraId === testSelection.cameraId
+      && event.videoId === testSelection.videoId && !testSelection.previousIds.has(event.id))
+    if (current) selectedEventId.value = current.id
+  }
   const fresh = findNewDetectionEvents(knownEventIds, nextEvents)
   knownEventIds = new Set(nextEvents.map(event => event.id))
   detectionAlerts.value = reconcileDetectionAlerts(detectionAlerts.value, nextEvents, fresh)
@@ -274,7 +285,7 @@ onBeforeUnmount(() => {
         <p v-if="ackError" class="refresh-error" role="alert">{{ ackError }}</p>
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
           <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" :focus-request="mapFocusRequest" :fire-camera-ids="fireCameraIds" @select-camera="selectCamera" @focus-applied="finishMapFocus" />
-          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror closable @close="closeCctv" @test-progress="refreshEvents" />
+          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror closable @close="closeCctv" @test-started="handleTestStarted" @test-progress="refreshEvents" />
           <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
           <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" :ack-busy="ackBusy" @select="selectEvent" @acknowledge="acknowledge" />
         </section>

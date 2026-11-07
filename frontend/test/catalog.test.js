@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { fetchCameras, fetchEvents, fetchVideos, fetchEvent, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, startTestRun, fetchTestRunStatus, openTestRunStream, acknowledgeEvent } from '../src/api/catalog.js'
+import { fetchCameras, fetchEvents, fetchVideos, fetchEvent, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, startTestRun, fetchTestRunStatus, openTestRunStream, acknowledgeEvent, fetchEventCaptures } from '../src/api/catalog.js'
 
 // feature/backend catalog.controller.js의 응답 규격에 대한 회귀 테스트입니다.
 const originalFetch = globalThis.fetch
@@ -13,6 +13,19 @@ const rawEvent = {
   max_confidence: 0.93, estimated_latitude: 36.0089,
   estimated_longitude: 128.7118, error_range_m: 50,
 }
+
+test('캡처 조회는 페이지·취소 신호를 전달하고 외부 이미지 주소를 거부한다', async () => {
+  const controller = new AbortController()
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/events/10/captures?limit=20&offset=20')
+    assert.equal(options.signal, controller.signal)
+    return Response.json({ items: [{ id: 1, video_time_ms: 3800, image_url: '/api/event-captures/1/image' }], limit: 20, offset: 20 })
+  }
+  assert.equal((await fetchEventCaptures(10, { offset: 20, signal: controller.signal })).items[0].video_time_ms, 3800)
+  globalThis.fetch = async () => Response.json({ items: [{ id: 1, video_time_ms: 3800, image_url: 'https://example.test/image' }], limit: 20, offset: 0 })
+  await assert.rejects(fetchEventCaptures(10), /응답/)
+  await assert.rejects(fetchEventCaptures(-1), /올바르지/)
+})
 
 test('등록 영상 메타데이터를 videos API에서 그대로 조회한다', async () => {
   const video = { id: 20, camera_id: 1, original_filename: 'sample.mp4', created_at: rawEvent.started_at }

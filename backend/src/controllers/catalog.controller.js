@@ -6,7 +6,10 @@ const path = require('node:path');
 const EVENT_COLUMNS = `e.id, e.video_id, COALESCE(e.camera_id, v.camera_id) AS camera_id, e.class, e.started_at,
   e.ended_at, e.max_confidence, e.estimated_latitude, e.estimated_longitude,
   e.error_range_m, e.acknowledged_at, ${alertingSql('e')} AS is_alerting,
-  ${popupAlertingSql('e')} AS is_popup_alerting, e.created_at, e.updated_at`;
+  ${popupAlertingSql('e')} AS is_popup_alerting, e.created_at, e.updated_at,
+  (SELECT json_build_object('id', ec.id, 'video_time_ms', ec.video_time_ms,
+    'image_url', '/api/event-captures/' || ec.id || '/image')
+    FROM event_captures ec WHERE ec.event_id = e.id ORDER BY ec.video_time_ms DESC LIMIT 1) AS latest_capture`;
 const EVENT_FROM = 'FROM detection_events e LEFT JOIN videos v ON v.id = e.video_id';
 
 function pagination(query) {

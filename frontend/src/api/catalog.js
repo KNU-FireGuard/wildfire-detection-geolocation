@@ -31,6 +31,7 @@ function normalizeEvent(event) {
     detectedAt: event.started_at,
     type: event.class,
     confidence: event.max_confidence,
+    latestCapture: event.latest_capture ?? null,
     estimatedLocation: hasLocation ? {
       latitude: event.estimated_latitude,
       longitude: event.estimated_longitude,
@@ -87,6 +88,21 @@ export async function fetchEvents({ signal } = {}) {
 
 export async function fetchVideos({ signal } = {}) {
   return fetchAll('videos', '영상', signal)
+}
+
+export async function fetchEventCaptures(eventId, { offset = 0, before, signal } = {}) {
+  if (!Number.isSafeInteger(eventId) || eventId < 1 || !Number.isSafeInteger(offset) || offset < 0) throw new Error('올바르지 않은 캡처 조회입니다.')
+  if (before !== undefined && (!Number.isSafeInteger(before) || before < 0)) throw new Error('올바르지 않은 캡처 시각입니다.')
+  const cursor = before === undefined ? '' : `&before_time_ms=${before}`
+  const response = await fetch(`/api/events/${eventId}/captures?limit=20&offset=${offset}${cursor}`, { signal })
+  if (!response.ok) throw new Error(`탐지 캡처 조회에 실패했습니다. (HTTP ${response.status})`)
+  const result = await response.json()
+  if (!Array.isArray(result?.items) || result.limit !== 20 || result.offset !== offset
+    || result.items.some(item => !Number.isSafeInteger(item.id) || !Number.isFinite(item.video_time_ms)
+      || item.video_time_ms < 0 || item.image_url !== `/api/event-captures/${item.id}/image`)) {
+    throw new Error('탐지 캡처 응답이 올바르지 않습니다.')
+  }
+  return result
 }
 
 export async function fetchLiveCctvs({ signal } = {}) {
@@ -173,6 +189,7 @@ export async function startTestRun(cameraId) {
   }
   const result = await response.json()
   if (!Number.isSafeInteger(result?.id) || result.id < 1 || result.camera_id !== cameraId
+    || !Number.isSafeInteger(result.video_id) || result.video_id < 1
     || result.stream_url !== `/api/test-runs/${result.id}/stream`) throw new Error('Test 실행 응답이 올바르지 않습니다.')
   return result
 }
