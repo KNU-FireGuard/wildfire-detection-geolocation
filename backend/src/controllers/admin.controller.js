@@ -40,4 +40,14 @@ async function listSmsLogs(req, res) {
   return res.json({ items: rows, ...page });
 }
 
-module.exports = { listAdminCameras, updateAlertPhone, listSmsLogs };
+async function deleteSmsLogs(req, res) {
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 ||
+      !ids.every(id => Number.isInteger(id) && id >= 1 && id <= 2147483647)) {
+    return res.status(400).json({ error: 'ids는 1~2147483647 정수로 구성된 1~100개 배열이어야 합니다.' });
+  }
+  const { rows } = await pool.query('DELETE FROM sms_logs WHERE id = ANY($1::int[]) RETURNING id', [[...new Set(ids)]]);
+  return res.json({ ids: rows.map(row => row.id), count: rows.length });
+}
+
+module.exports = { listAdminCameras, updateAlertPhone, listSmsLogs, deleteSmsLogs };

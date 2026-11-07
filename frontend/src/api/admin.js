@@ -81,3 +81,11 @@ export async function fetchSmsLogs(token, { signal } = {}) {
   if (!Array.isArray(page?.items)) throw new Error('문자 발송 내역 응답 형식이 올바르지 않습니다.')
   return page.items.map(normalizeSmsLog)
 }
+
+export async function deleteSmsLogs(ids, token) {
+  return request('/api/admin/sms-logs', token, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  }, '문자 발송 내역 삭제')
+}
