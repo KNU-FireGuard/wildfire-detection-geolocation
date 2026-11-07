@@ -179,7 +179,7 @@ export async function deleteEvent(eventId) {
   const response = await fetch(`/api/events/${eventId}`, { method: 'DELETE', signal: AbortSignal.timeout(15000) })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    throw new Error(body.error || `이벤트 삭제에 실패했습니다. (HTTP ${response.status})`)
+    throw Object.assign(new Error(body.error || `이벤트 삭제에 실패했습니다. (HTTP ${response.status})`), { status: response.status })
   }
 }
 
