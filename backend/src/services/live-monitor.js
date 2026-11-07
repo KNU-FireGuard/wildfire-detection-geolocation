@@ -30,7 +30,7 @@ function createLiveMonitor({
   restartDelayMs = 10000,
   heartbeatTimeoutMs = 120000,
   watchdogIntervalMs = 30000,
-  terminationGraceMs = 10000,
+  terminationGraceMs = 5000,
 } = {}) {
   if (!catalog) throw new Error('ITS CCTV 목록이 필요합니다.');
   const resolvedRunnerPath = runnerPath ? path.resolve(PROJECT_ROOT, runnerPath) : '';
@@ -41,6 +41,25 @@ function createLiveMonitor({
   let restartCount = 0;
   let slots = [];
   let overall = 'stopped';
+  let lifecycle = Promise.resolve();
+
+  function serialize(operation) {
+    const result = lifecycle.then(operation);
+    lifecycle = result.catch(() => {});
+    return result;
+  }
+
+  function terminateWorker(child) {
+    return new Promise(resolve => {
+      // Register before signalling so a quick exit cannot be missed.
+      const timer = setTimeout(() => child.kill('SIGKILL'), terminationGraceMs);
+      child.once('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      child.kill('SIGTERM');
+    });
+  }
 
   function clearTimers() {
     if (restartTimer) clearTimeout(restartTimer);
@@ -105,7 +124,9 @@ function createLiveMonitor({
   async function launch() {
     if (!active) return;
     if (slots.length !== 6) { overall = 'waiting_for_cctv'; return; }
-    if (!resolvedRunnerPath || !await canRun(resolvedRunnerPath)) {
+    const runnable = resolvedRunnerPath && await canRun(resolvedRunnerPath);
+    if (!active) return;
+    if (!runnable) {
       overall = 'waiting_for_ai';
       slots.forEach(slot => { slot.state = 'waiting_for_ai'; });
       return;
@@ -186,7 +207,7 @@ function createLiveMonitor({
     if (worker) {
       const old = worker;
       worker = null;
-      old.kill('SIGTERM');
+      await terminateWorker(old);
       for (const slot of slots) {
         await closeRun(slot, 'CCTV 목록이 갱신되었습니다.');
       }
@@ -200,7 +221,7 @@ function createLiveMonitor({
   async function start() {
     if (active) return status();
     active = true;
-    await reconcile();
+    await serialize(reconcile);
     return status();
   }
 
@@ -209,7 +230,7 @@ function createLiveMonitor({
     clearTimers();
     const child = worker;
     worker = null;
-    child?.kill('SIGTERM');
+    if (child) await terminateWorker(child);
     for (const slot of slots) {
       await closeRun(slot, 'Backend 서버가 종료되었습니다.');
       slot.state = 'stopped';
@@ -217,7 +238,17 @@ function createLiveMonitor({
     overall = 'stopped';
   }
 
-  return { start, stop, reconcile, status, recordHeartbeat };
+  return {
+    start,
+    stop: () => {
+      // Block launches immediately, even while a reconciliation is still waiting.
+      active = false;
+      clearTimers();
+      return serialize(stop);
+    },
+    reconcile: () => serialize(reconcile),
+    status, recordHeartbeat,
+  };
 }
 
 module.exports = { createLiveMonitor };

@@ -9,6 +9,86 @@ const cameras = Array.from({ length: 6 }, (_, index) => ({
   name: `CCTV ${index + 1}`, streamUrl: `http://video.example.test/${index + 1}.m3u8`,
 }));
 
+for (const force of [false, true]) {
+  test(`주소 갱신은 이전 작업자의 ${force ? '강제' : '정상'} 종료를 기다린다`, async () => {
+    let items = cameras;
+    const children = [];
+    const monitor = createLiveMonitor({
+      catalog: { list: async () => ({ items }) },
+      canRun: async () => true, runManager: fakeRuns(),
+      finalizeEvents: async () => {}, getToken: () => 'test-token',
+      terminationGraceMs: 10,
+      spawnImpl() {
+        const child = new EventEmitter();
+        child.stdin = new PassThrough();
+        child.signals = [];
+        child.kill = signal => {
+          child.signals.push(signal);
+          if (signal === 'SIGKILL' || children.length > 1) {
+            queueMicrotask(() => child.emit('close', 0));
+          }
+        };
+        children.push(child);
+        return child;
+      },
+    });
+    await monitor.start();
+    items = cameras.map(camera => ({ ...camera, streamUrl: `${camera.streamUrl}?new` }));
+    const update = monitor.reconcile();
+    const concurrentUpdate = monitor.reconcile();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(children.length, 1);
+    assert.deepEqual(children[0].signals, ['SIGTERM']);
+    if (!force) children[0].emit('close', 0);
+    await Promise.all([update, concurrentUpdate]);
+    assert.equal(children.length, 2);
+    assert.deepEqual(children[0].signals, force ? ['SIGTERM', 'SIGKILL'] : ['SIGTERM']);
+    await monitor.stop();
+  });
+}
+
+for (const phase of ['termination', 'preparation']) {
+  test(`종료 요청 후 ${phase} 대기가 풀려도 새 AI를 실행하지 않는다`, async () => {
+    let items = cameras;
+    let release;
+    let entered;
+    const waiting = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const children = [];
+    const runs = fakeRuns();
+    const monitor = createLiveMonitor({
+      catalog: { list: async () => ({ items }) },
+      canRun: async () => {
+        if (phase === 'preparation' && children.length) { entered(); await gate; }
+        return true;
+      },
+      runManager: runs, finalizeEvents: async () => {}, getToken: () => 'test-token',
+      spawnImpl() {
+        const child = new EventEmitter();
+        child.stdin = new PassThrough();
+        child.kill = () => {
+          if (phase === 'termination' && children.length === 1) {
+            entered();
+            gate.then(() => child.emit('close', 0));
+          } else queueMicrotask(() => child.emit('close', 0));
+        };
+        children.push(child);
+        return child;
+      },
+    });
+    await monitor.start();
+    items = cameras.map(camera => ({ ...camera, streamUrl: `${camera.streamUrl}?new` }));
+    const update = monitor.reconcile();
+    await waiting;
+    const stopping = monitor.stop();
+    release();
+    await Promise.all([update, stopping]);
+    assert.equal(children.length, 1, '종료 요청 후 대체 작업자를 생성하면 안 됩니다.');
+    assert.equal(runs.runs.size, 0);
+    assert.equal(monitor.status().state, 'stopped');
+  });
+}
+
 function fakeRuns() {
   let id = 100;
   const runs = new Map();
@@ -23,6 +103,30 @@ function fakeRuns() {
     removeRun(run) { runs.delete(run.id); },
   };
 }
+
+test('서버의 10초 종료 제한 전에 응답 없는 AI를 강제 종료한다', async () => {
+  const signals = [];
+  const monitor = createLiveMonitor({
+    catalog: { list: async () => ({ items: cameras }) },
+    canRun: async () => true, runManager: fakeRuns(),
+    finalizeEvents: async () => {}, getToken: () => 'test-token',
+    spawnImpl() {
+      const child = new EventEmitter();
+      child.stdin = new PassThrough();
+      child.kill = signal => {
+        signals.push(signal);
+        if (signal === 'SIGKILL') queueMicrotask(() => child.emit('close', 0));
+      };
+      return child;
+    },
+  });
+  await monitor.start();
+  const started = performance.now();
+  await monitor.stop();
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.ok(performance.now() - started < 9000, '서버 종료 제한 전에 정리할 여유가 있어야 합니다.');
+  assert.equal(monitor.status().state, 'stopped');
+});
 
 test('AI 실행 파일이 없으면 ITS 호출 없이 6개 카메라를 대기 상태로 표시한다', async () => {
   let lists = 0;
@@ -54,7 +158,7 @@ test('Backend가 만든 실행 ID와 6개 영상 주소를 한 AI 작업자에 �
       child.stdin = new PassThrough();
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
-      child.kill = () => { child.killed = true; };
+      child.kill = () => { child.killed = true; queueMicrotask(() => child.emit('close', 0)); };
       child.input = '';
       child.stdin.on('data', chunk => { child.input += chunk; });
       children.push({ child, args, options });
@@ -123,7 +227,7 @@ test('AI 프로세스 실행이 즉시 실패해도 재시도한다', async () =
       child.stdin = new PassThrough();
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
-      child.kill = () => {};
+      child.kill = () => { queueMicrotask(() => child.emit('close', 0)); };
       queueMicrotask(() => child.emit('spawn'));
       return child;
     },

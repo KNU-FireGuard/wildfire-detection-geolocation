@@ -60,7 +60,7 @@ function createCctvCatalog({
       refreshing = true;
       try {
         const pending = await readPending();
-        if (pending) return savePending(pending);
+        if (pending) return await savePending(pending);
         if (!client && !process.env.ITS_CCTV_API_KEY) throw new Error('ITS_CCTV_API_KEY가 설정되지 않았습니다.');
         await readCache();
         await fs.mkdir(path.dirname(cachePath), { recursive: true });
@@ -68,7 +68,7 @@ function createCctvCatalog({
         if (candidates.length < 6) throw new Error('재생 가능한 HLS CCTV가 6개 미만입니다. 캐시는 유지됩니다.');
         const selected = { refreshedAt: now().toISOString(), items: selectDistributed(candidates, 6) };
         await writePrivate(`${cachePath}.pending`, selected);
-        return savePending(selected);
+        return await savePending(selected);
       } finally { refreshing = false; }
     },
   };
