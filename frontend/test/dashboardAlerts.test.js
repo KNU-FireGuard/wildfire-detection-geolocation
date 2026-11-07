@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { compileComponent, createHarness, settle } from './helpers/vueHarness.js'
+import { compileComponent, createHarness, findAll, settle } from './helpers/vueHarness.js'
 
 const fixtureCode = `
   const state = () => globalThis.__dashboardAlertsTest;
@@ -31,7 +31,7 @@ for (const [name, key] of [['DetectionAlertModal', 'modal'], ['EventList', 'list
   replacements[`import ${name} from '../components/${name}.vue'`] = `
     const ${name} = { inheritAttrs: false, props: ['events', 'cameras', 'busy', 'error', 'ackBusy'],
       emits: ['acknowledge', 'dismiss', 'open'], setup(props, { emit }) {
-        globalThis.__dashboardAlertsTest.${key} = { props, acknowledge: ids => emit('acknowledge', ids) };
+        globalThis.__dashboardAlertsTest.${key} = { props, open: id => emit('open', id), acknowledge: ids => emit('acknowledge', ids) };
         return () => null;
       } };
   `
@@ -161,5 +161,24 @@ test('같은 CCTV의 연기 뒤 화재가 오면 기존 팝업에 합치고 연�
     await settle()
     assert.deepEqual(view.state.modal.props.events.map(event => event.id), [2])
     assert.equal(view.state.list.props.events.find(event => event.id === 2).status, 'UNCONFIRMED')
+  } finally { view.dispose() }
+})
+
+test('지도를 닫은 뒤 팝업에서 지도 보기를 누르면 지도를 다시 열고 확인 상태는 유지한다', async () => {
+  const view = await setup()
+  try {
+    const mapButton = () => findAll(view.root, 'button').find(node => node.props['aria-controls'] === 'monitoring-map')
+    mapButton().props.onClick()
+    await settle()
+    assert.equal(mapButton().props['aria-expanded'], false)
+    view.state.events = [{ ...fire(1), type: 'smoke', alerting: false }]
+    await view.poll()
+    assert.equal(view.state.modal.props.events.length, 1)
+    view.state.modal.open(1)
+    await settle()
+    assert.equal(mapButton().props['aria-expanded'], true)
+    assert.equal(view.state.modal.props.events.length, 0)
+    assert.deepEqual(view.state.acks, [])
+    assert.equal(view.state.list.props.events[0].status, 'UNCONFIRMED')
   } finally { view.dispose() }
 })

@@ -50,6 +50,7 @@ const detectionAlerts = ref([])
 const fireKey = computed(() => [...activeFireCameraIds(events.value)].sort((a, b) => a - b).join(','))
 const fireCameraIds = computed(() => new Set(fireKey.value ? fireKey.value.split(',').map(Number) : []))
 function openDetectionAlert(id) {
+  mapVisible.value = true
   selectEvent(id)
   dismissDetectionAlerts()
 }
