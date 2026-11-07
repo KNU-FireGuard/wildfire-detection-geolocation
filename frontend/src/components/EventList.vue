@@ -4,7 +4,8 @@ import { cameraName as nameOf } from '../utils/cameraName'
 import { formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
 import { filterEvents } from '../utils/eventFilters'
 const props = defineProps({ events: { type: Array, default: () => [] }, cameras: { type: Array, default: () => [] }, selectedId: { type: [Number, String], default: null }, ackBusy: { type: Boolean, default: false } })
-const emit = defineEmits(['select', 'acknowledge'])
+const emit = defineEmits(['select', 'acknowledge', 'acknowledge-all'])
+const unconfirmedCount = computed(() => props.events.filter(event => event.status === 'UNCONFIRMED').length)
 const cameraName = cameraId => nameOf(cameraId, props.cameras)
 const typeFilter = ref('all')
 const statusFilter = ref('all')
@@ -26,7 +27,7 @@ function resetFilters() {
 
 <template>
   <section class="dashboard-panel" aria-labelledby="events-title">
-    <div class="panel-heading"><h2 id="events-title">최근 탐지 이벤트</h2><RouterLink to="/events">전체 보기</RouterLink><span class="event-count">표시 {{ filteredEvents.length }} / {{ events.length }}건</span></div>
+    <div class="panel-heading"><h2 id="events-title">최근 탐지 이벤트</h2><RouterLink to="/events">전체 보기</RouterLink><span class="event-count">표시 {{ filteredEvents.length }} / {{ events.length }}건</span><button type="button" class="ack-all-button" :disabled="ackBusy || unconfirmedCount === 0" @click="emit('acknowledge-all')">{{ ackBusy ? '확인 처리 중…' : `미확인 이벤트 전체 확인 (${unconfirmedCount}건)` }}</button></div>
     <form class="event-filters" aria-label="탐지 이벤트 필터" @submit.prevent>
       <label>유형
         <select v-model="typeFilter" aria-label="이벤트 유형 필터">
@@ -71,6 +72,7 @@ function resetFilters() {
 </template>
 
 <style scoped>
+.panel-heading { flex-wrap: wrap; gap: 10px; }.ack-all-button { margin-left: auto; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--text); cursor: pointer; }.ack-all-button:disabled { opacity: .5; cursor: default; }
 .event-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 4px 0 14px; }
 .event-filters label { display: grid; gap: 5px; color: var(--text-3); font-size: 11px; }
 .event-filters select { min-width: 118px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px 10px; background: var(--surface-2); color: var(--text); font: inherit; }

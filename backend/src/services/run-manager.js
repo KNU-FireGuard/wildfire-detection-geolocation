@@ -33,6 +33,11 @@ function hasActiveRun(cameraId) {
   ));
 }
 
+function hasActiveEvent(eventId) {
+  return [...runs.values()].some(run => ['ready', 'running'].includes(run.status)
+    && [...run.eventIdsByClass.values()].includes(eventId));
+}
+
 function publicStatus(run) {
   return {
     id: run.id,
@@ -111,6 +116,7 @@ module.exports = {
   finishUpload,
   getRun,
   hasActiveRun,
+  hasActiveEvent,
   markFailed,
   removeRun,
   publicStatus,

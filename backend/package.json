@@ -8,7 +8,7 @@
     "dev": "node --watch src/server.js",
     "create-admin": "node src/scripts/create-admin.js",
     "test": "node --test",
-    "test:integration": "node --test test/catalog.integration.test.js test/live-camera-sync.integration.test.js test/event-captures.integration.test.js"
+    "test:integration": "node --test test/catalog.integration.test.js test/live-camera-sync.integration.test.js test/event-captures.integration.test.js test/event-actions.integration.test.js"
   },
   "keywords": [],
   "author": "",

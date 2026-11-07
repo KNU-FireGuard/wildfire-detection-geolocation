@@ -7,7 +7,7 @@ import MonitoringMap from '../components/MonitoringMap.vue'
 import DetectionAlertModal from '../components/DetectionAlertModal.vue'
 import EventDetail from '../components/EventDetail.vue'
 import LiveCctvWall from '../components/LiveCctvWall.vue'
-import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, acknowledgeEvent } from '../api/catalog'
+import { fetchCameras, fetchEvents, fetchVideos, fetchLiveCctvs, fetchLiveMonitorStatus, refreshLiveCctvs, acknowledgeEvent, acknowledgeAllEvents } from '../api/catalog'
 import { cameras as mockCameras } from '../mocks/cameras'
 import { events as mockEvents } from '../mocks/events'
 import { retainSelection } from '../utils/dashboardSelection'
@@ -67,6 +67,23 @@ function dismissDetectionAlerts() {
 }
 const ackBusy = ref(false)
 const ackError = ref('')
+async function acknowledgeAll() {
+  if (ackBusy.value) return
+  ackBusy.value = true
+  ackError.value = ''
+  dataRevision++
+  try {
+    const result = dataSource === 'api' ? await acknowledgeAllEvents()
+      : { ids: events.value.filter(event => event.status === 'UNCONFIRMED').map(event => event.id) }
+    const ids = new Set(result.ids)
+    events.value = events.value.map(event => ids.has(event.id)
+      ? { ...event, status: 'CONFIRMED', alerting: false, popupAlerting: false } : event)
+    detectionAlerts.value = reconcileDetectionAlerts(detectionAlerts.value, events.value)
+    dataRevision++
+    if (dataSource === 'api') await loadData({ silent: true })
+  } catch (error) { ackError.value = error.message }
+  finally { ackBusy.value = false }
+}
 async function acknowledge(ids) {
   if (ackBusy.value) return
   const list = [...new Set(Array.isArray(ids) ? ids : [ids])]
@@ -285,9 +302,9 @@ onBeforeUnmount(() => {
         <p v-if="ackError" class="refresh-error" role="alert">{{ ackError }}</p>
         <section class="dashboard-grid" :class="{ 'with-detail': selectedCamera || selectedEvent, 'map-hidden': !mapVisible }" aria-label="지도 및 탐지 현황">
           <MonitoringMap v-if="mapVisible" id="monitoring-map" class="map-panel" :cameras="cameras" :events="events" :selected-event="selectedEvent" :selected-camera="selectedCamera" :focus-request="mapFocusRequest" :fire-camera-ids="fireCameraIds" @select-camera="selectCamera" @focus-applied="finishMapFocus" />
-          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" mirror closable @close="closeCctv" @test-started="handleTestStarted" @test-progress="refreshEvents" />
+          <EventDetail v-if="selectedCamera || selectedEvent" class="detail-panel" :event="selectedEvent" :camera="selectedCamera" :videos="videos" :capture-limit="6" mirror closable @close="closeCctv" @test-started="handleTestStarted" @test-progress="refreshEvents" />
           <LiveCctvWall v-if="liveCameras.length" id="live-cctv-wall" :cameras="liveCameras" :selected-id="selectedCamera?.sourceType === 'live' ? selectedCamera.id : null" @select="selectLiveTile" />
-          <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" :ack-busy="ackBusy" @select="selectEvent" @acknowledge="acknowledge" />
+          <EventList id="events-panel" class="events-panel" :events="events" :cameras="cameras" :selected-id="selectedEventId" :ack-busy="ackBusy" @select="selectEvent" @acknowledge="acknowledge" @acknowledge-all="acknowledgeAll" />
         </section>
         <section class="summary-grid" aria-label="관제 요약">
           <article class="summary-card"><span class="summary-icon red"><DashboardIcon name="fire" :size="29" /></span><div><p>탐지 이벤트</p><strong>{{ events.length }}<small>건</small></strong></div></article>

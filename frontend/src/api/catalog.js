@@ -7,6 +7,8 @@ function normalizeCamera(camera) {
     sourceType: camera.source_type,
     latitude: camera.latitude,
     longitude: camera.longitude,
+    createdAt: camera.created_at ?? null,
+    providerKey: camera.provider_key ?? null,
     locationName: null,
     altitudeM: null,
     status: null,
@@ -161,6 +163,24 @@ export async function acknowledgeEvent(eventId) {
   const data = await response.json()
   if (!data?.item || typeof data.item !== 'object' || Array.isArray(data.item)) throw new Error('이벤트 확인 응답이 올바르지 않습니다.')
   return normalizeEvent(data.item)
+}
+
+export async function acknowledgeAllEvents() {
+  const response = await postPublic('/api/events/acknowledge-all', '미확인 이벤트 전체 확인')
+  if (!response.ok) throw new Error(`전체 확인에 실패했습니다. (HTTP ${response.status})`)
+  const result = await response.json()
+  if (!Array.isArray(result.ids) || result.ids.some(id => !Number.isSafeInteger(id) || id < 1)
+    || result.count !== result.ids.length) throw new Error('전체 확인 응답이 올바르지 않습니다.')
+  return result
+}
+
+export async function deleteEvent(eventId) {
+  if (!Number.isSafeInteger(eventId) || eventId < 1) throw new Error('올바르지 않은 이벤트 번호입니다.')
+  const response = await fetch(`/api/events/${eventId}`, { method: 'DELETE', signal: AbortSignal.timeout(15000) })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.error || `이벤트 삭제에 실패했습니다. (HTTP ${response.status})`)
+  }
 }
 
 export async function loginAdmin(username, password) {

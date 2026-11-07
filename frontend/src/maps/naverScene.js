@@ -6,8 +6,12 @@ export function hasCoordinates(location) {
 export function errorRangeDisplay(location) {
   const radius = location?.errorRadiusM
   if (!Number.isFinite(radius) || radius < 0) return { mode: 'unknown', label: '오차 범위 미산출' }
-  if (radius >= 1000) return { mode: 'low-confidence', label: `위치 신뢰 낮음 · 오차 반경 ${new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(radius / 1000)} km` }
-  return { mode: 'radius', label: `오차 반경 ${new Intl.NumberFormat('ko-KR').format(radius)} m` }
+  if (radius >= 1000) return {
+    mode: 'low-confidence', radiusM: 500,
+    label: `위치 신뢰도 낮음 · 실제 오차 반경 ${new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(radius / 1000)} km`,
+  }
+  return { mode: 'radius', radiusM: radius,
+    label: `위치 신뢰도 ${radius <= 200 ? '높음' : '중간'} · 오차 반경 ${new Intl.NumberFormat('ko-KR').format(radius)} m` }
 }
 
 export function isVisibleEstimatedEvent(event) {
@@ -45,8 +49,8 @@ export function createNaverScene(maps, map, onCameraSelect) {
       anchor: new maps.Point(size / 2, size),
     }
   }
-  const fireCenterIcon = () => ({
-    content: '<div style="box-sizing:border-box;width:14px;height:14px;border:2px solid white;border-radius:50%;background:#e0402e;box-shadow:0 0 0 3px rgba(255,106,87,.25)"></div>',
+  const fireCenterIcon = (lowConfidence = false) => ({
+    content: `<div style="box-sizing:border-box;width:14px;height:14px;border:2px solid white;border-radius:50%;background:${lowConfidence ? '#f6bd4a' : '#e0402e'};box-shadow:0 0 0 3px ${lowConfidence ? 'rgba(246,189,74,.25)' : 'rgba(255,106,87,.25)'}"></div>`,
     anchor: new maps.Point(7, 7),
   })
   function clear() {
@@ -73,17 +77,19 @@ export function createNaverScene(maps, map, onCameraSelect) {
     for (const event of visibleEvents) {
       const fire = event.estimatedLocation
       const range = errorRangeDisplay(fire)
-      // 오차가 커도 픽셀 마커로 대체하지 않고 SDK의 미터 반경 원으로 지도 축척에 맞춤
+      const lowConfidence = range.mode === 'low-confidence'
+      // 큰 오차는 실제 값과 구분되는 500m 점선 참고 표시로 제한한다.
       if (range.mode !== 'unknown') {
         overlays.push(new maps.Circle({
-          map, center: position(fire), radius: fire.errorRadiusM,
-          strokeColor: '#e0402e', strokeOpacity: 1, strokeWeight: 2,
-          fillColor: '#e0402e', fillOpacity: 0.08, clickable: false, zIndex: 15,
+          map, center: position(fire), radius: range.radiusM,
+          strokeColor: lowConfidence ? '#f6bd4a' : '#e0402e', strokeOpacity: 1, strokeWeight: 2,
+          strokeStyle: lowConfidence ? 'shortdash' : 'solid',
+          fillColor: lowConfidence ? '#f6bd4a' : '#e0402e', fillOpacity: lowConfidence ? 0.03 : 0.08, clickable: false, zIndex: 15,
         }))
       }
       const fireMarker = new maps.Marker({
         map, position: position(fire), title: `추정 산불 위치 · ${range.label}`, zIndex: selectedEvent && event.id === selectedEvent.id ? 31 : 30,
-        icon: fireCenterIcon(),
+        icon: fireCenterIcon(lowConfidence),
       })
       overlays.push(fireMarker)
     }
