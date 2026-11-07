@@ -75,5 +75,55 @@ class TestDownloadErrorMessage(unittest.TestCase):
         self.assertNotIn("SSL 인증서", msg)
 
 
+class TestConcurrentBuilds(unittest.TestCase):
+    """한 프로세스에서 두 카메라 DEM 생성이 겹쳐도 각자의 실패 원인으로 안내 (PR #98 리뷰)"""
+
+    def test_each_build_reports_its_own_cause(self):
+        import threading
+
+        a_downloaded = threading.Event()
+        b_done = threading.Event()
+        results = {}
+
+        def fake_urlopen(req, timeout=None, context=None):
+            # 스레드 A는 인증서 오류, 스레드 B는 일반 네트워크 오류
+            if threading.current_thread().name == "A":
+                raise _cert_error()
+            raise urllib.error.URLError("timed out")
+
+        def a_anchor(lats, lons):
+            out = eng.fetch_open_meteo_batch(lats, lons)  # A의 인증서 오류 기록
+            a_downloaded.set()
+            b_done.wait(5)  # A가 메시지를 만들기 전에 B의 실패가 끼어들게 함
+            return out
+
+        def b_anchor(lats, lons):
+            a_downloaded.wait(5)
+            return eng.fetch_open_meteo_batch(lats, lons)
+
+        def run(name, anchor):
+            tmp = Path(tempfile.mkdtemp())
+            grid = lambda la, lo, zoom=12: eng.fetch_terrarium_dem_grid(la, lo, zoom=zoom, cache_dir=tmp / "tiles")
+            try:
+                eng.build_and_cache_dem(CAM_LAT, CAM_LON, npz_path=tmp / "dem.npz", grid_source=grid, anchor_source=anchor)
+            except RuntimeError as exc:
+                results[name] = str(exc)
+            finally:
+                if name == "B":
+                    b_done.set()
+
+        with mock.patch.object(eng.urllib.request, "urlopen", fake_urlopen):
+            threads = [threading.Thread(target=run, args=("A", a_anchor), name="A"),
+                       threading.Thread(target=run, args=("B", b_anchor), name="B")]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(10)
+
+        self.assertIn("SSL 인증서", results["A"])
+        self.assertIn("네트워크", results["B"])
+        self.assertNotIn("SSL 인증서", results["B"])
+
+
 if __name__ == "__main__":
     unittest.main()

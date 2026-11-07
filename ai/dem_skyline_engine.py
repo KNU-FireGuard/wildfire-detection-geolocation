@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import json
 import math
 import ssl
@@ -139,8 +140,11 @@ def _dest_np(
     return np.degrees(la2), np.degrees(lo2)
 
 
-# 마지막 다운로드 실패 원인, build_and_cache_dem의 오류 메시지에 사용 (#68)
-_last_download_error: Exception | None = None
+# build_and_cache_dem 호출별 다운로드 실패 원인 목록 (#68)
+# 모듈 전역 하나로 두면 한 프로세스에서 여러 카메라 DEM 생성이 겹칠 때 다른 요청의 예외가 덮어씀 (PR #98 리뷰)
+_download_errors: contextvars.ContextVar[list[BaseException] | None] = contextvars.ContextVar(
+    "dem_download_errors", default=None
+)
 
 SSL_CERT_ERROR_MESSAGE = (
     "DEM 데이터를 다운로드할 수 없습니다. SSL 인증서 확인에 실패했습니다(CERTIFICATE_VERIFY_FAILED). "
@@ -168,12 +172,13 @@ def _is_cert_error(exc: BaseException | None) -> bool:
 
 
 def _urlopen(req: urllib.request.Request, timeout: float):
-    """인증서 묶음을 지정해 열고, 실패하면 원인을 기록한 뒤 예외를 그대로 냄"""
-    global _last_download_error
+    """인증서 묶음을 지정해 열고, 실패하면 현재 DEM 생성 호출의 원인 목록에 기록한 뒤 예외를 그대로 냄"""
     try:
         return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
     except Exception as exc:
-        _last_download_error = exc
+        errors = _download_errors.get()
+        if errors is not None:
+            errors.append(exc)
         raise
 
 
@@ -378,25 +383,29 @@ def build_and_cache_dem(
 
     # 2. Populate dense 201x201 (~50m step) elevation matrix using the grid source (AWS Terrarium 30m tiles),
     #    falling back to anchor bilinear interpolation when the grid source is unavailable (offline)
-    global _last_download_error
-    _last_download_error = None  # 이번 빌드의 실패 원인만 메시지에 반영
-    sampled = grid_source(lat_mesh, lon_mesh, zoom=12)
-    grid_ok = sampled is not None and not np.isnan(sampled).any()
-    if not grid_ok and coarse_fallback is not None:
-        # Still offline: keep the existing coarse cache instead of rebuilding the same coarse grid
-        return coarse_fallback
+    # 이번 호출의 다운로드 실패 원인만 모음 (스레드·호출마다 분리)
+    download_errors: list[BaseException] = []
+    token = _download_errors.set(download_errors)
+    try:
+        sampled = grid_source(lat_mesh, lon_mesh, zoom=12)
+        grid_ok = sampled is not None and not np.isnan(sampled).any()
+        if not grid_ok and coarse_fallback is not None:
+            # Still offline: keep the existing coarse cache instead of rebuilding the same coarse grid
+            return coarse_fallback
 
-    api_elev = anchor_source(a_lat_m.ravel(), a_lon_m.ravel())
-    elev_grid: np.ndarray | None = None
-    source = DEM_SOURCE_TERRARIUM
-    if grid_ok:
-        elev_grid = np.asarray(sampled, dtype=np.float32)
-        if api_elev is not None:
-            t_anchor = grid_source(a_lat_m, a_lon_m, zoom=12)
-            if t_anchor is not None:
-                datum_bias = float(np.median(api_elev - np.asarray(t_anchor).ravel()))
-                if abs(datum_bias) < 5.0:
-                    elev_grid = elev_grid + datum_bias * 0.1
+        api_elev = anchor_source(a_lat_m.ravel(), a_lon_m.ravel())
+        elev_grid: np.ndarray | None = None
+        source = DEM_SOURCE_TERRARIUM
+        if grid_ok:
+            elev_grid = np.asarray(sampled, dtype=np.float32)
+            if api_elev is not None:
+                t_anchor = grid_source(a_lat_m, a_lon_m, zoom=12)
+                if t_anchor is not None:
+                    datum_bias = float(np.median(api_elev - np.asarray(t_anchor).ravel()))
+                    if abs(datum_bias) < 5.0:
+                        elev_grid = elev_grid + datum_bias * 0.1
+    finally:
+        _download_errors.reset(token)
 
     if elev_grid is None:
         if api_elev is not None:
@@ -411,7 +420,8 @@ def build_and_cache_dem(
             elev_grid = anchor_interp(pts).reshape(grid_size, grid_size).astype(np.float32)
             source = DEM_SOURCE_ANCHOR_INTERP
         else:
-            raise RuntimeError(SSL_CERT_ERROR_MESSAGE if _is_cert_error(_last_download_error) else NETWORK_ERROR_MESSAGE)
+            cert_failed = any(_is_cert_error(exc) for exc in download_errors)
+            raise RuntimeError(SSL_CERT_ERROR_MESSAGE if cert_failed else NETWORK_ERROR_MESSAGE)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
