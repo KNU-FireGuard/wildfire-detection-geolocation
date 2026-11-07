@@ -9,9 +9,10 @@ test('PostgreSQL: 전체 확인·이벤트 삭제는 캡처를 정리하고 문�
   const client = await pool.connect();
   let server;
   try {
+    await client.query('SET search_path TO pg_temp');
     const schema = readFileSync(path.join(__dirname, '../../sql/init.sql'), 'utf8')
       .replaceAll('CREATE TABLE IF NOT EXISTS ', 'CREATE TEMP TABLE ')
-      .replace(/^BEGIN;\s*/, '').replace(/COMMIT;\s*$/, '');
+      .replace(/^BEGIN;\s*/m, '').replace(/COMMIT;\s*$/, '');
     await client.query(schema);
     const cameraId = (await client.query("INSERT INTO cameras (name,source_type) VALUES ('test','test') RETURNING id")).rows[0].id;
     const videoId = (await client.query("INSERT INTO videos(camera_id,original_filename,file_path) VALUES ($1,'test.mp4','data/videos/test.mp4') RETURNING id", [cameraId])).rows[0].id;

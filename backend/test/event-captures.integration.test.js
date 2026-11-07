@@ -10,9 +10,10 @@ test('PostgreSQL: 캡처는 동일 이벤트에 5초 간격으로 저장되고 �
   const pool = require('../src/config/db');
   const client = await pool.connect();
   try {
+    await client.query('SET search_path TO pg_temp');
     const schema = readFileSync(path.join(__dirname, '../../sql/init.sql'), 'utf8')
       .replaceAll('CREATE TABLE IF NOT EXISTS ', 'CREATE TEMP TABLE ')
-      .replace(/^BEGIN;\s*/, '').replace(/COMMIT;\s*$/, '');
+      .replace(/^BEGIN;\s*/m, '').replace(/COMMIT;\s*$/, '');
     await client.query(schema);
     const camera = (await client.query("INSERT INTO cameras (name, source_type) VALUES ('capture test', 'test') RETURNING id")).rows[0].id;
     const video = (await client.query("INSERT INTO videos (camera_id, original_filename, file_path) VALUES ($1, 'fixture.mp4', 'data/videos/fixture.mp4') RETURNING id", [camera])).rows[0].id;
