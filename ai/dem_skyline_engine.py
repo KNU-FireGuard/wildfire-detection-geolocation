@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import ssl
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -138,6 +139,44 @@ def _dest_np(
     return np.degrees(la2), np.degrees(lo2)
 
 
+# 마지막 다운로드 실패 원인, build_and_cache_dem의 오류 메시지에 사용 (#68)
+_last_download_error: Exception | None = None
+
+SSL_CERT_ERROR_MESSAGE = (
+    "DEM 데이터를 다운로드할 수 없습니다. SSL 인증서 확인에 실패했습니다(CERTIFICATE_VERIFY_FAILED). "
+    "`pip install certifi`로 인증서 묶음을 설치하거나, macOS python.org Python이면 "
+    "Applications/Python 3.x 폴더의 Install Certificates.command를 실행하세요."
+)
+NETWORK_ERROR_MESSAGE = "DEM 데이터를 다운로드할 수 없습니다. 네트워크 상태를 확인해주세요."
+
+
+def _ssl_context() -> ssl.SSLContext | None:
+    """certifi가 있으면 그 인증서 묶음으로 검증, 없으면 None(시스템 기본값)
+
+    macOS python.org Python은 시스템 키체인 인증서를 쓰지 않아 기본값으로는 HTTPS 검증이 실패함 (#68)
+    """
+    try:
+        import certifi
+    except ImportError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _is_cert_error(exc: BaseException | None) -> bool:
+    reason = getattr(exc, "reason", None)
+    return isinstance(exc, ssl.SSLCertVerificationError) or isinstance(reason, ssl.SSLCertVerificationError)
+
+
+def _urlopen(req: urllib.request.Request, timeout: float):
+    """인증서 묶음을 지정해 열고, 실패하면 원인을 기록한 뒤 예외를 그대로 냄"""
+    global _last_download_error
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
+    except Exception as exc:
+        _last_download_error = exc
+        raise
+
+
 def fetch_open_meteo_batch(lats: np.ndarray, lons: np.ndarray, timeout: float = 10.0) -> np.ndarray | None:
     """Query up to 100 coordinates from the Open-Meteo Elevation API."""
     lat_str = ",".join(f"{x:.6f}" for x in lats)
@@ -145,7 +184,7 @@ def fetch_open_meteo_batch(lats: np.ndarray, lons: np.ndarray, timeout: float = 
     url = f"{OPEN_METEO_URL}?{urllib.parse.urlencode({'latitude': lat_str, 'longitude': lon_str})}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "FireGuard-Research/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if "elevation" in data and len(data["elevation"]) == len(lats):
                 return np.asarray(data["elevation"], dtype=np.float32)
@@ -200,7 +239,7 @@ def fetch_terrarium_dem_grid(
                 url = TERRARIUM_TILE_URL.format(z=zoom, x=tx, y=ty)
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "FireGuard-Research/1.0"})
-                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    with _urlopen(req, timeout=timeout) as resp:
                         tile_bytes = resp.read()
                     tile_file.write_bytes(tile_bytes)
                 except Exception:
@@ -339,6 +378,8 @@ def build_and_cache_dem(
 
     # 2. Populate dense 201x201 (~50m step) elevation matrix using the grid source (AWS Terrarium 30m tiles),
     #    falling back to anchor bilinear interpolation when the grid source is unavailable (offline)
+    global _last_download_error
+    _last_download_error = None  # 이번 빌드의 실패 원인만 메시지에 반영
     sampled = grid_source(lat_mesh, lon_mesh, zoom=12)
     grid_ok = sampled is not None and not np.isnan(sampled).any()
     if not grid_ok and coarse_fallback is not None:
@@ -370,7 +411,7 @@ def build_and_cache_dem(
             elev_grid = anchor_interp(pts).reshape(grid_size, grid_size).astype(np.float32)
             source = DEM_SOURCE_ANCHOR_INTERP
         else:
-            raise RuntimeError("DEM 데이터를 다운로드할 수 없습니다. 네트워크 상태를 확인해주세요.")
+            raise RuntimeError(SSL_CERT_ERROR_MESSAGE if _is_cert_error(_last_download_error) else NETWORK_ERROR_MESSAGE)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
