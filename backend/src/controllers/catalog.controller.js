@@ -36,7 +36,7 @@ function list(sql) {
   };
 }
 
-const listCameras = list(`SELECT id, name, source_type, latitude, longitude, created_at
+const listCameras = list(`SELECT id, name, source_type, latitude, longitude, created_at, provider_key
   FROM cameras ORDER BY id ASC LIMIT $1 OFFSET $2`);
 const listVideos = list(`SELECT id, camera_id, original_filename, created_at
   FROM videos ORDER BY id DESC LIMIT $1 OFFSET $2`);

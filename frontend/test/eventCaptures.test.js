@@ -16,6 +16,27 @@ const component = await compileComponent(new URL('../src/components/EventCapture
 })
 const capture = (id, time) => ({ id, video_time_ms: time, image_url: `/api/event-captures/${id}/image` })
 
+test('대시보드 미리보기는 최신 6장만 표시하고 더보기는 이벤트 상세로 이동한다', async () => {
+  const previous = globalThis.document
+  globalThis.document = { hidden: true }
+  const state = { items: Array.from({ length: 10 }, (_, i) => capture(i + 1, i * 5000)).reverse(), requests: [] }
+  globalThis.__capturesTest = state
+  const view = createHarness().mount(component, { eventId: 9, previewLimit: 6 })
+  try {
+    await settle()
+    assert.equal(findAll(view.root, 'img').length, 6)
+    assert.equal(findAll(view.root, 'img')[0].props.src, '/api/event-captures/5/image')
+    const link = findAll(view.root, 'a')[0]
+    assert.equal(link.props.href, '/events/9')
+    assert.match(allText(link), /더보기/)
+    state.items.unshift(capture(11, 50000))
+    view.props.latestCapture = { id: 11 }
+    await settle()
+    assert.equal(findAll(view.root, 'img').length, 6)
+    assert.equal(findAll(view.root, 'img')[0].props.src, '/api/event-captures/6/image')
+  } finally { view.app.unmount(); globalThis.document = previous; delete globalThis.__capturesTest }
+})
+
 test('캡처는 시간순으로 표시·선택하고 새 캡처를 중복 없이 합치며 이벤트 전환 시 초기화한다', async () => {
   const previous = globalThis.document
   globalThis.document = { hidden: true }
@@ -60,7 +81,7 @@ test('캡처가 빠르게 늘어도 이전 기록은 영상 시각 커서로 빠
     view.props.latestCapture = { id: 25 }
     await settle()
     assert.equal(findAll(view.root, 'img').length, 20)
-    findAll(view.root, 'button').find(node => /이전 캡처 더 보기/.test(allText(node))).props.onClick()
+    findAll(view.root, 'button').find(node => /더보기/.test(allText(node))).props.onClick()
     await settle()
     assert.equal(findAll(view.root, 'img').length, 25)
     assert.equal(state.requests.at(-1).before, 28800)

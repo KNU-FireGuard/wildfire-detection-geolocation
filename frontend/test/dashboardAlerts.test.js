@@ -11,6 +11,13 @@ const fixtureCode = `
   export const fetchLiveMonitorStatus = async () => ({ cameras: [] });
   export const refreshLiveCctvs = async () => { state().refreshes++; };
   export const acknowledgeEvent = async id => { state().acks.push(id); await state().onAck(id); };
+  export const acknowledgeAllEvents = async () => {
+    state().bulkCalls = (state().bulkCalls || 0) + 1;
+    if (state().bulkError) throw new Error("전체 확인 실패");
+    const ids = state().events.filter(event => event.status !== "CONFIRMED").map(event => event.id);
+    state().events = state().events.map(event => ({...event, status: "CONFIRMED", alerting: false, popupAlerting: false}));
+    return {ids, count: ids.length};
+  };
 `
 const fixtureUrl = `data:text/javascript,${encodeURIComponent(fixtureCode)}`
 const replacements = {
@@ -37,8 +44,8 @@ replacements["import EventDetail from '../components/EventDetail.vue'"] = `const
 for (const [name, key] of [['DetectionAlertModal', 'modal'], ['EventList', 'list']]) {
   replacements[`import ${name} from '../components/${name}.vue'`] = `
     const ${name} = { inheritAttrs: false, props: ['events', 'cameras', 'busy', 'error', 'ackBusy'],
-      emits: ['acknowledge', 'dismiss', 'open', 'select'], setup(props, { emit }) {
-        globalThis.__dashboardAlertsTest.${key} = { props, select: id => emit('select', id), open: id => emit('open', id), acknowledge: ids => emit('acknowledge', ids) };
+      emits: ['acknowledge', 'acknowledge-all', 'dismiss', 'open', 'select'], setup(props, { emit }) {
+        globalThis.__dashboardAlertsTest.${key} = { props, acknowledgeAll: () => emit('acknowledge-all'), select: id => emit('select', id), open: id => emit('open', id), acknowledge: ids => emit('acknowledge', ids) };
         return () => null;
       } };
   `
@@ -63,6 +70,26 @@ async function setup(initial = []) {
   async function poll() { [...intervals.values()].find(timer => timer.delay === 5000).callback(); await settle() }
   return { ...view, state, intervals, poll, dispose() { view.app.unmount(); Object.assign(globalThis, originals); delete globalThis.__dashboardAlertsTest } }
 }
+
+test('전체 확인은 미확인 화재·연기를 함께 처리하고 실패하면 상태를 유지한다', async () => {
+  const view = await setup()
+  try {
+    view.state.events = [fire(1), { ...fire(2), type: 'smoke', alerting: false }]
+    await view.poll()
+    view.state.bulkError = true
+    view.state.list.acknowledgeAll()
+    await settle()
+    assert.ok(view.state.list.props.events.every(event => event.status === 'UNCONFIRMED'))
+    assert.equal(view.state.modal.props.events.length, 2)
+    view.state.bulkError = false
+    view.state.list.acknowledgeAll()
+    view.state.list.acknowledgeAll()
+    await settle()
+    assert.equal(view.state.bulkCalls, 2)
+    assert.ok(view.state.list.props.events.every(event => event.status === 'CONFIRMED'))
+    assert.equal(view.state.modal.props.events.length, 0)
+  } finally { view.dispose() }
+})
 
 test('과거 이벤트에서 Test를 시작해도 카메라는 유지하고 새 실행 이벤트를 상세에 표시한다', async () => {
   const view = await setup([{ ...fire(1, 10), videoId: 7 }])

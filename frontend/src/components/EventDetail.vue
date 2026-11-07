@@ -15,6 +15,7 @@ const props = defineProps({
   // true이면 지도 아래 실시간 CCTV 영상에서 재생 중인 같은 영상을 공유하고 영상 서버에 다시 접속하지 않음
   mirror: { type: Boolean, default: false },
   closable: { type: Boolean, default: false },
+  captureLimit: { type: Number, default: 0 },
 })
 const emit = defineEmits(['test-progress', 'test-started', 'close'])
 const showDetails = ref(false)
@@ -74,10 +75,10 @@ const cameraStatusLabel = computed(() => {
           <dt>탐지 시각</dt><dd><time :datetime="event.detectedAt">{{ formatDetectedAt(event.detectedAt) }} <small>KST</small></time></dd>
           <dt>CCTV</dt><dd>{{ camera?.name ?? '카메라 정보 없음' }}</dd>
           <dt>탐지 유형</dt><dd>{{ formatType(event.type) }}</dd>
-          <dt>추정 위치</dt><dd>{{ event.estimatedLocation ? '위치 추정 완료' : '위치 추정 정보 없음' }}</dd>
+          <dt>추정 위치</dt><dd v-if="event.estimatedLocation">{{ rangeDisplay.label }}</dd><dd v-else>위치 추정 정보 없음</dd>
         </dl>
         <button type="button" class="primary-button detail-toggle" :aria-expanded="showDetails" aria-controls="extended-detail" @click="showDetails = !showDetails"><DashboardIcon name="bell" :size="18" />{{ showDetails ? '상세 정보 접기' : '상세 정보 보기' }}<DashboardIcon name="arrow" :size="18" /></button>
-        <EventCaptures v-if="event.videoId" :event-id="event.id" :latest-capture="event.latestCapture" @seek="seekCapture" />
+        <EventCaptures v-if="event.videoId" :event-id="event.id" :latest-capture="event.latestCapture" :preview-limit="captureLimit" @seek="seekCapture" />
         <div v-if="showDetails" id="extended-detail" class="extended-detail">
           <h4>Camera 정보</h4>
           <dl v-if="camera" class="extended-info">

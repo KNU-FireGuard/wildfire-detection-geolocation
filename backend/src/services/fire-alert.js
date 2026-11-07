@@ -24,10 +24,17 @@ function buildMessage(cameraName) {
 // 호출자의 탐지 저장을 막지 않도록 모든 오류는 내부에서 처리합니다.
 function createFireAlert({ pool = defaultPool, notifier = createNotifier() } = {}) {
   async function writeLog(cameraId, eventId, phone, message, status, error) {
-    await pool.query(`
+    const sql = `
       INSERT INTO sms_logs (camera_id, event_id, phone_number, message, status, provider, error)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-    `, [cameraId, eventId, phone, message, status, notifier.name, error]);
+    `;
+    const values = [cameraId, eventId, phone, message, status, notifier.name, error];
+    try { await pool.query(sql, values); }
+    catch (failure) {
+      // Event deletion may finish while the provider request is pending. Keep the send log.
+      if (failure.code !== '23503' || failure.constraint !== 'sms_logs_event_id_fkey') throw failure;
+      await pool.query(sql, [cameraId, null, phone, message, status, notifier.name, error]);
+    }
   }
 
   async function notifyFire({ cameraId, eventId, confidence }) {

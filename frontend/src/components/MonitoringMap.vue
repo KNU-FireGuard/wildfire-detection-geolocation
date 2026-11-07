@@ -130,7 +130,7 @@ onBeforeUnmount(() => {
         <p>이벤트 #{{ selectedEvent.id }} · {{ selectedCamera?.name ?? '카메라 정보 없음' }} <RouterLink :to="`/events/${selectedEvent.id}`">상세 보기</RouterLink></p>
         <p v-if="validFire" class="coordinates">위도 {{ selectedEvent.estimatedLocation.latitude.toFixed(6) }} · 경도 {{ selectedEvent.estimatedLocation.longitude.toFixed(6) }}</p>
         <p v-if="validFire" class="coordinates" :class="{ 'low-confidence': rangeDisplay.mode === 'low-confidence' }">{{ rangeDisplay.label }}</p>
-        <p v-else class="empty-message">{{ selectedEvent.status === 'CONFIRMED' ? '확인 완료된 이벤트는 지도에 표시하지 않습니다.' : '유효한 추정 위치 정보가 없습니다.' }}</p>
+        <p v-if="!validFire" class="empty-message">{{ selectedEvent.status === 'CONFIRMED' ? '확인 완료된 이벤트는 지도에 표시하지 않습니다.' : '유효한 추정 위치 정보가 없습니다.' }}</p>
       </template>
       <p v-else-if="!cameras.length" class="empty-message">등록된 카메라가 없습니다.</p>
     </div>
@@ -143,6 +143,7 @@ onBeforeUnmount(() => {
 .map-toolbar { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 11px; overflow: hidden; background: var(--glass); backdrop-filter: blur(10px); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); }.map-toolbar button { padding: 9px 13px; border: 0; background: transparent; color: var(--text-2); font-size: 12px; font-weight: 500; transition: background 0.15s, color 0.15s; }.map-toolbar button:hover { color: var(--text); background: var(--surface-3); }.map-toolbar button[aria-pressed='true'] { color: var(--on-accent); background: var(--accent-strong); }
 .map-legend { position: absolute; top: 58px; left: 12px; display: flex; gap: 14px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--glass); backdrop-filter: blur(10px); color: var(--text-2); font-size: 11px; }.camera-key { color: var(--accent); }.fire-key { color: var(--fire); }
 .map-selection { padding: 16px 18px; font-size: 12px; color: var(--text-2); }.camera-groups { display: grid; gap: 12px; }.camera-group h3 { margin: 0 0 7px; color: var(--text-3); font-size: 12px; font-weight: 600; }.camera-buttons { display: flex; flex-wrap: wrap; gap: 7px; }.camera-buttons button { border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2); border-radius: 999px; padding: 6px 12px; font-size: 11px; transition: border-color 0.15s, color 0.15s; }.camera-buttons button:hover { border-color: var(--accent); color: var(--text); }.camera-buttons button[aria-pressed='true'] { background: var(--accent-strong); color: var(--on-accent); border-color: transparent; }a { color: var(--accent); margin-left: 12px; }.coordinates { color: var(--text-3); font-variant-numeric: tabular-nums; }
-.low-confidence { color: var(--fire); }
+.low-confidence { color: var(--warn); }
+.map-legend { flex-wrap: wrap; max-width: calc(100% - 24px); box-sizing: border-box; }
 @media (max-width: 600px) { .map-area { height: min(76vh, 700px); min-height: 470px; }.map-toolbar button { padding: 8px; font-size: 11px; } }
 </style>

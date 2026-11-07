@@ -18,14 +18,13 @@ test('없는 카메라, 숫자가 아닌 값, 빈 값은 선택하지 않는다'
 const catalog = parse(readFileSync(new URL('../src/views/CatalogView.vue', import.meta.url), 'utf8')).descriptor.template.content
 const cameraTable = catalog.match(/<table v-if="resource === 'cameras'">[\s\S]*?<\/table>/)[0]
 
-test('카메라 목록 표에는 ID 열과 대시보드 열이 없고 행을 더블클릭하면 해당 카메라로 이동한다', () => {
+test('카메라 목록 행을 더블클릭하거나 Enter를 누르면 상세 팝업을 연다', () => {
   assert.doesNotMatch(cameraTable, /<th>ID<\/th>/)
   assert.doesNotMatch(cameraTable, /row\.id }}/)
   assert.doesNotMatch(cameraTable, /<th>대시보드<\/th>/)
   assert.doesNotMatch(cameraTable, /RouterLink/)
-  assert.match(cameraTable, /@dblclick="openOnDashboard\(row\.id\)"/)
-  assert.match(cameraTable, /@keydown\.enter="openOnDashboard\(row\.id\)"/)
-  assert.match(readFileSync(new URL('../src/views/CatalogView.vue', import.meta.url), 'utf8'), /router\.push\(\{ path: '\/', query: \{ camera: id \} \}\)/)
+  assert.match(cameraTable, /@dblclick="openCamera\(row\)"/)
+  assert.match(cameraTable, /@keydown\.enter="openCamera\(row\)"/)
 })
 
 test('탐지 이벤트 표의 ID 열은 그대로 둔다', () => {

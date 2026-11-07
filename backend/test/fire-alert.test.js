@@ -28,6 +28,25 @@ function setup({ camera, sendError, queryError } = {}) {
 
 const logInsert = queries => queries.find(call => /INSERT INTO sms_logs/.test(call.sql));
 
+test('발송 중 이벤트가 삭제돼도 문자를 재전송하지 않고 연결 없는 발송 기록을 남긴다', async () => {
+  let sends = 0;
+  const logs = [];
+  const alert = createFireAlert({
+    notifier: { name: 'test', send: async () => { sends++; } },
+    pool: { query: async (sql, params) => {
+      if (/SELECT name/.test(sql)) return { rows: [{ name: 'test', alert_phone: '01012345678' }] };
+      logs.push(params);
+      if (params[1] !== null) throw Object.assign(new Error('event deleted'), { code: '23503', constraint: 'sms_logs_event_id_fkey' });
+      return { rows: [] };
+    } },
+  });
+  await alert.notifyFire({ cameraId: 1, eventId: 7 });
+  assert.equal(sends, 1);
+  assert.equal(logs.length, 2);
+  assert.equal(logs[1][1], null);
+  assert.equal(logs[1][4], 'sent');
+});
+
 test('번호가 있는 카메라의 화재 탐지는 문자를 보내고 sent로 기록한다', async () => {
   const { alert, queries, sent } = setup({ camera: { name: '북악산 CCTV', alert_phone: '01012345678' } });
   await alert.notifyFire({ cameraId: 3, eventId: 15, confidence: 0.944 });

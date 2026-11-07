@@ -12,6 +12,8 @@ export async function compileComponent(url, replacements = {}) {
 
 export const makeNode = (tag, text = '') => ({ tag, text, props: {}, children: [], parent: null,
   style: { overflow: '' }, open: false, showCalls: 0,
+  addEventListener() {}, removeEventListener() {},
+  getRootNode() { return globalThis.document },
   showModal() { this.open = true; this.showCalls++ }, close() { this.open = false },
 })
 export const findAll = (node, tag) => [...(node.tag === tag ? [node] : []), ...node.children.flatMap(child => findAll(child, tag))]

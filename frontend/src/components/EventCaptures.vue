@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { fetchEventCaptures } from '../api/catalog'
 
-const props = defineProps({ eventId: { type: Number, required: true }, latestCapture: { type: Object, default: null } })
+const props = defineProps({ eventId: { type: Number, required: true }, latestCapture: { type: Object, default: null }, previewLimit: { type: Number, default: 0 } })
 const emit = defineEmits(['seek'])
 const captures = ref([])
 const error = ref('')
@@ -13,6 +13,7 @@ let generation = 0
 let timer
 let controller
 const ordered = computed(() => [...captures.value].sort((a, b) => a.video_time_ms - b.video_time_ms))
+const displayed = computed(() => props.previewLimit > 0 ? ordered.value.slice(-props.previewLimit) : ordered.value)
 const timestamp = milliseconds => `${(milliseconds / 1000).toFixed(1)}초`
 async function load(older = false) {
   if (busy.value) return
@@ -62,12 +63,13 @@ onBeforeUnmount(() => { generation++; controller?.abort(); clearInterval(timer) 
     <p v-if="error" role="alert">{{ error }} <button type="button" @click="load()">다시 시도</button></p>
     <p v-else-if="!captures.length">{{ busy ? '캡처를 불러오는 중입니다.' : '아직 저장된 캡처가 없습니다.' }}</p>
     <div class="capture-grid">
-      <button v-for="capture in ordered" :key="capture.id" type="button" @click="emit('seek', capture.video_time_ms / 1000)">
+      <button v-for="capture in displayed" :key="capture.id" type="button" @click="emit('seek', capture.video_time_ms / 1000)">
         <img :src="capture.image_url" :alt="`영상 ${timestamp(capture.video_time_ms)} 탐지 캡처`" loading="lazy">
         <span>영상 {{ timestamp(capture.video_time_ms) }}</span>
       </button>
     </div>
-    <button v-if="more" type="button" :disabled="busy" @click="load(true)">이전 캡처 더 보기</button>
+    <a v-if="previewLimit > 0 && (captures.length > previewLimit || more)" class="more-captures" :href="`/events/${eventId}`">더보기</a>
+    <button v-else-if="previewLimit === 0 && more" type="button" :disabled="busy" @click="load(true)">더보기</button>
   </section>
 </template>
 
@@ -76,4 +78,5 @@ onBeforeUnmount(() => { generation++; controller?.abort(); clearInterval(timer) 
 .capture-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
 .capture-grid button { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); cursor: pointer; }
 .capture-grid img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain; }.capture-grid span { display: block; padding: 7px; font-size: 12px; }
+.more-captures { display: inline-block; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--accent); text-decoration: none; }
 </style>

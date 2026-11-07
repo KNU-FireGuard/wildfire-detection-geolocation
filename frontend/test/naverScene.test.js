@@ -55,11 +55,15 @@ test('오차 미산출 위치는 범위를 지어내지 않고 작은 중심점�
   assert.equal(f.overlays.length, 1)
 })
 
-test('오차 반경 표시 기준은 null, 1km 미만, 1km 이상을 구분한다', () => {
+test('오차 반경에 따른 위치 표시 등급은 200m와 1km 경계를 구분한다', () => {
   assert.deepEqual(errorRangeDisplay(fire), { mode: 'unknown', label: '오차 범위 미산출' })
-  assert.deepEqual(errorRangeDisplay({ errorRadiusM: 999 }), { mode: 'radius', label: '오차 반경 999 m' })
-  assert.deepEqual(errorRangeDisplay({ errorRadiusM: 1000 }), { mode: 'low-confidence', label: '위치 신뢰 낮음 · 오차 반경 1 km' })
-  assert.deepEqual(errorRangeDisplay({ errorRadiusM: 4360 }), { mode: 'low-confidence', label: '위치 신뢰 낮음 · 오차 반경 4.36 km' })
+  for (const radius of [0, 110, 200]) assert.match(errorRangeDisplay({ errorRadiusM: radius }).label, /위치 신뢰도 높음/)
+  for (const radius of [201, 999]) assert.match(errorRangeDisplay({ errorRadiusM: radius }).label, /위치 신뢰도 중간/)
+  for (const radius of [1000, 1900, 4100]) {
+    const range = errorRangeDisplay({ errorRadiusM: radius })
+    assert.match(range.label, /위치 신뢰도 낮음 · 실제 오차 반경/)
+    assert.equal(range.radiusM, 500)
+  }
 })
 
 test('1km 미만은 미터 반경 원을 그리고 줌을 바꿔도 실제 반경을 유지한다', () => {
@@ -79,7 +83,7 @@ test('1km 미만은 미터 반경 원을 그리고 줌을 바꿔도 실제 반�
   assert.equal(f.overlays[1].map, null)
 })
 
-test('1km 경계와 실제 저장된 큰 반경도 지리적 원으로 표시하고 낮은 신뢰 안내를 유지한다', () => {
+test('1km 이상은 원본 오차값을 보존하면서 500m 점선 참고 원으로 표시한다', () => {
   for (const radius of [4360, 999, 1000, 1910, 4100, 0]) {
     const f = fixture()
     const scene = createNaverScene(f.maps, f.map, () => {})
@@ -87,11 +91,13 @@ test('1km 경계와 실제 저장된 큰 반경도 지리적 원으로 표시하
     scene.render({ cameras: [], selectedEvent: { estimatedLocation: location } })
     assert.equal(f.overlays.length, 2)
     assert.equal(f.overlays[0].options.map, f.map)
-    assert.equal(f.overlays[0].options.radius, radius)
-    assert.equal(f.overlays[0].options.fillOpacity, 0.08)
+    assert.equal(f.overlays[0].options.radius, radius >= 1000 ? 500 : radius)
+    assert.equal(f.overlays[0].options.strokeStyle, radius >= 1000 ? 'shortdash' : 'solid')
+    assert.equal(f.overlays[0].options.fillOpacity, radius >= 1000 ? 0.03 : 0.08)
     assert.equal(f.overlays[0].options.strokeOpacity, 1)
     assert.match(f.overlays[1].options.icon.content, /width:14px;height:14px/)
-    assert.equal(f.overlays[1].options.title, `추정 산불 위치 · ${errorRangeDisplay(location).label}`)
+    assert.ok(f.overlays[1].options.title.includes(errorRangeDisplay(location).label))
+    assert.equal(location.errorRadiusM, radius)
     scene.clear()
     assert.ok(f.overlays.every(overlay => overlay.map === null))
   }
