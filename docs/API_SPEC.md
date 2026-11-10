@@ -390,3 +390,12 @@
 - 솔라피 호출: `POST /messages/v4/send-many/detail`(HMAC-SHA256 서명)
 - 솔라피는 HTTP 오류, 응답의 `errorCode`, 비어 있지 않은 `failedMessageList` 중 하나라도 있으면 `failed`로 기록
 - 키는 Backend 환경변수에만 저장, Frontend 노출 금지
+# 관리자 실시간 탐지 제어
+
+- `GET /api/admin/live-monitor`: 관리자 Bearer JWT 인증 후 실시간 분석 상태 조회
+- `PUT /api/admin/live-monitor`: 관리자 Bearer JWT 인증, JSON `{ "enabled": true }`로 시작, `{ "enabled": false }`로 종료
+- 응답: `{ "enabled": false, "state": "stopped", "cameras": [] }`, 카메라별 상태 항목은 기존 공개 `GET /api/live-monitor/status`와 동일
+- `enabled`는 분석 활성화 의도, `state`는 실제 상태이며 CCTV 대기·시작·재시작 중에도 enabled는 true
+- enabled 누락·boolean 이외 값은 400, 인증 실패는 401, 처리 실패는 기존 오류 응답 사용
+- 종료 응답은 AI 프로세스 종료·실행 이벤트 정리 후 반환, 서버 재시작 시 항상 OFF, 설정은 DB에 저장하지 않음
+- 공개 상태 조회·AI 토큰 heartbeat 인증·테스트 분석 API는 기존 계약 유지

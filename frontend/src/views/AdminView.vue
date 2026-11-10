@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { loginAdmin } from '../api/catalog'
-import { fetchAdminCameras, fetchSmsLogs, updateAlertPhone, deleteSmsLogs } from '../api/admin'
+import { fetchAdminCameras, fetchSmsLogs, updateAlertPhone, deleteSmsLogs, fetchLiveMonitor, setLiveMonitor } from '../api/admin'
 import { useAdminSession } from '../composables/useAdminSession'
 import { formatDetectedAt } from '../utils/eventFormat'
 
@@ -10,6 +10,48 @@ const username = ref('')
 const password = ref('')
 const loginBusy = ref(false)
 const notice = ref('')
+const monitor = ref(null)
+const monitorBusy = ref(false)
+const monitorError = ref('')
+const monitorLoading = ref(false)
+let monitorTimer
+const monitorLabel = computed(() => ({
+  stopped: '꺼짐', stopping: '종료 중', starting: '시작 중', running: '분석 중',
+  restarting: '재시작 중', waiting_for_cctv: 'CCTV 목록 대기',
+  waiting_for_ai: 'AI 실행 파일 확인 필요', failed: '오류',
+}[monitor.value?.state] ?? '상태 확인 중'))
+
+async function loadMonitor() {
+  if (!active || !isLoggedIn.value || monitorBusy.value || monitorLoading.value) return
+  const sessionToken = token.value
+  monitorLoading.value = true
+  try {
+    const result = await fetchLiveMonitor(sessionToken)
+    if (active && token.value === sessionToken) { monitor.value = result; monitorError.value = '' }
+  } catch (error) {
+    if (active && token.value === sessionToken && !expire(error)) {
+      monitor.value = null
+      monitorError.value = error.message
+    }
+  } finally { monitorLoading.value = false }
+}
+
+async function toggleMonitor() {
+  if (monitorBusy.value || monitorLoading.value || !monitor.value) return
+  const sessionToken = token.value
+  const enabled = !monitor.value.enabled
+  monitorBusy.value = true
+  monitorError.value = ''
+  try {
+    const result = await setLiveMonitor(enabled, sessionToken)
+    if (active && token.value === sessionToken) monitor.value = result
+  } catch (error) {
+    if (active && token.value === sessionToken && !expire(error)) monitorError.value = error.message
+  } finally {
+    monitorBusy.value = false
+    loadMonitor()
+  }
+}
 
 const cameras = ref([])
 const drafts = ref({})
@@ -25,7 +67,7 @@ const logsDeleting = ref(false)
 const deleteNotice = ref('')
 const deleteError = ref('')
 let active = true
-onBeforeUnmount(() => { active = false })
+onBeforeUnmount(() => { active = false; clearInterval(monitorTimer) })
 const allLogsSelected = computed(() => logs.value.length > 0 && logs.value.every(log => selectedLogs.value.has(log.id)))
 function selectLog(id, checked) {
   const next = new Set(selectedLogs.value)
@@ -132,7 +174,12 @@ function logout() {
 }
 
 watch(isLoggedIn, loggedIn => {
+  clearInterval(monitorTimer)
+  monitor.value = null
+  monitorError.value = ''
   if (!loggedIn) { selectedLogs.value = new Set(); deleteNotice.value = ''; deleteError.value = ''; return }
+  loadMonitor()
+  monitorTimer = setInterval(loadMonitor, 3000)
   loadCameras()
   loadLogs()
 }, { immediate: true })
@@ -141,7 +188,7 @@ watch(isLoggedIn, loggedIn => {
 <template>
   <div class="catalog-page admin-page">
     <header class="page-heading">
-      <h1>문자 알림 관리</h1>
+      <h1>관리자 설정</h1>
       <button v-if="isLoggedIn" type="button" class="secondary-button" @click="logout">로그아웃</button>
     </header>
 
@@ -156,6 +203,17 @@ watch(isLoggedIn, loggedIn => {
     </section>
 
     <template v-else>
+      <section class="dashboard-panel" aria-label="실시간 탐지 설정">
+        <div class="section-heading">
+          <h2>실시간 탐지</h2>
+          <button type="button" class="primary-button" :disabled="!monitor || monitorBusy || monitorLoading" @click="toggleMonitor">
+            {{ monitorBusy ? '변경 중' : monitor?.enabled ? '실시간 탐지 끄기' : '실시간 탐지 켜기' }}
+          </button>
+        </div>
+        <p role="status">상태: {{ monitorLabel }}</p>
+        <p class="hint">실시간 CCTV의 AI 분석을 제어합니다. 영상 재생과 테스트 분석은 유지되며, 서버 재시작 시에는 꺼짐으로 시작합니다.</p>
+        <p v-if="monitorError" class="form-error" role="alert">{{ monitorError }}</p>
+      </section>
       <section class="dashboard-panel" aria-label="카메라별 알림 번호">
         <div class="section-heading">
           <h2>카메라별 알림 번호</h2>

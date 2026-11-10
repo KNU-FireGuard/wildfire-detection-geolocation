@@ -23,7 +23,6 @@ async function start() {
       server.once('error', reject);
     });
     console.log(`Backend 서버 실행: http://127.0.0.1:${port}`);
-    await monitor.start();
     console.log(`실시간 CCTV 감시 상태: ${monitor.status().state}`);
 
     let stopping = false;
