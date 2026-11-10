@@ -43,6 +43,7 @@ function createLiveMonitor({
   let overall = 'stopped';
   let lifecycle = Promise.resolve();
   let controlVersion = 0;
+  const closedWorkers = new WeakSet();
 
   function serialize(operation) {
     const result = lifecycle.then(operation);
@@ -51,6 +52,7 @@ function createLiveMonitor({
   }
 
   function terminateWorker(child) {
+    if (closedWorkers.has(child)) return Promise.resolve();
     return new Promise(resolve => {
       // Register before signalling so a quick exit cannot be missed.
       const timer = setTimeout(() => child.kill('SIGKILL'), terminationGraceMs);
@@ -179,7 +181,11 @@ function createLiveMonitor({
     const finish = message => serialize(() => finishWorker(child, message))
       .catch(() => { overall = 'failed'; });
     child.once('error', () => finish('AI 작업자를 시작하지 못했습니다.'));
-    child.once('close', code => finish(`AI 작업자가 종료되었습니다. (code ${code})`));
+    child.once('close', code => {
+      // Remember close immediately, even while lifecycle cleanup is queued.
+      closedWorkers.add(child);
+      finish(`AI 작업자가 종료되었습니다. (code ${code})`);
+    });
     let terminationRequestedAt = null;
     watchdog = setInterval(() => {
       if (worker !== child) return;
