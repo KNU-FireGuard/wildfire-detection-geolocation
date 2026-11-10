@@ -42,6 +42,8 @@ function createLiveMonitor({
   let slots = [];
   let overall = 'stopped';
   let lifecycle = Promise.resolve();
+  let controlVersion = 0;
+  const closedWorkers = new WeakSet();
 
   function serialize(operation) {
     const result = lifecycle.then(operation);
@@ -50,6 +52,7 @@ function createLiveMonitor({
   }
 
   function terminateWorker(child) {
+    if (closedWorkers.has(child)) return Promise.resolve();
     return new Promise(resolve => {
       // Register before signalling so a quick exit cannot be missed.
       const timer = setTimeout(() => child.kill('SIGKILL'), terminationGraceMs);
@@ -70,6 +73,7 @@ function createLiveMonitor({
 
   function status() {
     return {
+      enabled: active,
       state: overall,
       cameras: slots.map(slot => ({
         camera_id: slot.cameraId, provider_key: slot.providerKey, name: slot.name,
@@ -80,6 +84,7 @@ function createLiveMonitor({
   }
 
   function recordHeartbeat(runId, cameraId) {
+    if (!active) return false;
     const slot = slots.find(item => item.run?.id === runId && item.cameraId === cameraId);
     if (!slot || !['starting', 'running'].includes(slot.state)) return false;
     slot.lastFrameAt = now();
@@ -106,7 +111,10 @@ function createLiveMonitor({
     slots.forEach(slot => { slot.state = 'restarting'; });
     const delay = Math.min(restartDelayMs * 2 ** restartCount, 300000);
     restartCount = Math.min(restartCount + 1, 5);
-    restartTimer = setTimeout(() => { restartTimer = null; launch().catch(() => { overall = 'failed'; }); }, delay);
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      serialize(launch).catch(() => { overall = 'failed'; });
+    }, delay);
     restartTimer.unref?.();
   }
 
@@ -122,7 +130,7 @@ function createLiveMonitor({
   }
 
   async function launch() {
-    if (!active) return;
+    if (!active || worker) return;
     if (slots.length !== 6) { overall = 'waiting_for_cctv'; return; }
     const runnable = resolvedRunnerPath && await canRun(resolvedRunnerPath);
     if (!active) return;
@@ -170,8 +178,14 @@ function createLiveMonitor({
       if (worker !== child) return;
       slots.forEach(slot => { slot.run.status = 'running'; });
     });
-    child.once('error', () => finishWorker(child, 'AI 작업자를 시작하지 못했습니다.'));
-    child.once('close', code => finishWorker(child, `AI 작업자가 종료되었습니다. (code ${code})`));
+    const finish = message => serialize(() => finishWorker(child, message))
+      .catch(() => { overall = 'failed'; });
+    child.once('error', () => finish('AI 작업자를 시작하지 못했습니다.'));
+    child.once('close', code => {
+      // Remember close immediately, even while lifecycle cleanup is queued.
+      closedWorkers.add(child);
+      finish(`AI 작업자가 종료되었습니다. (code ${code})`);
+    });
     let terminationRequestedAt = null;
     watchdog = setInterval(() => {
       if (worker !== child) return;
@@ -190,7 +204,9 @@ function createLiveMonitor({
   }
 
   async function reconcile() {
+    if (!active) return status();
     const listing = await catalog.list();
+    if (!active) return status();
     const items = listing.items || [];
     const valid = items.length === 6 && items.every(item =>
       Number.isSafeInteger(item.cameraId) && item.cameraId > 0
@@ -219,10 +235,18 @@ function createLiveMonitor({
   }
 
   async function start() {
-    if (active) return status();
-    active = true;
-    await serialize(reconcile);
-    return status();
+    const version = ++controlVersion;
+    return serialize(async () => {
+      if (version !== controlVersion || active) return status();
+      active = true;
+      try { return await reconcile(); }
+      catch (error) {
+        active = false;
+        clearTimers();
+        overall = 'failed';
+        throw error;
+      }
+    });
   }
 
   async function stop() {
@@ -232,7 +256,7 @@ function createLiveMonitor({
     worker = null;
     if (child) await terminateWorker(child);
     for (const slot of slots) {
-      await closeRun(slot, 'Backend 서버가 종료되었습니다.');
+      await closeRun(slot, '실시간 탐지가 중지되었습니다.');
       slot.state = 'stopped';
     }
     overall = 'stopped';
@@ -242,7 +266,9 @@ function createLiveMonitor({
     start,
     stop: () => {
       // Block launches immediately, even while a reconciliation is still waiting.
+      controlVersion += 1;
       active = false;
+      overall = 'stopping';
       clearTimers();
       return serialize(stop);
     },

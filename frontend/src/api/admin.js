@@ -2,6 +2,17 @@
 const PHONE_PATTERN = /^010\d{8}$/
 const PAGE_SIZE = 100 // Backend에서 허용하는 최대 페이지 크기
 
+export function fetchLiveMonitor(token) {
+  return request('/api/admin/live-monitor', token, {}, '실시간 탐지 상태')
+}
+
+export function setLiveMonitor(enabled, token) {
+  return request('/api/admin/live-monitor', token, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  }, '실시간 탐지 설정')
+}
+
 function authError(message) {
   const error = new Error(message)
   error.code = 'unauthorized'

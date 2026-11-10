@@ -104,6 +104,67 @@ function fakeRuns() {
   };
 }
 
+for (const blocked of [false, true]) {
+  test(`OFF 처리 전에 이미 종료된 작업자를 다시 기다리지 않는다 (목록 조회 대기=${blocked})`, async () => {
+    const children = [];
+    const runs = fakeRuns();
+    let release;
+    let entered;
+    let waiting = false;
+    const gate = new Promise(resolve => { release = resolve; });
+    const ready = new Promise(resolve => { entered = resolve; });
+    const monitor = createLiveMonitor({
+      catalog: { async list() {
+        if (waiting) { entered(); await gate; }
+        return { items: cameras };
+      } },
+      canRun: async () => true, runManager: runs,
+      finalizeEvents: async () => {}, getToken: () => 'test-token',
+      terminationGraceMs: 10,
+      spawnImpl() {
+        const child = new EventEmitter();
+        child.stdin = new PassThrough();
+        child.signals = [];
+        child.closed = false;
+        child.kill = signal => {
+          child.signals.push(signal);
+          if (child.closed) return false;
+          queueMicrotask(() => { child.closed = true; child.emit('close', 0); });
+          return true;
+        };
+        children.push(child);
+        return child;
+      },
+    });
+    await monitor.start();
+    let updating;
+    if (blocked) {
+      waiting = true;
+      updating = monitor.reconcile();
+      await ready;
+    }
+    const stopping = monitor.stop();
+    children[0].closed = true;
+    children[0].emit('close', 0);
+    waiting = false;
+    release();
+    let timeout;
+    try {
+      await Promise.race([
+        Promise.all([stopping, updating]),
+        new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('종료된 AI를 기다리며 OFF 요청이 멈춤')), 300); }),
+      ]);
+    } finally { clearTimeout(timeout); }
+    assert.equal(monitor.status().state, 'stopped');
+    assert.equal(monitor.status().enabled, false);
+    assert.equal(runs.runs.size, 0);
+    assert.deepEqual(children[0].signals, []);
+    await monitor.start();
+    assert.equal(children.length, 2, '다시 ON 요청이 정상 처리되어야 함');
+    await monitor.stop();
+  });
+}
+
 test('서버의 10초 종료 제한 전에 응답 없는 AI를 강제 종료한다', async () => {
   const signals = [];
   const monitor = createLiveMonitor({

@@ -7,7 +7,7 @@ const read = path => readFileSync(new URL(path, import.meta.url), 'utf8')
 
 test('관리자 화면은 /admin 경로와 사이드 메뉴에 연결된다', () => {
   assert.match(read('../src/router.js'), /path:\s*'\/admin',\s*component:\s*AdminView/)
-  assert.match(read('../src/App.vue'), /to:\s*'\/admin',\s*label:\s*'문자 알림 관리'/)
+  assert.match(read('../src/App.vue'), /to:\s*'\/admin',\s*label:\s*'관리자 설정'/)
 })
 
 test('관리자 화면은 로그인 전에는 로그인 폼만, 로그인 후에 번호 설정과 발송 내역을 보인다', () => {

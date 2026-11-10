@@ -34,6 +34,39 @@ const cctvRefreshBusy = ref(false)
 const cctvRefreshMessage = ref('')
 const cctvRefreshError = ref('')
 const now = ref(new Date())
+const liveMonitor = ref(null)
+const monitorCheckedAt = ref(0)
+let monitorController
+let monitorInterval
+const liveIndicator = computed(() => {
+  if (dataSource === 'mock') return { tone: 'muted', label: '데모 데이터' }
+  if (!liveMonitor.value || now.value.getTime() - monitorCheckedAt.value > 10000) {
+    return { tone: 'muted', label: '탐지 상태 확인 불가' }
+  }
+  const { enabled, state } = liveMonitor.value
+  if (state === 'stopping') return { tone: 'pending', label: '실시간 탐지 종료 중' }
+  if (state === 'failed') return { tone: 'error', label: '실시간 탐지 오류' }
+  if (enabled === false || state === 'stopped') return { tone: 'muted', label: '실시간 탐지 꺼짐' }
+  if (state === 'running') return { tone: 'running', label: '실시간 탐지 중' }
+  return { tone: 'pending', label: ({ starting: '실시간 탐지 시작 중', restarting: '실시간 탐지 재시작 중',
+    waiting_for_cctv: 'CCTV 목록 대기', waiting_for_ai: 'AI 실행 준비 필요' })[state] ?? '탐지 상태 확인 중' }
+})
+
+async function refreshMonitor() {
+  if (disposed || monitorController) return
+  const controller = new AbortController()
+  monitorController = controller
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const result = await fetchLiveMonitorStatus({ signal: controller.signal })
+    if (!disposed) { liveMonitor.value = result; monitorCheckedAt.value = Date.now() }
+  } catch {
+    if (!disposed) liveMonitor.value = null
+  } finally {
+    clearTimeout(timeout)
+    monitorController = null
+  }
+}
 let requestController
 let clockInterval
 let refreshInterval
@@ -268,12 +301,16 @@ onMounted(() => {
   loadData()
   clockInterval = setInterval(() => { now.value = new Date() }, 1000)
   if (dataSource === 'api') {
+    refreshMonitor()
+    monitorInterval = setInterval(() => { if (!document.hidden) refreshMonitor() }, 3000)
     refreshInterval = setInterval(() => { if (!document.hidden) loadData({ silent: true }) }, 30000)
     eventRefreshInterval = setInterval(() => { if (!document.hidden) refreshEvents() }, 5000)
   }
 })
 onBeforeUnmount(() => {
   disposed = true
+  monitorController?.abort()
+  clearInterval(monitorInterval)
   requestController?.abort()
   eventController?.abort()
   clearInterval(clockInterval)
@@ -291,7 +328,7 @@ onBeforeUnmount(() => {
           <span class="user-profile"><span class="avatar"><DashboardIcon name="user" :size="20" /></span>admin</span>
         </div>
       </header>
-      <div class="workspace-heading"><span>실시간 관제 현황</span><div class="workspace-actions"><button type="button" class="cctv-refresh-button" :aria-expanded="mapVisible" aria-controls="monitoring-map" @click="mapVisible = !mapVisible">{{ mapVisible ? '지도 닫기' : '지도 열기' }}</button><button v-if="dataSource === 'api'" type="button" class="cctv-refresh-button" :disabled="cctvRefreshBusy" @click="refreshCctv">{{ cctvRefreshBusy ? '갱신 중…' : 'CCTV 주소 갱신' }}</button><span v-if="dataSource === 'mock'" class="mode-badge">데모 데이터</span></div></div>
+      <div class="workspace-heading"><span :class="liveIndicator.tone" role="status">실시간 관제 현황 · {{ liveIndicator.label }}</span><div class="workspace-actions"><button type="button" class="cctv-refresh-button" :aria-expanded="mapVisible" aria-controls="monitoring-map" @click="mapVisible = !mapVisible">{{ mapVisible ? '지도 닫기' : '지도 열기' }}</button><button v-if="dataSource === 'api'" type="button" class="cctv-refresh-button" :disabled="cctvRefreshBusy" @click="refreshCctv">{{ cctvRefreshBusy ? '갱신 중…' : 'CCTV 주소 갱신' }}</button><span v-if="dataSource === 'mock'" class="mode-badge">데모 데이터</span></div></div>
       <p v-if="cctvRefreshMessage" class="cctv-refresh-result" role="status">{{ cctvRefreshMessage }}</p>
       <p v-if="cctvRefreshError" class="refresh-error" role="alert">{{ cctvRefreshError }}</p>
       <p v-if="isLoading" class="load-status" role="status">카메라와 탐지 이벤트를 불러오는 중입니다.</p>
@@ -326,7 +363,10 @@ h1 { margin: 0; font-size: clamp(23px, 2vw, 30px); letter-spacing: -1px; font-we
 .user-profile { display: flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text-2); }
 .avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--on-accent); background: linear-gradient(135deg, #3d8ff0, #1b5fb8); }
 .workspace-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; color: var(--text-2); font-size: 12px; font-weight: 600; letter-spacing: 0.4px; }
-.workspace-heading > span::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); animation: live-pulse 2.4s ease-in-out infinite; vertical-align: 1px; }
+.workspace-heading > span::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 9px; border-radius: 50%; background: var(--text-3); vertical-align: 1px; }
+.workspace-heading > span.running::before { background: var(--ok); box-shadow: 0 0 10px var(--ok); animation: live-pulse 2.4s ease-in-out infinite; }
+.workspace-heading > span.pending::before { background: var(--warn); }
+.workspace-heading > span.error::before { background: var(--fire); }
 .mode-badge { border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text-2); border-radius: 999px; padding: 4px 11px; font-size: 11px; font-weight: 500; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .summary-card { display: flex; gap: 14px; align-items: center; padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 70px), var(--surface); box-shadow: var(--shadow); }
