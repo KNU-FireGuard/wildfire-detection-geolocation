@@ -7,7 +7,8 @@ import { formatConfidence, formatDetectedAt, formatType, formatStatus } from '..
 import { errorRangeDisplay } from '../maps/naverScene'
 const LiveVideo = defineAsyncComponent(() => import('./LiveVideo.vue'))
 const LiveMirror = defineAsyncComponent(() => import('./LiveMirror.vue'))
-const TestRunPanel = defineAsyncComponent(() => import('./TestRunPanel.vue'))
+const demoEnabled = import.meta.env.VITE_DEMO_MODE !== 'false'
+const TestRunPanel = demoEnabled ? defineAsyncComponent(() => import('./TestRunPanel.vue')) : null
 const props = defineProps({
   event: { type: Object, default: null },
   camera: { type: Object, default: null },
@@ -66,7 +67,7 @@ const cameraStatusLabel = computed(() => {
       <div v-else-if="camera?.sourceType === 'test'" class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>Test 분석을 시작하면 원본 영상을 재생합니다.</strong><p>확정 탐지는 아래 캡처에서 확인할 수 있습니다.</p></div>
       <div v-else class="video-message"><span class="video-icon"><DashboardIcon name="camera" :size="30" /></span><strong>재생할 영상이 없습니다.</strong><p>data/videos에 원본 영상을 넣고 카메라에 연결해 주세요.</p></div>
     </div>
-    <TestRunPanel v-if="camera?.sourceType === 'test'" :camera-id="camera.id" @started="startPlayback" @events-updated="emit('test-progress')" />
+    <TestRunPanel v-if="demoEnabled && camera?.sourceType === 'test'" :camera-id="camera.id" @started="startPlayback" @events-updated="emit('test-progress')" />
     <div class="event-info" aria-live="polite">
       <div class="info-heading"><h3>탐지 이벤트 정보</h3><span v-if="event" class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span></div>
       <p v-if="!event" class="empty-message">이벤트를 선택하면 상세 정보를 확인할 수 있습니다.</p>

@@ -6,6 +6,9 @@
 
 ## 준비물
 
+- 회사 서버 배포와 개인 Mac 데모 분리 절차: [배포 안내](deploy/README.md)
+- 회사 서버 배포에는 테스트 영상·테스트 메타데이터 seed를 전달하지 않으며 배포 준비 파일은 실행 전 검증 필요
+
 - Node.js `^20.19.0 || >=22.12.0`과 npm
 - Python 3.11과 pip 권장, `pip install`은 패키지만 설치하며 Python 버전은 변경하지 않음
 - Docker와 Docker Compose
