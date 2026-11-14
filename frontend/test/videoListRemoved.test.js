@@ -13,7 +13,9 @@ test('영상 목록 화면은 메뉴와 경로에서 제거되었다', () => {
 test('목록 화면(CatalogView)에는 영상 목록용 코드가 남아 있지 않고 카메라·이벤트 목록은 유지된다', () => {
   const source = read('views/CatalogView.vue')
   const { descriptor } = parse(source)
-  assert.doesNotMatch(source, /fetchVideos|resource === 'videos'|selectedVideo|video-player|play-button|영상 목록/)
+  // 카메라 상세의 등록 영상 메타데이터 조회는 유지하되 독립 영상 목록은 금지
+  assert.doesNotMatch(source, /resource === 'videos'|selectedVideo|video-player|play-button|영상 목록/)
+  assert.doesNotMatch(descriptor.scriptSetup.content, /videos:\s*fetchVideos/)
   assert.match(descriptor.scriptSetup.content, /cameras:\s*fetchCameras/)
   assert.match(descriptor.scriptSetup.content, /events:\s*fetchEvents/)
 })

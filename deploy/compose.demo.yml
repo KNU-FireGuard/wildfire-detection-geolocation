@@ -1,0 +1,36 @@
+# Demo only: distinct project/DB, videos and seed remain outside images
+services:
+  api:
+    image: fireguard-demo-api:${IMAGE_TAG:-local}
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+    environment:
+      DEMO_MODE: "true"
+    volumes:
+      - type: bind
+        source: ${DEMO_VIDEO_DIR:?Set existing demo video directory}
+        target: /app/data/videos
+        read_only: true
+        bind:
+          create_host_path: false
+      - ../ai/config/cameras.json:/app/ai/config/cameras.json:ro
+  web:
+    image: fireguard-demo-web:${IMAGE_TAG:-local}
+    build:
+      args:
+        VITE_DEMO_MODE: "true"
+  demo-seed:
+    image: postgres:17
+    profiles: [demo-tools]
+    environment:
+      PGHOST: db
+      PGUSER: ${DB_USER:-fireguard}
+      PGDATABASE: ${DB_NAME:-fireguard}
+      PGPASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    volumes:
+      - ../sql/seed.dev.sql:/seed.sql:ro
+    entrypoint: [psql, -v, ON_ERROR_STOP=1, -f, /seed.sql]
+    depends_on:
+      db:
+        condition: service_healthy
