@@ -95,12 +95,24 @@ docker compose --env-file deploy/.env -p fireguard-demo -f deploy/compose.yml -f
 - 운영 소스 묶음 생성·내부 파일 검사 통과, 테스트 영상·가중치·seed·데모 override 제외
 - 운영 묶음을 임시 폴더에 풀고 기존 node_modules로 웹 빌드 통과, TestRunPanel 청크와 mock 카메라 레코드 미포함 확인
 - 일반 개발 모드 웹 빌드 통과, HLS 번들 크기 경고 존재
-- 프론트 전체 테스트 168개 중 166개 통과·2개 실패: 변경하지 않은 catalogActions.test.js의 Vue 상대 경로 해석, videoListRemoved.test.js의 기존 fetchVideos 기대 충돌
+- 초기 검증의 프론트 테스트 실패 2건은 아래 후속 보완에서 해결
 - Mac arm64의 웹 이미지·CPU Backend/AI 이미지 빌드 및 Python 의존성 설치 통과
 - 실제 로컬 Compose에서 웹·API·PostgreSQL 연결, 빈 운영 DB, 관리자 생성·로그인·권한 검사, 기본 OFF·테스트 경로 차단 확인
 - 임시 프로젝트 fireguard-local-check-f3809e24의 컨테이너·네트워크·볼륨만 검증 후 삭제, 이미지와 빌드 캐시는 로컬에 유지
 - /app에서 PyTorch·OpenCV·Ultralytics·실시간 runner·LocationSession import 및 이미지 내 테스트 영상·seed·보정 데이터 미포함 확인
 - 최초 모듈 점검은 /app/backend에서 실행해 ai 모듈 검색 실패, /app에서 재검증하여 통과
 - 실제 모델 추론·최종 GPU 이미지 빌드·T4 검증은 미실행, Mac arm64 CPU 이미지 성공을 회사 Linux amd64 GPU 검증으로 간주하지 않음
-- npm 설치에서 Backend 의존성 moderate 1건·high 1건, Frontend 빌드 의존성 high 1건 감사 경고 관찰, 자동 audit fix 미실행
+- 초기 npm 감사 경고는 아래 후속 보안 패치에서 해결, 무조건적인 audit fix는 사용하지 않음
 - 회사 서버 접속·설치·다운로드·삭제·컨테이너 실행 없음
+
+## 후속 보완 검증 · 2026-11-14
+
+- body-parser 2.3.0 → 2.4.0, qs 6.16.0 → 6.17.1로 허용 범위 내 lockfile 갱신
+- Vite 8.3.2 → 8.3.8, package.json은 ~8.3.8로 같은 패치 계열 유지
+- 카메라 추가 정보 조회·컴포넌트 import 테스트 fixture 복구, 이벤트 더블클릭 상세·체크박스 선택 삭제·취소·실패·부분 성공 재시도 검증
+- 독립 영상 목록 금지 검사를 유지하면서 상세 팝업의 등록 영상 메타데이터 조회 허용
+- 프론트 전체 170개 통과, 백엔드 102개 통과·DB 통합 4개 생략, 웹 빌드 통과
+- Backend·Frontend 전체 npm audit 모두 알려진 취약점 0건, 검사 시점 기준이며 향후 공지까지 보장하지 않음
+- 패치된 lockfile로 Mac arm64 웹·CPU API 이미지 재빌드 통과, 컨테이너 npm ci에서도 취약점 0건
+- 로컬 임시 Compose에서 일반·gzip 관리자 로그인, 웹/API/DB 연결, 인증·OFF·테스트 API 차단·테스트 UI와 레코드 미포함 확인
+- fireguard-security-smoke-24dcdfc5 프로젝트의 임시 컨테이너·네트워크·볼륨만 정리, 회사 서버 변경 없음
