@@ -20,6 +20,10 @@ FILES = (
 )
 
 
+def archive_name(file):
+    return file.relative_to(ROOT).as_posix()
+
+
 def production_files():
     files = {ROOT / name for name in FILES}
     for directory in ('backend/src', 'frontend/src', 'frontend/public'):
@@ -47,7 +51,7 @@ def main():
     with args.output.open('xb') as output:
         with tarfile.open(fileobj=output, mode='w:gz') as archive:
             for file in production_files():
-                archive.add(file, arcname=str(file.relative_to(ROOT)), recursive=False)
+                archive.add(file, arcname=archive_name(file), recursive=False)
     print(f'Production source bundle created: {args.output}')
 
 

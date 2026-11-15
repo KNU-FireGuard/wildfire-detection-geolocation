@@ -42,6 +42,8 @@ const cameraStatusLabel = computed(() => {
   if (props.camera?.sourceType === 'live') return ({
     running: 'AI 감시 중', starting: 'AI 시작 중', restarting: 'AI 재시작 중',
     waiting_for_ai: 'AI 연결 대기', waiting_for_cctv: 'CCTV 연결 대기',
+    connecting: '영상 연결 중', stream_error: '영상 수신 실패',
+    analysis_delayed: 'AI 분석 지연', stopped: 'AI 꺼짐', failed: 'AI 오류',
   })[props.camera.monitorState] ?? 'AI 감시 상태 없음'
   return props.camera?.status === 'ONLINE' ? '온라인'
     : props.camera?.status === 'OFFLINE' ? '오프라인' : '상태 정보 없음'
@@ -53,7 +55,7 @@ const cameraStatusLabel = computed(() => {
     <div class="panel-heading video-heading">
       <h2 id="detail-title">{{ camera?.name ?? 'CCTV' }} <span class="title-caption">영상</span></h2>
       <div class="video-actions">
-        <span class="camera-status" :class="{ online: camera?.monitorState === 'running' || camera?.status === 'ONLINE' }"><i />{{ cameraStatusLabel }}</span>
+        <span class="camera-status" :class="{ online: camera?.sourceType === 'live' ? camera?.monitorState === 'running' : camera?.status === 'ONLINE' }"><i />{{ cameraStatusLabel }}</span>
         <button v-if="closable" type="button" class="close-cctv" @click="emit('close')">CCTV 닫기</button>
       </div>
     </div>

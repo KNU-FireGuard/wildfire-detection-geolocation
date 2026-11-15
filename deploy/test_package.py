@@ -1,7 +1,8 @@
 import importlib.util
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('deployment_package', Path(__file__).with_name('package.py'))
 package = importlib.util.module_from_spec(spec)
@@ -9,8 +10,12 @@ spec.loader.exec_module(package)
 
 
 class ProductionPackageTest(unittest.TestCase):
+    def test_archive_names_use_slashes_on_windows(self):
+        with patch.object(package, 'ROOT', PureWindowsPath('C:/repository')):
+            self.assertEqual(package.archive_name(PureWindowsPath('C:/repository/sql/init.sql')), 'sql/init.sql')
+
     def test_production_bundle_excludes_demo_assets_secrets_and_seed(self):
-        names = {str(file.relative_to(package.ROOT)) for file in package.production_files()}
+        names = {package.archive_name(file) for file in package.production_files()}
         self.assertIn('sql/init.sql', names)
         self.assertIn('deploy/compose.gpu.yml', names)
         self.assertIn('deploy/cameras.json', names)

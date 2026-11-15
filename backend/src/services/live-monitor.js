@@ -1,6 +1,7 @@
 const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { createInterface } = require('node:readline');
 const runManagerDefault = require('./run-manager');
 const { finalizeRunEvents } = require('./detection-events');
 const { getAiCallbackToken } = require('../middleware/require-ai-callback');
@@ -44,6 +45,10 @@ function createLiveMonitor({
   let lifecycle = Promise.resolve();
   let controlVersion = 0;
   const closedWorkers = new WeakSet();
+  let workerStartedAt = null;
+  let workerHeartbeatAt = null;
+  let workerProgressAt = null;
+  let hasWorkerStatus = false;
 
   function serialize(operation) {
     const result = lifecycle.then(operation);
@@ -75,10 +80,12 @@ function createLiveMonitor({
     return {
       enabled: active,
       state: overall,
+      last_worker_heartbeat_at: workerHeartbeatAt === null ? null : new Date(workerHeartbeatAt).toISOString(),
       cameras: slots.map(slot => ({
         camera_id: slot.cameraId, provider_key: slot.providerKey, name: slot.name,
         run_id: slot.run?.id ?? null, state: slot.state,
-        last_frame_at: slot.lastFrameAt ? new Date(slot.lastFrameAt).toISOString() : null,
+        last_frame_at: slot.lastFrameAt == null ? null : new Date(slot.lastFrameAt).toISOString(),
+        last_analysis_at: slot.lastAnalysisAt == null ? null : new Date(slot.lastAnalysisAt).toISOString(),
       })),
     };
   }
@@ -86,7 +93,9 @@ function createLiveMonitor({
   function recordHeartbeat(runId, cameraId) {
     if (!active) return false;
     const slot = slots.find(item => item.run?.id === runId && item.cameraId === cameraId);
-    if (!slot || !['starting', 'running'].includes(slot.state)) return false;
+    if (!slot || ['stopped', 'restarting'].includes(slot.state)) return false;
+    workerHeartbeatAt = now();
+    if (!hasWorkerStatus) workerProgressAt = workerHeartbeatAt;
     slot.lastFrameAt = now();
     slot.state = 'running';
     if (slots.every(item => item.lastFrameAt)) {
@@ -94,6 +103,43 @@ function createLiveMonitor({
       restartCount = 0;
     }
     return true;
+  }
+
+  function recordWorkerStatus(child, message) {
+    if (!active || worker !== child || message?.type !== 'live_status') return;
+    const validAge = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
+      && Number.isFinite(new Date(now() - value).getTime());
+    if (!validAge(message.progress_age_ms) || !Array.isArray(message.cameras)
+      || message.cameras.length !== slots.length) return;
+    const seen = new Set();
+    const updates = [];
+    for (const item of message.cameras) {
+      const slot = slots.find(candidate => candidate.cameraId === item.camera_id && candidate.run?.id === item.run_id);
+      if (!slot || seen.has(item.camera_id)
+        || !['connecting', 'receiving', 'stream_error'].includes(item.stream_state)
+        || !(item.frame_age_ms === null || validAge(item.frame_age_ms))
+        || !(item.analysis_age_ms === null || validAge(item.analysis_age_ms))
+        || typeof item.analysis_delayed !== 'boolean') return;
+      seen.add(item.camera_id);
+      updates.push([slot, item]);
+    }
+    const current = now();
+    hasWorkerStatus = true;
+    workerHeartbeatAt = current;
+    workerProgressAt = current - message.progress_age_ms;
+    for (const [slot, item] of updates) {
+      slot.lastFrameAt = item.frame_age_ms === null ? null : current - item.frame_age_ms;
+      slot.lastAnalysisAt = item.analysis_age_ms === null ? null : current - item.analysis_age_ms;
+      slot.state = item.stream_state === 'connecting' ? 'connecting'
+        : item.stream_state === 'stream_error' || item.frame_age_ms === null || item.frame_age_ms > 15000 ? 'stream_error'
+          : item.analysis_delayed || item.analysis_age_ms === null || item.analysis_age_ms > 5000 ? 'analysis_delayed'
+            : 'running';
+    }
+    if (slots.every(slot => slot.state === 'running')) { overall = 'running'; restartCount = 0; }
+    else if (slots.every(slot => slot.state === 'connecting')) overall = 'connecting';
+    else if (slots.every(slot => slot.state === 'stream_error')) overall = 'stream_error';
+    else if (slots.some(slot => ['connecting', 'stream_error'].includes(slot.state))) overall = 'degraded';
+    else overall = 'analysis_delayed';
   }
 
   async function closeRun(slot, message) {
@@ -148,6 +194,7 @@ function createLiveMonitor({
       slot.run = runManager.createRun({ cameraId: slot.cameraId, videoId: null });
       slot.state = 'starting';
       slot.lastFrameAt = null;
+      slot.lastAnalysisAt = null;
     });
     const configuration = {
       result_url: `${baseUrl}/detections`,
@@ -169,7 +216,19 @@ function createLiveMonitor({
       return;
     }
     worker = child;
+    workerStartedAt = now();
+    workerHeartbeatAt = null;
+    workerProgressAt = null;
+    hasWorkerStatus = false;
     overall = 'starting';
+    if (child.stdout) {
+      const lines = createInterface({ input: child.stdout });
+      lines.on('line', line => {
+        try { recordWorkerStatus(child, JSON.parse(line)); }
+        catch { /* YOLO and location libraries also write non-status output. */ }
+      });
+      child.once('close', () => lines.close());
+    }
     child.stdout?.resume();
     child.stderr?.on('data', chunk => process.stderr.write(`[AI live] ${chunk}`));
     child.stdin?.on('error', () => child.kill('SIGTERM'));
@@ -189,7 +248,10 @@ function createLiveMonitor({
     let terminationRequestedAt = null;
     watchdog = setInterval(() => {
       if (worker !== child) return;
-      const stale = slots.some(slot => now() - (slot.lastFrameAt || slot.startedAt) > heartbeatTimeoutMs);
+      // Receiver threads reconnect each stream. Only a silent/stalled worker
+      // warrants restarting the shared model and all cameras.
+      const stale = now() - (workerHeartbeatAt ?? workerStartedAt) > heartbeatTimeoutMs
+        || now() - (workerProgressAt ?? workerStartedAt) > heartbeatTimeoutMs;
       if (!stale) return;
       if (terminationRequestedAt === null) {
         terminationRequestedAt = now();

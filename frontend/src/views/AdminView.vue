@@ -19,6 +19,8 @@ const monitorLabel = computed(() => ({
   stopped: '꺼짐', stopping: '종료 중', starting: '시작 중', running: '분석 중',
   restarting: '재시작 중', waiting_for_cctv: 'CCTV 목록 대기',
   waiting_for_ai: 'AI 실행 파일 확인 필요', failed: '오류',
+  connecting: '영상 연결 중', stream_error: '영상 수신 실패',
+  analysis_delayed: '분석 지연', degraded: '일부 CCTV 연결·분석 지연',
 }[monitor.value?.state] ?? '상태 확인 중'))
 
 async function loadMonitor() {

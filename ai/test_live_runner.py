@@ -98,6 +98,105 @@ class LiveConfigEncodingTests(unittest.TestCase):
 
 
 class StreamClockTests(unittest.TestCase):
+    def test_slow_video_samples_do_not_relax_the_original_confirmation_gate(self):
+        analysis = live_runner.CameraAnalysis(CAMERA)
+        for index in range(30):
+            self.assertEqual(analysis.process(result(), NAMES, packet(sequence=index * 6)), [])
+
+    def test_old_queued_frame_is_discarded_before_model_inference(self):
+        with patch.object(live_runner.time, 'monotonic', return_value=100):
+            model = Mock()
+            health = live_runner.WorkerHealth([CAMERA])
+            actual = live_runner.analyze_batch(model, 'cpu', [(0,packet(captured_at=98))],
+                [CAMERA], [confirmed_analysis()], callbacks(), Mock(), live_runner.TimingStats(), health)
+            self.assertEqual(actual, ([],[]))
+            model.predict.assert_not_called()
+
+    def test_skipped_samples_are_reported_as_delayed_even_with_fast_inference(self):
+        with patch.object(live_runner.time, 'monotonic', return_value=100):
+            analysis = live_runner.CameraAnalysis(CAMERA)
+            analysis.previous = packet(sequence=19)
+            health = live_runner.WorkerHealth([CAMERA])
+            live_runner.analyze_batch(SimpleNamespace(names=NAMES,predict=lambda **kwargs: [result()]),
+                'cpu', [(0,packet(sequence=21))], [CAMERA], [analysis], callbacks(), Mock(),
+                live_runner.TimingStats(), health)
+            self.assertTrue(health.snapshot()['cameras'][0]['analysis_delayed'])
+
+    def test_inference_over_one_second_keeps_a_recent_valid_result(self):
+        clock = [100.0]
+        with patch.object(live_runner.time, 'monotonic', side_effect=lambda: clock[0]):
+            analysis = confirmed_analysis()
+            frame = packet(captured_at=99.5)
+            health = live_runner.WorkerHealth([CAMERA])
+            health.frame_received(CAMERA['camera_id'])
+            cb = callbacks()
+            model = SimpleNamespace(names=NAMES)
+            def predict(**kwargs):
+                clock[0] += 1.5
+                return [result()]
+            model.predict = predict
+            processed, usable = live_runner.analyze_batch(
+                model, 'cpu', [(0, frame)], [CAMERA], [analysis], cb,
+                Mock(), live_runner.TimingStats(), health)
+            self.assertEqual(processed, [0])
+            self.assertEqual(usable, [0])
+            self.assertIn((1, 'fire', 'detection'), cb.pending)
+            status = health.snapshot()
+            self.assertTrue(status['cameras'][0]['analysis_delayed'])
+
+    def test_worker_status_exists_without_streams_or_accepted_detections(self):
+        clock = [100.0]
+        with patch.object(live_runner.time, 'monotonic', side_effect=lambda: clock[0]):
+            health = live_runner.WorkerHealth([CAMERA])
+            health.stream_state(1, 'stream_error')
+            health.progress()
+            clock[0] += 2
+            status = health.snapshot()
+        self.assertEqual(status['type'], 'live_status')
+        self.assertEqual(status['cameras'][0]['stream_state'], 'stream_error')
+        self.assertIsNone(status['cameras'][0]['frame_age_ms'])
+        self.assertEqual(status['progress_age_ms'], 2000)
+
+    def test_status_can_be_reported_while_predict_is_blocked(self):
+        entered, release = threading.Event(), threading.Event()
+        health = live_runner.WorkerHealth([CAMERA])
+        cb = callbacks()
+        def predict(**kwargs):
+            entered.set()
+            if not release.wait(3):
+                raise AssertionError('test did not release inference')
+            return [result()]
+        thread = threading.Thread(target=live_runner.analyze_batch, args=(
+            SimpleNamespace(names=NAMES,predict=predict), 'cpu', [(0,packet())], [CAMERA],
+            [live_runner.CameraAnalysis(CAMERA)], cb, Mock(), live_runner.TimingStats(), health))
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            output = io.StringIO()
+            with patch.object(live_runner.sys,'stdout',output):
+                live_runner.report_health(health,SimpleNamespace(is_set=lambda:False,wait=lambda _:True))
+            self.assertEqual(json.loads(output.getvalue())['type'],'live_status')
+            self.assertEqual(cb.pending,{})
+        finally:
+            release.set(); thread.join(3)
+        self.assertFalse(thread.is_alive())
+
+    def test_inference_past_result_expiry_is_counted_but_not_used(self):
+        clock = [100.0]
+        with patch.object(live_runner.time, 'monotonic', side_effect=lambda: clock[0]):
+            analysis, frame = confirmed_analysis(), packet(captured_at=100)
+            health, cb = live_runner.WorkerHealth([CAMERA]), callbacks()
+            def predict(**kwargs):
+                clock[0] += 6
+                return [result()]
+            processed, usable = live_runner.analyze_batch(
+                SimpleNamespace(names=NAMES, predict=predict), 'cpu', [(0, frame)],
+                [CAMERA], [analysis], cb, Mock(), live_runner.TimingStats(), health)
+            self.assertEqual(processed, [0])
+            self.assertEqual(usable, [])
+            self.assertEqual(cb.pending, {})
+            self.assertEqual(len(analysis.gate.timestamps), 0)
+
     def test_receiver_keeps_sampling_after_nonzero_first_timestamp_and_missing_positions(self):
         import cv2
 

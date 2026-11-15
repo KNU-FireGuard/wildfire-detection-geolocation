@@ -89,7 +89,12 @@ const cameraVideosLoaded = ref(false)
 const lastDetected = event => event.endedAt ?? event.updatedAt ?? event.detectedAt
 const latestCameraEvent = computed(() => [...cameraHistory.value].sort((a, b) =>
   Date.parse(lastDetected(b)) - Date.parse(lastDetected(a)))[0] ?? null)
-const monitorLabel = computed(() => ({ running: '감시 중', starting: '시작 중', restarting: '재시작 중', waiting_for_ai: 'AI 연결 대기', waiting_for_cctv: 'CCTV 연결 대기', stopped: '감시 중지', failed: '감시 오류' })[cameraMonitor.value?.state] ?? '정보 없음')
+const monitorLabel = computed(() => ({
+  running: '감시 중', starting: '시작 중', restarting: '재시작 중',
+  waiting_for_ai: 'AI 연결 대기', waiting_for_cctv: 'CCTV 연결 대기',
+  stopped: '감시 중지', failed: '감시 오류', connecting: '영상 연결 중',
+  stream_error: '영상 수신 실패', analysis_delayed: '분석 지연',
+})[cameraMonitor.value?.state] ?? '정보 없음')
 watch(selectedCamera, async (camera, _previous, onCleanup) => {
   cameraHistory.value = []; cameraVideos.value = []; cameraMonitor.value = null; cameraExtraError.value = ''; cameraHistoryLoaded.value = false; cameraVideosLoaded.value = false
   if (!camera) { cameraExtraLoading.value = false; return }
