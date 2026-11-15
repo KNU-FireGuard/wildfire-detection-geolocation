@@ -399,3 +399,11 @@
 - enabled 누락·boolean 이외 값은 400, 인증 실패는 401, 처리 실패는 기존 오류 응답 사용
 - 종료 응답은 AI 프로세스 종료·실행 이벤트 정리 후 반환, 서버 재시작 시 항상 OFF, 설정은 DB에 저장하지 않음
 - 공개 상태 조회·AI 토큰 heartbeat 인증·테스트 분석 API는 기존 계약 유지
+
+## 배포 모드
+
+- DEMO_MODE=false에서 `/api/cameras/:id/test-runs`, `/api/test-runs/*`, `/api/videos/:id/stream`은 DB 접근 전 404 반환
+- `/api/videos`는 기존 페이지 형식의 빈 목록 반환, 잘못된 페이지 값은 400
+- production에서 DEMO_MODE 미지정 시 false, 로컬 개발 기본값은 기존 테스트 기능 유지
+- 테스트 카메라 또는 영상 레코드가 있는 DB로 배포 모드를 시작하면 서버 시작 거부, 자동 삭제 없음
+- `GET /api/health`는 프로세스 응답 상태 `{ "status": "ok" }` 반환, GPU·CCTV·외부 서비스 정상 여부를 보장하지 않음

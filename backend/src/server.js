@@ -6,6 +6,7 @@ async function start() {
   const app = require('./app');
   const { monitor } = require('./services/live-cctv-runtime');
   const port = Number(process.env.PORT || 3000);
+  const host = process.env.HOST || '127.0.0.1';
   let server;
 
   try {
@@ -15,14 +16,15 @@ async function start() {
       throw new Error('PORT는 1부터 65535 사이의 정수여야 합니다.');
     }
     await pool.query('SELECT 1');
+    await require('./middleware/deployment-mode').assertDeploymentDatabase(pool);
     console.log('PostgreSQL 연결 성공');
 
-    server = app.listen(port, '127.0.0.1');
+    server = app.listen(port, host);
     await new Promise((resolve, reject) => {
       server.once('listening', resolve);
       server.once('error', reject);
     });
-    console.log(`Backend 서버 실행: http://127.0.0.1:${port}`);
+    console.log(`Backend 서버 실행: http://${host}:${port}`);
     console.log(`실시간 CCTV 감시 상태: ${monitor.status().state}`);
 
     let stopping = false;

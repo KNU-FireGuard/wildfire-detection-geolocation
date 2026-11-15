@@ -4,6 +4,8 @@ const detectionsRoutes = require('./detections.routes');
 const testRunsRoutes = require('./runs.routes');
 
 const router = express.Router();
+router.use(require('../middleware/deployment-mode').deploymentMode);
+router.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 router.use('/auth', authRoutes);
 router.use(testRunsRoutes);
