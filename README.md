@@ -101,7 +101,7 @@ docker compose exec -T db sh -c "psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $P
 ## 3 관리자 계정과 Backend
 
 - 새 터미널에서 실행
-- `npm run create-admin`은 SMS 관리 사용 시 최초 한 번 실행, 대시보드·Test·이벤트 확인·CCTV 갱신에는 관리자 로그인 불필요
+- `npm run create-admin`은 SMS 설정·발송 내역 관리와 실시간 탐지 ON/OFF 사용 시 최초 한 번 실행, 대시보드·Test·이벤트 확인·CCTV 갱신에는 관리자 로그인 불필요
 - 생성 후 `.env`의 `ADMIN_INITIAL_PASSWORD` 값 삭제
 
 ```text
@@ -112,6 +112,7 @@ npm run dev
 ```
 
 - Backend 주소: `http://127.0.0.1:3000`
+- 상태 확인: `http://127.0.0.1:3000/api/health`, Backend의 `/`는 화면 경로가 없어 404 반환, 로컬 화면은 Frontend 실행 후 `http://127.0.0.1:5173` 접속
 - ITS 실영상 사용 시 루트 `.env`에 `ITS_CCTV_API_KEY=발급키` 설정 후 Backend 재시작
 - 대시보드의 CCTV 주소 갱신 버튼에서 로그인 없이 최초 목록 조회 또는 영상 주소 수동 갱신
 - 새 화재·연기는 유형별 팝업으로 표시, 지도에서 보기·확인 완료·나중에 확인 선택, 팝업 닫기와 Esc는 이벤트 확인 상태를 바꾸지 않음
@@ -120,7 +121,9 @@ npm run dev
 - 기존 DB는 캡처 기능 사용 전 위 `sql/init.sql` 재적용 절차 실행 후 Backend 재시작, 캡처 테이블만 추가할 때는 `sql/003-event-captures.sql` 사용
 - Backend 재시작 시 실시간 AI 분석은 항상 OFF, `관리자 설정`에서 관리자 로그인 후 실시간 탐지 켜기·끄기 선택
 - 실시간 탐지를 꺼도 CCTV 영상 재생과 테스트 분석은 유지, 기본 작업자는 `ai/inference/live_runner.py`이며 `AI_LIVE_RUNNER_PATH`는 비워 둬도 됨
-- 실시간도 5fps·최근 20프레임 중 16회·불 0.3/연기 0.5 적용, Backend 로그의 `analysis_fps`·`dropped`·`timings`로 처리 속도와 단계별 소요 시간 확인
+- 실시간도 목표 5fps·최근 20프레임 중 16회·불 0.3/연기 0.5 적용, Backend 로그의 실제 추론 `analysis_fps`·결과 유효시간 내 처리 `usable_fps`·`dropped`·`timings`로 속도 확인
+- 영상 연결 중·영상 수신 실패·분석 지연을 구분하여 표시, 탐지 결과와 독립된 작업자 상태를 5초 간격으로 수신하므로 느린 추론이나 한 카메라 장애만으로 전체 AI를 재시작하지 않음
+- 추론 대기는 1초 이내 프레임만 선택하고 결과는 대기열 등록 후 최대 5초 이내만 사용, 0.4초 간격·순번 누락·약 4초 구간 검사는 유지하므로 CPU가 목표 속도를 못 맞추면 확정 탐지가 발생하지 않을 수 있음
 - 실시간 확정 탐지는 위치 계산을 기다리지 않고 먼저 전송, 위치는 계산 후 같은 이벤트에 보완
 - 실시간 위치는 고정 자세가 없어도 능선·DEM으로 자동 추정, 화각 미등록 시 기본 60° 사용, Backend 로그의 `location_ready`·`reason`·`warnings`·`retry_in_s`로 준비·실패·재시도 확인
 - 화재 문자: 기존 DB는 `sql/init.sql` 재실행, 사이드 메뉴 `관리자 설정`에서 관리자 로그인 후 카메라별 번호 설정과 발송 내역 확인

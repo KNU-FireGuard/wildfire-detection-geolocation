@@ -23,6 +23,68 @@ from ai.inference.backend_connect import (
 )
 from ai.inference.temporal_detection import FrameSampler, TemporalDetectionGate
 
+QUEUE_MAX_AGE = 1.0
+RESULT_MAX_AGE = 5.0
+
+
+class WorkerHealth:
+    """수신·추론·작업자 생존을 탐지 확정과 독립적으로 관측."""
+    def __init__(self, cameras):
+        self.lock = threading.Lock()
+        self.progress_at = time.monotonic()
+        self.cameras = {camera['camera_id']: {
+            'camera_id': camera['camera_id'], 'run_id': camera['run_id'],
+            'stream_state': 'connecting', 'frame_at': None, 'analysis_at': None,
+            'inference_at': None, 'analysis_delayed': False,
+        } for camera in cameras}
+
+    def progress(self):
+        with self.lock:
+            self.progress_at = time.monotonic()
+
+    def stream_state(self, camera_id, state):
+        with self.lock:
+            self.cameras[camera_id]['stream_state'] = state
+
+    def frame_received(self, camera_id):
+        with self.lock:
+            self.cameras[camera_id].update(stream_state='receiving', frame_at=time.monotonic())
+
+    def inference_started(self, camera_ids):
+        with self.lock:
+            for camera_id in camera_ids:
+                self.cameras[camera_id]['inference_at'] = time.monotonic()
+
+    def inference_finished(self, camera_id, duration, skipped_samples=False):
+        with self.lock:
+            self.cameras[camera_id].update(
+                analysis_at=time.monotonic(), inference_at=None,
+                analysis_delayed=duration > 0.2 or skipped_samples)
+
+    def snapshot(self):
+        now = time.monotonic()
+        age = lambda value: None if value is None else max(0, (now - value) * 1000)
+        with self.lock:
+            cameras = []
+            for value in self.cameras.values():
+                busy = value['inference_at'] is not None and now - value['inference_at'] > 0.2
+                cameras.append({
+                    'camera_id': value['camera_id'], 'run_id': value['run_id'],
+                    'stream_state': value['stream_state'],
+                    'frame_age_ms': age(value['frame_at']), 'analysis_age_ms': age(value['analysis_at']),
+                    'analysis_delayed': value['analysis_delayed'] or busy,
+                })
+            return {'type': 'live_status', 'progress_age_ms': age(self.progress_at), 'cameras': cameras}
+
+
+def report_health(health, stop):
+    while not stop.is_set():
+        # One write keeps the status record intact beside library stdout messages.
+        sys.stdout.write(json.dumps(health.snapshot()) + '\n')
+        sys.stdout.flush()
+        if stop.wait(5):
+            break
+
 
 def log(message):
     print(message, file=sys.stderr, flush=True)
@@ -78,7 +140,7 @@ class FrameClock:
         return self.previous
 
 
-def receive(camera, buffer, stop):
+def receive(camera, buffer, stop, health=None):
     import cv2
 
     generation = 0
@@ -89,6 +151,8 @@ def receive(camera, buffer, stop):
         clock = None
         generation += 1
         try:
+            if health is not None:
+                health.stream_state(camera['camera_id'], 'connecting')
             capture = cv2.VideoCapture(camera["source_url"], cv2.CAP_FFMPEG, [
                 cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 15000,
                 cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000,
@@ -103,6 +167,8 @@ def receive(camera, buffer, stop):
                 ok, frame = capture.read()
                 if not ok:
                     raise RuntimeError("stream_read_failed")
+                if health is not None:
+                    health.frame_received(camera['camera_id'])
                 previous_fallbacks = clock.fallbacks
                 timestamp = clock.resolve(capture.get(cv2.CAP_PROP_POS_MSEC) / 1000)
                 if not previous_fallbacks and clock.fallbacks:
@@ -122,6 +188,8 @@ def receive(camera, buffer, stop):
                 sequence += 1
                 delay = 2
         except Exception as exc:
+            if health is not None:
+                health.stream_state(camera['camera_id'], 'stream_error')
             # 스트림 URL·인증 파라미터를 로그에 출력하지 않음
             reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
             log(f"[live camera={camera['camera_id']}] reconnect: {reason}")
@@ -177,7 +245,7 @@ class CameraAnalysis:
     def process(self, result, names, packet):
         import cv2
 
-        if time.monotonic() - packet.captured_at > 1:
+        if time.monotonic() - packet.captured_at > RESULT_MAX_AGE:
             self.reset()
             return []
         if self.previous and packet.generation != self.previous.generation:
@@ -228,7 +296,7 @@ class LocationTask:
         return not self.context.cancelled.is_set() and not self.context.pose.cancelled.is_set()
 
     def fresh(self):
-        return self.current() and time.monotonic() - self.packet.captured_at <= 5
+        return self.current() and time.monotonic() - self.packet.captured_at <= RESULT_MAX_AGE
 
 
 class TimingStats:
@@ -385,16 +453,17 @@ class Outbound:
     location: bool = False
 
     def fresh(self):
-        return time.monotonic() - self.created <= 5 and (self.task is None or self.task.current())
+        return time.monotonic() - self.created <= RESULT_MAX_AGE and (self.task is None or self.task.current())
 
 
 class Callbacks:
     """HTTP 지연이 추론을 막지 않도록 최신 결과만 보관하는 제한된 전송함."""
-    def __init__(self, config, token, timings=None):
+    def __init__(self, config, token, timings=None, heartbeat=True):
         self.config = config
         self.headers = {"X-AI-Token": token}
         self.pending = {}
         self.heartbeats = {}
+        self.heartbeat_enabled = heartbeat
         self.lock = threading.Lock()
         self.locations = None
         self.timings = timings or TimingStats()
@@ -403,7 +472,7 @@ class Callbacks:
         now = time.monotonic()
         camera_id = camera["camera_id"]
         with self.lock:
-            if now - self.heartbeats.get(camera_id, -math.inf) >= 10:
+            if self.heartbeat_enabled and now - self.heartbeats.get(camera_id, -math.inf) >= 10:
                 self.pending[(camera_id, "heartbeat")] = Outbound(
                     now, self.config["heartbeat_url"], {"run_id": camera["run_id"], "camera_id": camera_id},
                 )
@@ -472,6 +541,41 @@ def validate_config(config):
     return config
 
 
+def analyze_batch(model, device, batch, cameras, analyses, callbacks, locations, timings, health):
+    fresh = []
+    for i, packet in batch:
+        if time.monotonic() - packet.captured_at <= QUEUE_MAX_AGE:
+            fresh.append((i, packet))
+        else:
+            analyses[i].reset()
+    if not fresh:
+        return [], []
+    for i, packet in fresh:
+        timings.record('queue', time.monotonic() - packet.captured_at, cameras[i]['camera_id'])
+    health.inference_started([cameras[i]['camera_id'] for i, _ in fresh])
+    started = time.monotonic()
+    results = model.predict(source=[packet.frame for _, packet in fresh], conf=0.3, iou=0.45,
+                            imgsz=640, device=device, verbose=False, save=False)
+    duration = time.monotonic() - started
+    timings.record('batch_inference', duration)
+    processed, usable = [], []
+    for (i, packet), result in zip(fresh, results):
+        processed.append(i)
+        previous = analyses[i].previous
+        skipped = previous is not None and packet.generation == previous.generation and (
+            packet.sequence != previous.sequence + 1
+            or not 0 < packet.timestamp - previous.timestamp <= 0.4 + 1e-6)
+        health.inference_finished(cameras[i]['camera_id'], duration, skipped)
+        if time.monotonic() - packet.captured_at > RESULT_MAX_AGE:
+            analyses[i].reset()
+            continue
+        payloads = analyses[i].process(result, model.names, packet)
+        callbacks.submit(cameras[i], payloads, packet, analyses[i].context)
+        locations.observe(cameras[i], packet, analyses[i].context)
+        usable.append(i)
+    return processed, usable
+
+
 def main():
     config = validate_config(json.load(sys.stdin.buffer))
     token = os.environ.get("AI_CALLBACK_TOKEN")
@@ -485,55 +589,46 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
     timings = TimingStats()
-    callbacks = Callbacks(config, token, timings)
+    callbacks = Callbacks(config, token, timings, heartbeat=False)
     locations = LocationWorker(callbacks.submit_location, timings=timings)
     callbacks.locations = locations
     threads = [threading.Thread(target=callbacks.run, args=(stop,), daemon=True),
                threading.Thread(target=locations.run, args=(stop,), daemon=True)]
     cameras = config["cameras"]
+    health = WorkerHealth(cameras)
+    threads.append(threading.Thread(target=report_health, args=(health, stop), daemon=True))
     buffers = [LiveBuffer() for _ in cameras]
     analyses = [CameraAnalysis(camera) for camera in cameras]
     for camera, buffer in zip(cameras, buffers):
-        threads.append(threading.Thread(target=receive, args=(camera, buffer, stop), daemon=True))
+        threads.append(threading.Thread(target=receive, args=(camera, buffer, stop, health), daemon=True))
     for thread in threads:
         thread.start()
     counts = [0] * len(cameras)
+    usable_counts = [0] * len(cameras)
     report_at = time.monotonic()
     log(f"[live] started {len(cameras)} cameras device={device}; target=5fps; gate=16/20")
     try:
         while not stop.is_set():
+            health.progress()
             batch = [(i, buffer.take()) for i, buffer in enumerate(buffers)]
             batch = [(i, p) for i, p in batch if p is not None]
-            fresh = []
-            for i, p in batch:
-                if time.monotonic() - p.captured_at <= 1:
-                    fresh.append((i, p))
-                else:
-                    analyses[i].reset()
-            if not fresh:
+            if not batch:
                 stop.wait(0.01)
             else:
-                for i, packet in fresh:
-                    timings.record("queue", time.monotonic() - packet.captured_at, cameras[i]["camera_id"])
-                started = time.monotonic()
-                results = model.predict(source=[p.frame for _, p in fresh], conf=0.3, iou=0.45,
-                                        imgsz=640, device=device, verbose=False, save=False)
-                timings.record("batch_inference", time.monotonic() - started)
-                for (i, packet), result in zip(fresh, results):
-                    if time.monotonic() - packet.captured_at > 1:
-                        analyses[i].reset()
-                        continue
-                    payloads = analyses[i].process(result, model.names, packet)
-                    callbacks.submit(cameras[i], payloads, packet, analyses[i].context)
-                    locations.observe(cameras[i], packet, analyses[i].context)
+                processed, usable = analyze_batch(model, device, batch, cameras, analyses,
+                                                  callbacks, locations, timings, health)
+                for i in processed:
                     counts[i] += 1
+                for i in usable:
+                    usable_counts[i] += 1
             elapsed = time.monotonic() - report_at
             if elapsed >= 30:
                 log(f"[live] timings={json.dumps(timings.take())}")
                 for i, camera in enumerate(cameras):
                     camera_timings = json.dumps(timings.take(camera["camera_id"]))
-                    log(f"[live camera={camera['camera_id']}] analysis_fps={counts[i] / elapsed:.1f} dropped={buffers[i].dropped} timings={camera_timings}")
+                    log(f"[live camera={camera['camera_id']}] analysis_fps={counts[i] / elapsed:.1f} usable_fps={usable_counts[i] / elapsed:.1f} dropped={buffers[i].dropped} timings={camera_timings}")
                 counts = [0] * len(cameras)
+                usable_counts = [0] * len(cameras)
                 report_at = time.monotonic()
     finally:
         stop.set()

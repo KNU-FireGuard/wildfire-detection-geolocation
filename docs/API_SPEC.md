@@ -45,26 +45,32 @@
 ### `GET /live-monitor/status`
 
 - ITS API 호출 없음, 서버 메모리의 6개 감시 상태 조회
-- `200` `{ "state": "waiting_for_ai", "cameras": [{ "camera_id": 9, "provider_key": "...", "name": "CCTV", "run_id": null, "state": "waiting_for_ai", "last_frame_at": null }] }`
-- 상태: `waiting_for_cctv` | `waiting_for_ai` | `starting` | `running` | `restarting` | `failed` | `stopped`
+- `200` `{ "enabled": false, "state": "stopped", "last_worker_heartbeat_at": null, "cameras": [{ "camera_id": 9, "provider_key": "...", "name": "CCTV", "run_id": null, "state": "stopped", "last_frame_at": null, "last_analysis_at": null }] }`
+- 상태: `waiting_for_cctv` | `waiting_for_ai` | `starting` | `connecting` | `running` | `stream_error` | `analysis_delayed` | `degraded` | `restarting` | `failed` | `stopping` | `stopped`
+- connecting은 영상 연결 대기, stream_error는 전체 영상 수신 실패, degraded는 일부 연결 장애·지연, analysis_delayed는 추론 지연·표본 누락, running은 현재 수신·추론 진행 상태이며 산불 확정 여부가 아님
+- last_frame_at은 작업자의 영상 프레임 수신 시각으로 원본 촬영 시각이 아니며, last_analysis_at은 실제 추론 완료 시각, last_worker_heartbeat_at은 독립 작업자 상태 수신 시각
 - `AI_LIVE_RUNNER_PATH`가 비어 있으면 기본 `ai/inference/live_runner.py` 실행, 지정한 파일이 없으면 `waiting_for_ai` 표시
-- Frontend는 30초마다 상태·카메라 정보를, 5초마다 탐지 이벤트를 다시 조회, 숨겨진 화면의 주기 조회는 생략하며 ITS 호출 한도를 사용하지 않음
+- 대시보드 상태 표시는 3초, 전체 상태·카메라 정보는 30초, 탐지 이벤트는 5초 간격 조회, 숨겨진 화면의 주기 조회는 생략하며 ITS 호출 한도를 사용하지 않음
 
 ### `POST /live-monitor/heartbeat`
 
 - Header: `X-AI-Token: <AI_CALLBACK_TOKEN>`
 - Body: `{ "run_id": 123, "camera_id": 9 }`
-- AI 작업자는 카메라별 실제 프레임을 처리한 뒤 30초 이내 간격으로 전송
+- 기존 사용자 지정 작업자의 처리 신호 호환 API, 기본 작업자는 아래 stdout 상태 계약을 사용하여 탐지와 생존 신호 분리
 - `202` `{ "accepted": true }`, `400` 입력 오류, `401` 인증 실패, `404` 실행 ID·카메라 불일치
-- 120초 동안 카메라 한 곳에서 신호가 없으면 Backend가 AI 작업자를 재시작
+- 작업자 전체 신호 누락 또는 추론 루프 진행 정지가 120초를 초과하면 30초 간격 감시에서 재시작, 카메라 하나의 수신 실패로 전체 재시작하지 않음
 
 ### 실시간 AI 작업자 입력 계약
 
-- Backend 시작 시 저장된 CCTV 6곳을 읽고 `AI_LIVE_RUNNER_PATH`의 Python 파일 한 개를 실행
+- Backend 시작 시 분석은 OFF, 관리자가 켤 때 저장된 CCTV 6곳을 읽고 `AI_LIVE_RUNNER_PATH`의 Python 파일 한 개 실행
 - Backend가 작업자의 표준 입력에 UTF-8 JSON 한 개를 보내고 입력을 닫음, AI는 시스템 문자 인코딩과 관계없이 UTF-8로 읽음
-- AI 작업자는 모델을 한 번 로드해 6곳을 지속 분석하고 위 heartbeat와 `POST /detections`에 JSON 전송
+- AI 작업자는 모델을 한 번 로드해 6곳을 지속 분석하고 `POST /detections`에 JSON 전송, 별도 상태 스레드는 결과 수용·탐지 확정과 무관하게 5초 간격 stdout JSON line 전송
+- stdout 상태 형식: `{ "type": "live_status", "progress_age_ms": 0, "cameras": [{ "run_id": 123, "camera_id": 9, "stream_state": "receiving", "frame_age_ms": 0, "analysis_age_ms": 0, "analysis_delayed": false }] }`, 실제로는 모든 6개 항목 포함
+- stream_state는 connecting·receiving·stream_error, 미수신·미분석 age는 null, 나머지 age는 monotonic 기준 비음수 밀리초, progress_age_ms는 메인 추론 루프의 마지막 진행 이후 시간
+- Backend는 현재 자식 프로세스의 현재 실행 ID 6개가 모두 일치할 때만 상태를 수락, 일반 라이브러리 stdout·잘못된 상태 레코드는 무시, 기존 HTTP heartbeat는 호환 유지
 - 기본 작업자는 카메라별 5fps·최근 20프레임 중 16회·불 0.3/연기 0.5·박스 IoU 0.2 기준 적용, HLS 조각 경계에서도 판정 유지
-- 프레임 대기열은 카메라별 최대 3개, 누락·재접속·큰 장면 변화 시 판정 초기화, 대기열 등록 후 1초 넘은 프레임은 추론 전·후 폐기
+- 프레임 대기열은 카메라별 최대 3개, 누락·재접속·큰 장면 변화 시 판정 초기화, 추론 전 대기는 1초 이내만 허용하고 추론 후에는 대기열 등록부터 총 5초 유효시간 적용
+- 추론 1회가 목표 표본 간격 0.2초를 초과하거나 표본 순번·시각이 끊기면 analysis_delayed 표시, 기존 5fps·16/20·3.6~4.2초·최대 간격 0.4초 조건은 완화하지 않음
 - 디코더 시각이 누락·반복되면 마지막 영상 시각과 원본 FPS로 복원, 양수 시각이 역행하면 재접속하여 판정 초기화, 첫 영상 시각과 시각 복원 횟수를 로그로 기록
 - 모델 경로는 `model_path`, 카메라 이름·좌표는 각 항목의 `name`, `latitude`, `longitude`로 전달, 위경도가 없으면 위치 추정 생략
 - 위치는 이름이 일치하는 고정 자세 보정값을 우선 사용, 없으면 기존 `LocationSession`의 영상 능선·DEM 기반 360° 자세 추정 실행, 품질 게이트를 통과한 자세로만 좌표 산출
@@ -75,7 +81,7 @@
 - 큰 장면 변화·해상도 변경·재접속 시 이전 자세와 대기 결과 무효화, 연속 10개 분석 프레임·영상 시각 1.8초 이상 안정된 뒤 기존 고정 자세를 재사용하지 않고 자동 재추정, 단순 프레임 누락은 탐지 투표만 초기화하고 같은 자세 유지
 - 최초 탐지와 위치 보완은 각각 카메라·클래스별 최신 콜백으로 병합, 프레임 대기열 등록 시각부터 5초가 지난 결과는 위치 계산 전·후와 HTTP 전송 직전에 폐기, 위치 계산 후 유효시간을 새로 시작하지 않음
 - 누락·재접속·장면 전환 전의 대기 중인 탐지·위치 결과는 무효화, 이미 전송 중인 HTTP 요청은 취소하지 않음
-- 실제 분석한 프레임에 대해서만 heartbeat 전송, 30초마다 `analysis_fps`·`dropped`와 추론·대기·DEM 준비·위치 계산·전송 소요 시간의 횟수·평균·최댓값(`timings`, ms)을 로그로 기록
+- 탐지 수용과 독립된 작업자 상태 전송, 30초마다 실제 추론 analysis_fps·5초 유효시간 내 처리 usable_fps·dropped와 단계별 소요 시간의 횟수·평균·최댓값(`timings`, ms) 기록
 - 위 유효시간·소요 시간은 로컬 대기열 등록 이후 기준이며 HLS 원본 촬영 시각부터의 전체 지연은 별도 계측 필요
 - `location_ready`, `mode`, `reason`, `warnings`, `retry_in_s`로 위치 준비 상태 기록, 야간·가림·능선 부족·정합 실패 시 위치는 null이며 화재 탐지와 알림은 계속 진행
 - 위치 null은 기존 이벤트 좌표를 삭제하지 않으며 새 위치 보완 시 갱신하는 기존 Backend 저장 정책 유지, 큰 장면 변화 감지는 완전한 PTZ·줌 추적을 대체하지 않음

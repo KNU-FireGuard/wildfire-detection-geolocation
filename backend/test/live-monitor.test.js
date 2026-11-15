@@ -104,6 +104,91 @@ function fakeRuns() {
   };
 }
 
+for (const allFailed of [false, true]) {
+  test(`영상 장애는 살아 있는 공유 AI를 재시작하지 않는다 (전체 장애=${allFailed})`, async () => {
+    let current = 1000;
+    let child;
+    const signals = [];
+    const monitor = createLiveMonitor({
+      catalog: {list: async () => ({items: cameras})}, canRun: async () => true,
+      runManager: fakeRuns(), finalizeEvents: async () => {}, getToken: () => 'test',
+      now: () => current, heartbeatTimeoutMs: 10, watchdogIntervalMs: 5,
+      spawnImpl() {
+        child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough();
+        child.kill = signal => { signals.push(signal); queueMicrotask(() => child.emit('close', 0)); };
+        return child;
+      },
+    });
+    try {
+      await monitor.start();
+      current += 100;
+      child.stdout.write(JSON.stringify({type:'live_status', progress_age_ms:0,
+        cameras: monitor.status().cameras.map((camera, i) => ({
+          run_id:camera.run_id, camera_id:camera.camera_id,
+          stream_state:allFailed || i === 0 ? 'stream_error' : 'receiving',
+          frame_age_ms:allFailed || i === 0 ? null : 0,
+          analysis_age_ms:allFailed || i === 0 ? null : 0, analysis_delayed:false,
+        }))})+'\n');
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.deepEqual(signals, []);
+      assert.equal(monitor.status().state, allFailed ? 'stream_error' : 'degraded');
+      assert.equal(monitor.status().cameras[0].last_frame_at, null);
+    } finally { await monitor.stop(); }
+  });
+}
+
+test('독립 상태는 수신·추론 시각을 구분하며 다른 실행 ID나 중복 카메라는 거부한다', async () => {
+  let child;
+  const monitor=createLiveMonitor({
+    catalog:{list:async () => ({items:cameras})}, canRun:async () => true,
+    runManager:fakeRuns(), finalizeEvents:async () => {}, getToken:() => 'test', now:() => 10000,
+    spawnImpl() {
+      child=new EventEmitter(); child.stdin=new PassThrough(); child.stdout=new PassThrough();
+      child.kill=() => queueMicrotask(() => child.emit('close',0)); return child;
+    },
+  });
+  try {
+    await monitor.start();
+    const items=monitor.status().cameras.map(camera => ({run_id:camera.run_id,camera_id:camera.camera_id,
+      stream_state:'receiving',frame_age_ms:100,analysis_age_ms:1500,analysis_delayed:true}));
+    const emit=items => child.stdout.write(JSON.stringify({type:'live_status',progress_age_ms:0,cameras:items})+'\n');
+    emit(items.map((item,i) => i === 0 ? {...item,run_id:999} : item));
+    emit(items.map((item,i) => i === 1 ? items[0] : item));
+    assert.equal(monitor.status().last_worker_heartbeat_at,null);
+    child.stdout.write('library log is not JSON\n');
+    emit(items);
+    const status=monitor.status();
+    assert.equal(status.state,'analysis_delayed');
+    assert.equal(status.cameras[0].last_frame_at,new Date(9900).toISOString());
+    assert.equal(status.cameras[0].last_analysis_at,new Date(8500).toISOString());
+  } finally {await monitor.stop();}
+});
+
+test('독립 상태 신호가 있어도 추론 루프가 멈췄으면 공유 AI를 재시작한다', async () => {
+  let current = 1000, child;
+  const signals = [];
+  const monitor = createLiveMonitor({
+    catalog:{list:async () => ({items:cameras})}, canRun:async () => true,
+    runManager:fakeRuns(), finalizeEvents:async () => {}, getToken:() => 'test',
+    now:() => current, heartbeatTimeoutMs:10, watchdogIntervalMs:5,
+    spawnImpl() {
+      child=new EventEmitter(); child.stdin=new PassThrough(); child.stdout=new PassThrough();
+      child.kill=signal => {signals.push(signal); queueMicrotask(() => child.emit('close',0));};
+      return child;
+    },
+  });
+  try {
+    await monitor.start(); current += 100;
+    for (const camera of monitor.status().cameras) monitor.recordHeartbeat(camera.run_id, camera.camera_id);
+    child.stdout.write(JSON.stringify({type:'live_status',progress_age_ms:100,
+      cameras:monitor.status().cameras.map(camera => ({run_id:camera.run_id,camera_id:camera.camera_id,
+        stream_state:'receiving',frame_age_ms:0,analysis_age_ms:100,analysis_delayed:true}))})+'\n');
+    await new Promise(resolve => setTimeout(resolve,20));
+    assert.deepEqual(signals,['SIGTERM']);
+    assert.equal(monitor.status().state,'restarting');
+  } finally {await monitor.stop();}
+});
+
 for (const blocked of [false, true]) {
   test(`OFF 처리 전에 이미 종료된 작업자를 다시 기다리지 않는다 (목록 조회 대기=${blocked})`, async () => {
     const children = [];

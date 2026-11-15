@@ -47,6 +47,10 @@ const liveIndicator = computed(() => {
   if (state === 'stopping') return { tone: 'pending', label: '실시간 탐지 종료 중' }
   if (state === 'failed') return { tone: 'error', label: '실시간 탐지 오류' }
   if (enabled === false || state === 'stopped') return { tone: 'muted', label: '실시간 탐지 꺼짐' }
+  if (state === 'stream_error') return { tone: 'error', label: '영상 수신 실패' }
+  if (state === 'analysis_delayed') return { tone: 'pending', label: '실시간 분석 지연' }
+  if (state === 'degraded') return { tone: 'pending', label: '일부 CCTV 연결·분석 지연' }
+  if (state === 'connecting') return { tone: 'pending', label: '실시간 영상 연결 중' }
   if (state === 'running') return { tone: 'running', label: '실시간 탐지 중' }
   return { tone: 'pending', label: ({ starting: '실시간 탐지 시작 중', restarting: '실시간 탐지 재시작 중',
     waiting_for_cctv: 'CCTV 목록 대기', waiting_for_ai: 'AI 실행 준비 필요' })[state] ?? '탐지 상태 확인 중' }

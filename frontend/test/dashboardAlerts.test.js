@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { compileComponent, createHarness, findAll, settle } from './helpers/vueHarness.js'
+import { compileComponent, createHarness, findAll, allText, settle } from './helpers/vueHarness.js'
 
 const fixtureCode = `
   const state = () => globalThis.__dashboardAlertsTest;
@@ -8,7 +8,7 @@ const fixtureCode = `
   export const fetchEvents = async () => { state().eventReads++; return state().events; };
   export const fetchVideos = async () => [];
   export const fetchLiveCctvs = async () => ({ cameras: [] });
-  export const fetchLiveMonitorStatus = async () => ({ cameras: [] });
+  export const fetchLiveMonitorStatus = async () => state().monitor ?? ({ cameras: [] });
   export const refreshLiveCctvs = async () => { state().refreshes++; };
   export const acknowledgeEvent = async id => { state().acks.push(id); await state().onAck(id); };
   export const acknowledgeAllEvents = async () => {
@@ -70,6 +70,27 @@ async function setup(initial = []) {
   async function poll() { [...intervals.values()].find(timer => timer.delay === 5000).callback(); await settle() }
   return { ...view, state, intervals, poll, dispose() { view.app.unmount(); Object.assign(globalThis, originals); delete globalThis.__dashboardAlertsTest } }
 }
+
+test('연결 실패와 느린 분석을 시작 중이나 정상 초록색으로 표시하지 않는다', async () => {
+  const view = await setup()
+  try {
+    for (const [state, label, tone] of [
+      ['connecting','실시간 영상 연결 중','pending'],
+      ['stream_error','영상 수신 실패','error'],
+      ['analysis_delayed','실시간 분석 지연','pending'],
+      ['degraded','일부 CCTV 연결·분석 지연','pending'],
+      ['running','실시간 탐지 중','running'],
+    ]) {
+      view.state.monitor = {enabled:true,state,cameras:[]}
+      const timer = [...view.intervals.values()].find(timer => timer.delay === 3000)
+      timer.callback()
+      await settle()
+      const indicator = findAll(view.root,'span').find(node => node.props.role === 'status')
+      assert.match(allText(indicator),new RegExp(label))
+      assert.equal(indicator.props.class,tone)
+    }
+  } finally {view.dispose()}
+})
 
 test('전체 확인은 미확인 화재·연기를 함께 처리하고 실패하면 상태를 유지한다', async () => {
   const view = await setup()
