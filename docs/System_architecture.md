@@ -145,4 +145,4 @@ flowchart LR
 - 회사 서버는 명시적 GPU override와 승인 포트 사용, Mac 데모는 CPU override·별도 영상 마운트·수동 seed 사용
 - 운영 소스 전달은 deploy/package.py의 허용 목록 적용, 운영 묶음에 seed.dev.sql·compose.demo.yml·데모 카메라 JSON 없음
 - 운영 DEMO_MODE=false에서 테스트 경로 차단, 테스트 데이터가 섞인 DB는 서버 시작 거부
-- 현재 배포 후보이며 회사 서버 변경·전체 이미지 빌드·실제 GPU 및 최종 알고리즘 검증은 별도 단계
+- Mac arm64 웹·CPU API 이미지 빌드와 기본 컨테이너 연동은 검증, 회사 Linux amd64 GPU 이미지·서버 변경·실제 GPU 및 최종 알고리즘 검증은 별도 단계

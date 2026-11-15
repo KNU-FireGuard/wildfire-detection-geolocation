@@ -3,6 +3,7 @@
 - 회사 서버: 실시간 CCTV 전용, 개인 Mac: 테스트 영상 데모
 - 이 문서는 실행 절차이며 회사 서버에서 자동으로 명령을 수행하지 않음
 - 서버에서 다운로드·파일 배치·포트 공개·컨테이너 실행은 담당자에게 경로·포트·GPU 사용 범위를 승인받은 뒤 진행
+- 에이전트가 회사 서버 작업을 실행할 때는 담당자와의 환경 협의에 더해 사용자에게 대상·내용·영향을 설명하고 명시적인 실행 허락을 받아야 함
 - 기존 컨테이너·Docker daemon·드라이버·80번 포트는 변경하지 않음, `prune`이나 전체 컨테이너 종료 명령 사용 금지
 - 알고리즘 개선 중인 배포 후보 구성, 최종 알고리즘과 실제 모델의 GPU 추론 검증 전 운영 완료로 간주하지 않음
 
@@ -18,14 +19,15 @@
 | GPU | 승인받은 T4 | CPU, 빠른 데모는 기존 Mac 네이티브 MPS 실행 권장 |
 
 - `sql/init.sql`은 테이블·인덱스·제약 생성용이며 데이터 INSERT 없음
-- 공통 스키마의 videos·video_id 등 빈 테이블·컬럼은 이벤트 조회 호환을 위해 유지, 실제 영상·좌표 데이터는 배포 DB에 없음
+- 공통 스키마의 videos·video_id 등 빈 테이블·컬럼은 이벤트 조회 호환을 위해 유지, 초기 운영 DB에는 테스트 영상 레코드·테스트 카메라 좌표 없음
+- 실시간 CCTV 좌표는 정상 운영 데이터로 ITS 목록 갱신 시 DB에 저장, 추정 산불 좌표는 실제 탐지 시 저장
 - DEMO_MODE=false 서버는 videos 또는 test 카메라 데이터가 있으면 시작을 거부, 데이터 자동 삭제는 하지 않음
 - 웹 빌드의 VITE_DEMO_MODE=false와 Backend의 DEMO_MODE=false를 함께 적용, 화면 숨김만으로 차단하지 않음
 - DB 볼륨은 Compose 프로젝트별 분리, 데모 DB 덤프를 운영에 복사하지 않음
 
 ## 운영 소스 묶음 준비 · 로컬
 
-프로젝트 루트에서 실행
+Git 작업 폴더의 프로젝트 루트에서 실행, 회사 서버에서 실행하는 명령이 아님
 
 ```bash
 python3 -m unittest discover -s deploy -p 'test_*.py'
@@ -38,6 +40,7 @@ python3 deploy/package.py /tmp/fireguard-production.tar.gz
 - 웹 이미지의 mock 모듈은 빈 배열로 대체, 모델은 별도 파일로 전달하여 읽기 전용 연결
 - Git LFS 포인터가 아니라 실제 모델 파일인지 전달 전 확인
 - 소스 묶음 생성은 현재 작업 파일 기준이므로 리뷰된 커밋에서 생성하고 커밋 ID와 함께 전달
+- 운영 묶음에는 포장 도구·테스트 코드·데모 override가 없으며 회사 서버에서는 아래 운영 실행 절차만 사용
 
 ## 회사 서버 · 승인 후에만 실행
 
@@ -58,10 +61,30 @@ docker compose --env-file deploy/.env -p fireguard-live -f deploy/compose.yml -f
 
 - config --quiet는 설정 검증만 수행, build·up·create-admin은 각각 별도 승인된 작업으로 실행
 - 관리자 생성 후 ADMIN_INITIAL_PASSWORD를 비우고 승인된 절차로 API 재생성하여 실행 환경에서도 제거
+- 초기 비밀번호를 설정한 채 API가 생성되었다면 환경파일 수정만으로 기존 컨테이너에서 값이 제거되지 않음
+- API를 재생성하는 작업도 승인 대상, 아래 명령은 별도 승인 후 실행
+
+```bash
+docker compose --env-file deploy/.env -p fireguard-live -f deploy/compose.yml -f deploy/compose.gpu.yml up -d --no-deps --force-recreate api
+```
+
+- API health가 healthy인지 조회하여 확인한 뒤 아래 웹 재시작도 승인 후 실행, API 교체 시 Nginx가 이전 컨테이너 IP를 계속 사용하지 않도록 다시 연결
+- 컨테이너 교체 시 IP 변경과 재연결 기준: [Docker Compose 네트워크 문서](https://docs.docker.com/compose/how-tos/networking/#updating-containers-on-the-network)
+
+```bash
+docker compose --env-file deploy/.env -p fireguard-live -f deploy/compose.yml -f deploy/compose.gpu.yml ps
+docker compose --env-file deploy/.env -p fireguard-live -f deploy/compose.yml -f deploy/compose.gpu.yml restart web
+```
+
 - SMS_PROVIDER는 console 기본값, 실제 문자 발송은 번호·키·비용 승인 후 solapi로 설정
 - 실시간 분석은 서버 재시작 시 OFF, 관리자 설정에서 명시적으로 ON
+- 새 DB·볼륨에는 CCTV 목록이 없으므로 ITS_CCTV_API_KEY 설정 후 승인받아 대시보드의 CCTV 주소 갱신 실행, 이 작업은 외부 조회·실시간 카메라 DB 등록·목록 캐시 저장을 수행
+- 목록 갱신 후 실시간 6대가 표시되는지 확인하고 분석 ON은 별도 승인 후 실행, 테스트 영상이나 seed는 사용하지 않음
 - DB·CCTV 목록·Terrarium 타일은 볼륨에 유지, 동적 DEM npz는 컨테이너 재생성 시 다시 계산될 수 있음
 - 업그레이드는 DB 백업 후 검토된 이미지 태그로 진행, 기존 DB의 스키마 변경은 별도 검토 후 적용
+- API 컨테이너 교체 시 위와 같이 health 확인 후 웹 컨테이너도 재시작
+- 모델만 변경할 때 이미지 재빌드는 불필요하지만 분석 OFF·파일 교체·API 재생성·health 확인·웹 재시작은 각각 승인된 범위에서 진행
+- 모델은 단일 파일 bind mount이므로 호스트에서 파일을 교체하면 기존 컨테이너가 예전 파일을 참조할 수 있음, AI 프로세스만 재시작하지 말고 API 컨테이너를 재생성하여 새 모델 연결
 - 중지는 승인된 경우에만 동일 프로젝트의 compose stop 사용, down -v·image prune·system prune 사용 금지
 
 ## Mac 데모 · 선택 사항
@@ -86,7 +109,7 @@ docker compose --env-file deploy/.env -p fireguard-demo -f deploy/compose.yml -f
 
 - 회사 Linux amd64 GPU 이미지 빌드·실제 모델 로딩, Mac CPU 검증과 구분
 - 회사 서버 드라이버 535와 CUDA 11.8 PyTorch 후보의 실제 GPU 추론
-- 관리자 로그인·실시간 1대→6대 처리량·OFF 시 프로세스 종료·실제 위치 추정
+- 회사 외부 주소에서 관리자 로그인·실시간 6대 처리량·OFF 시 실제 AI 프로세스 종료·실제 위치 추정, 현재 감시 작업자는 6대 목록을 요구하므로 1대 점검은 별도 구성 필요
 - 외부 HTTPS·지도 인증·CCTV와 DEM API 접근·실제 SMS는 담당자 승인 후 확인
 
 ## 로컬 검증 기록 · 2026-11-14

@@ -3,6 +3,7 @@
 - 모든 명령은 별도 안내가 없으면 프로젝트 루트에서 실행
 - Bash는 macOS·Linux·Git Bash용, Windows 명령은 CMD용
 - 실제 영상 4개는 Git에 없으므로 조장에게 요청
+- 아래 실행 절차는 로컬 개발·테스트 영상 데모용, 회사 서버는 [배포 안내](deploy/README.md)를 따르며 `sql/seed.dev.sql`을 전달·실행하지 않음
 
 ## 준비물
 
