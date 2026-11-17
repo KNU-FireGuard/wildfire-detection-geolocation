@@ -15,6 +15,7 @@ const api = `data:text/javascript,${encodeURIComponent(`
 `)}`
 globalThis.__catalogDialogComponent = await compileComponent(new URL('../src/components/RecordDialog.vue', import.meta.url))
 const replacements = {
+  "import { useAdminSession } from '../composables/useAdminSession'": "const useAdminSession = () => ({ token: ref('test-token'), isLoggedIn: ref(globalThis.__catalogActions.loggedIn !== false), signOut() {} })",
   "'../api/catalog'": JSON.stringify(api),
   "import RecordDialog from '../components/RecordDialog.vue'": 'const RecordDialog = globalThis.__catalogDialogComponent',
   "import EventCaptures from '../components/EventCaptures.vue'": `const EventCaptures = {
@@ -28,9 +29,9 @@ for (const file of ['cameraName', 'cameraSearch', 'eventFormat']) replacements[`
 replacements["'../composables/useQuery'"] = JSON.stringify(new URL('../src/composables/useQuery.js', import.meta.url).href)
 const component = await compileComponent(new URL('../src/views/CatalogView.vue', import.meta.url), replacements)
 
-function setup(resource) {
+function setup(resource, loggedIn = true) {
   const previous = { document: globalThis.document, window: globalThis.window, Document: globalThis.Document, ShadowRoot: globalThis.ShadowRoot }
-  const state = {
+  const state = { loggedIn,
     cameras: [{ id: 7, name: '기도4교', latitude: 0, longitude: 128.1, sourceType: 'test' },
       { id: 8, name: '청성', latitude: 36.1, longitude: 128.2, sourceType: 'live' }],
     events: [{ id: 9, cameraId: 7, type: 'fire', detectedAt: new Date().toISOString(), status: 'UNCONFIRMED' }], deletes: [],
@@ -124,5 +125,14 @@ test('전체 선택 삭제의 부분 실패는 실패 항목만 선택 상태로
     await remove(); await settle()
     assert.deepEqual(view.state.deletes, [9, 10, 10])
     assert.equal(findAll(view.root, 'tr').length, 0)
+  } finally { view.dispose() }
+})
+
+test('비로그인 사용자는 삭제 버튼과 선택 체크박스를 볼 수 없다', async () => {
+  const view = setup('events', false)
+  try {
+    await settle()
+    assert.equal(findAll(view.root, 'input').length, 0)
+    assert.ok(!allText(view.root).includes('선택 삭제'))
   } finally { view.dispose() }
 })

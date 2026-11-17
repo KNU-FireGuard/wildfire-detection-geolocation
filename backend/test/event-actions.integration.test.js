@@ -5,6 +5,8 @@ const path = require('node:path');
 test('PostgreSQL: 전체 확인·이벤트 삭제는 캡처를 정리하고 문자 이력은 보존한다', {
   skip: process.env.npm_lifecycle_event !== 'test:integration' && process.env.RUN_DB_TESTS !== '1',
 }, async () => {
+  process.env.JWT_SECRET = 'event-delete-test-secret-32-bytes-long';
+  const headers = {Authorization: `Bearer ${require('jsonwebtoken').sign({id: 1, username: 'admin'}, process.env.JWT_SECRET)}`};
   const pool = require('../src/config/db');
   const client = await pool.connect();
   let server;
@@ -41,12 +43,12 @@ test('PostgreSQL: 전체 확인·이벤트 삭제는 캡처를 정리하고 문�
     assert.ok(saved.every(row => row.acknowledged_at));
     assert.equal(saved[0].updated_at.toISOString(), events[0].updated_at.toISOString());
     failDelete = true;
-    assert.equal((await fetch(`${base}/events/${eventId}`, { method: 'DELETE' })).status, 500);
+    assert.equal((await fetch(`${base}/events/${eventId}`, { method: 'DELETE', headers })).status, 500);
     assert.equal(Number((await client.query('SELECT count(*) FROM event_captures')).rows[0].count), 1);
     assert.equal((await client.query('SELECT event_id FROM sms_logs')).rows[0].event_id, eventId);
     assert.equal(Number((await client.query('SELECT count(*) FROM detection_events')).rows[0].count), 2);
     failDelete = false;
-    assert.equal((await fetch(`${base}/events/${eventId}`, { method: 'DELETE' })).status, 204);
+    assert.equal((await fetch(`${base}/events/${eventId}`, { method: 'DELETE', headers })).status, 204);
     assert.equal(Number((await client.query('SELECT count(*) FROM event_captures')).rows[0].count), 0);
     assert.equal((await client.query('SELECT event_id FROM sms_logs')).rows[0].event_id, null);
     assert.equal(Number((await client.query('SELECT count(*) FROM detection_events')).rows[0].count), 1);
