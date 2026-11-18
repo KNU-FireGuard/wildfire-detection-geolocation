@@ -78,7 +78,10 @@ function applyEventFilters() {
   if (!filterError.value) return updateEventQuery({ filters: { ...eventDraft }, page: 1 })
 }
 function resetEventFilters() {
-  if (!deleting.value) return updateEventQuery({ filters: { ...defaultEventFilters }, page: 1 })
+  if (deleting.value) return
+  Object.assign(eventDraft, defaultEventFilters)
+  filterError.value = ''
+  return updateEventQuery({ filters: { ...defaultEventFilters }, page: 1 })
 }
 function clearEventFilter(key) {
   if (deleting.value) return
@@ -106,6 +109,7 @@ const checkedIds = ref(new Set())
 const deleteProgress = ref(0)
 const deleteTotal = ref(0)
 let actionGeneration = 0
+let disposed = false
 const allChecked = computed(() => rows.value.length > 0 && rows.value.every(row => checkedIds.value.has(row.id)))
 function checkEvent(id, checked) {
   const next = new Set(checkedIds.value)
@@ -134,6 +138,7 @@ async function removeCheckedEvents() {
   const generation = actionGeneration
   const sessionToken = token.value
   const isCurrentAction = () => generation === actionGeneration && token.value === sessionToken
+  const canUpdateList = () => !disposed && props.resource === 'events' && token.value === sessionToken && data.value !== null
   deleting.value = true
   deleteError.value = ''
   deleteMessage.value = ''
@@ -146,15 +151,20 @@ async function removeCheckedEvents() {
       if (!isCurrentAction()) break
       try { await deleteEvent(id, sessionToken); removed.add(id) }
       catch (error) {
-        if (!isCurrentAction()) break
-        if (error.status === 401) { signOut(); deleteError.value = '로그인이 만료되었습니다. 관리자 설정에서 다시 로그인해주세요.'; break }
         if (error.status === 404) removed.add(id)
-        else failures.push({ id, message: error.message })
+        else {
+          if (!isCurrentAction()) break
+          if (error.status === 401) { signOut(); deleteError.value = '로그인이 만료되었습니다. 관리자 설정에서 다시 로그인해주세요.'; break }
+          failures.push({ id, message: error.message })
+        }
+      }
+      // 조건 변경은 후속 요청을 중단하지만 같은 화면·세션의 확정된 삭제 결과는 유지
+      if (removed.has(id) && canUpdateList()) {
+        data.value = allRows.value.filter(event => event.id !== id)
+        if (selectedEvent.value?.id === id) selectedEvent.value = null
       }
       if (!isCurrentAction()) break
       deleteProgress.value++
-      data.value = allRows.value.filter(event => !removed.has(event.id))
-      if (selectedEvent.value && removed.has(selectedEvent.value.id)) selectedEvent.value = null
     }
     if (isCurrentAction()) {
       checkedIds.value = new Set(failures.map(item => item.id))
@@ -164,7 +174,7 @@ async function removeCheckedEvents() {
   } finally { deleting.value = false }
 }
 watch(() => props.resource, () => { actionGeneration++; search.value = ''; checkedIds.value = new Set(); selectedCamera.value = null; selectedEvent.value = null; deleteError.value = ''; deleteMessage.value = '' })
-onBeforeUnmount(() => { actionGeneration++; clearInterval(calendarTimer) })
+onBeforeUnmount(() => { disposed = true; actionGeneration++; clearInterval(calendarTimer) })
 const sourceLabel = camera => camera.sourceType === 'live' ? '실시간 CCTV' : camera.sourceType === 'test' ? '테스트 CCTV' : '정보 없음'
 const cameraHistory = ref([])
 const cameraVideos = ref([])
