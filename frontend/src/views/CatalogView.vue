@@ -51,6 +51,8 @@ async function removeCheckedEvents() {
   const ids = [...checkedIds.value]
   if (!window.confirm(`선택한 이벤트 ${ids.length}건과 연결된 캡처를 삭제할까요? 문자 발송 이력은 보존됩니다.`)) return
   const generation = actionGeneration
+  const sessionToken = token.value
+  const isCurrentAction = () => generation === actionGeneration && token.value === sessionToken
   deleting.value = true
   deleteError.value = ''
   deleteMessage.value = ''
@@ -60,19 +62,20 @@ async function removeCheckedEvents() {
   const failures = []
   try {
     for (const id of ids) {
-      if (generation !== actionGeneration || !isLoggedIn.value) break
-      try { await deleteEvent(id, token.value); removed.add(id) }
+      if (!isCurrentAction()) break
+      try { await deleteEvent(id, sessionToken); removed.add(id) }
       catch (error) {
+        if (!isCurrentAction()) break
         if (error.status === 401) { signOut(); deleteError.value = '로그인이 만료되었습니다. 관리자 설정에서 다시 로그인해주세요.'; break }
         if (error.status === 404) removed.add(id)
         else failures.push({ id, message: error.message })
       }
-      if (generation !== actionGeneration || !isLoggedIn.value) break
+      if (!isCurrentAction()) break
       deleteProgress.value++
       data.value = allRows.value.filter(event => !removed.has(event.id))
       if (selectedEvent.value && removed.has(selectedEvent.value.id)) selectedEvent.value = null
     }
-    if (generation === actionGeneration) {
+    if (isCurrentAction()) {
       checkedIds.value = new Set(failures.map(item => item.id))
       deleteMessage.value = `${removed.size}건을 삭제했습니다.`
       if (failures.length) deleteError.value = `${failures.length}건은 삭제하지 못했습니다. ${failures.slice(0, 3).map(item => `#${item.id}: ${item.message}`).join(' / ')}`
