@@ -174,9 +174,9 @@ export async function acknowledgeAllEvents() {
   return result
 }
 
-export async function deleteEvent(eventId) {
+export async function deleteEvent(eventId, token) {
   if (!Number.isSafeInteger(eventId) || eventId < 1) throw new Error('올바르지 않은 이벤트 번호입니다.')
-  const response = await fetch(`/api/events/${eventId}`, { method: 'DELETE', signal: AbortSignal.timeout(15000) })
+  const response = await fetch(`/api/events/${eventId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw Object.assign(new Error(body.error || `이벤트 삭제에 실패했습니다. (HTTP ${response.status})`), { status: response.status })

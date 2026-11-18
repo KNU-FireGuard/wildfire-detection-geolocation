@@ -9,6 +9,8 @@ import { filterCameras } from '../utils/cameraSearch'
 import { cameraName } from '../utils/cameraName'
 import { formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
 import { useQuery } from '../composables/useQuery'
+import { useAdminSession } from '../composables/useAdminSession'
+const { token, isLoggedIn, signOut } = useAdminSession()
 const props = defineProps({ resource: { type: String, required: true } })
 const titles = { cameras: '카메라 목록', events: '탐지 이벤트' }
 async function fetchEventsWithCameraNames({ signal }) {
@@ -45,10 +47,12 @@ watch(rows, current => {
 function openCamera(camera) { selectedCamera.value = camera }
 function openEvent(event) { if (!deleting.value) selectedEvent.value = event }
 async function removeCheckedEvents() {
-  if (!checkedIds.value.size || deleting.value) return
+  if (!isLoggedIn.value || !checkedIds.value.size || deleting.value) return
   const ids = [...checkedIds.value]
   if (!window.confirm(`선택한 이벤트 ${ids.length}건과 연결된 캡처를 삭제할까요? 문자 발송 이력은 보존됩니다.`)) return
   const generation = actionGeneration
+  const sessionToken = token.value
+  const isCurrentAction = () => generation === actionGeneration && token.value === sessionToken
   deleting.value = true
   deleteError.value = ''
   deleteMessage.value = ''
@@ -58,18 +62,20 @@ async function removeCheckedEvents() {
   const failures = []
   try {
     for (const id of ids) {
-      if (generation !== actionGeneration) break
-      try { await deleteEvent(id); removed.add(id) }
+      if (!isCurrentAction()) break
+      try { await deleteEvent(id, sessionToken); removed.add(id) }
       catch (error) {
+        if (!isCurrentAction()) break
+        if (error.status === 401) { signOut(); deleteError.value = '로그인이 만료되었습니다. 관리자 설정에서 다시 로그인해주세요.'; break }
         if (error.status === 404) removed.add(id)
         else failures.push({ id, message: error.message })
       }
-      if (generation !== actionGeneration) break
+      if (!isCurrentAction()) break
       deleteProgress.value++
       data.value = allRows.value.filter(event => !removed.has(event.id))
       if (selectedEvent.value && removed.has(selectedEvent.value.id)) selectedEvent.value = null
     }
-    if (generation === actionGeneration) {
+    if (isCurrentAction()) {
       checkedIds.value = new Set(failures.map(item => item.id))
       deleteMessage.value = `${removed.size}건을 삭제했습니다.`
       if (failures.length) deleteError.value = `${failures.length}건은 삭제하지 못했습니다. ${failures.slice(0, 3).map(item => `#${item.id}: ${item.message}`).join(' / ')}`
@@ -148,7 +154,7 @@ watch(() => selectedEvent.value?.id, (id, _previous, onCleanup) => {
     <section v-else class="dashboard-panel">
       <label v-if="resource === 'cameras'" class="camera-search">카메라 검색<input v-model="search" type="search" placeholder="카메라 이름, 번호, 좌표, 유형 검색" /></label>
       <p>{{ resource === 'cameras' && search.trim() ? `검색 ${rows.length} / 전체 ${allRows.length}건` : `총 ${rows.length}건` }}</p>
-      <div v-if="resource === 'events'" class="event-actions">
+      <div v-if="resource === 'events' && isLoggedIn" class="event-actions">
         <span>선택 {{ checkedIds.size }}건</span>
         <button type="button" class="delete-button" :disabled="deleting || checkedIds.size === 0" @click="removeCheckedEvents">{{ deleting ? `삭제 중 (${deleteProgress}/${deleteTotal})` : '선택 삭제' }}</button>
         <span class="interaction-hint">이벤트를 더블클릭하면 상세 정보를 볼 수 있습니다.</span>
@@ -160,9 +166,9 @@ watch(() => selectedEvent.value?.id, (id, _previous, onCleanup) => {
         <table v-if="resource === 'cameras'"><caption class="sr-only">카메라 목록</caption><thead><tr><th>이름</th><th>위도</th><th>경도</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id" class="camera-row" tabindex="0" title="더블클릭하면 카메라 상세 정보를 봅니다" @dblclick="openCamera(row)" @keydown.enter="openCamera(row)"><td>{{ row.name }}</td><td>{{ row.latitude ?? '정보 없음' }}</td><td>{{ row.longitude ?? '정보 없음' }}</td></tr></tbody></table>
         <table v-else>
           <caption class="sr-only">체크박스로 삭제 대상을 선택하고 이벤트를 더블클릭하면 상세 정보를 확인합니다.</caption>
-          <thead><tr><th><input type="checkbox" aria-label="이벤트 전체 선택" :checked="allChecked" :indeterminate="checkedIds.size > 0 && !allChecked" :disabled="deleting" @change="checkAll($event.target.checked)"></th><th>ID</th><th>탐지 시각</th><th>카메라</th><th>유형</th><th>상태</th></tr></thead>
+          <thead><tr><th v-if="isLoggedIn"><input type="checkbox" aria-label="이벤트 전체 선택" :checked="allChecked" :indeterminate="checkedIds.size > 0 && !allChecked" :disabled="deleting" @change="checkAll($event.target.checked)"></th><th>ID</th><th>탐지 시각</th><th>카메라</th><th>유형</th><th>상태</th></tr></thead>
           <tbody><tr v-for="row in rows" :key="row.id" class="event-row" :class="{ checked: checkedIds.has(row.id) }" tabindex="0" title="더블클릭하면 이벤트 상세 정보를 봅니다" @dblclick="openEvent(row)" @keydown.enter.self="openEvent(row)">
-            <td @dblclick.stop><input type="checkbox" :aria-label="`이벤트 ${row.id} 선택`" :checked="checkedIds.has(row.id)" :disabled="deleting" @change="checkEvent(row.id, $event.target.checked)"></td>
+            <td v-if="isLoggedIn" @dblclick.stop><input type="checkbox" :aria-label="`이벤트 ${row.id} 선택`" :checked="checkedIds.has(row.id)" :disabled="deleting" @change="checkEvent(row.id, $event.target.checked)"></td>
             <td>{{ row.id }}</td><td>{{ formatDetectedAt(row.detectedAt) }}</td><td>{{ row.cameraName }}</td><td>{{ formatType(row.type) }}</td><td>{{ formatStatus(row.status) }}</td>
           </tr></tbody>
         </table>
