@@ -1,9 +1,11 @@
 <script setup>
+import { useRoute } from 'vue-router'
 import { fetchCameras, fetchEvent } from '../api/catalog'
 import EventDetail from '../components/EventDetail.vue'
 import { useQuery } from '../composables/useQuery'
 import { formatDetectedAt } from '../utils/eventFormat'
 const props = defineProps({ id: { type: String, required: true } })
+const route = useRoute()
 const { data, loading, error, reload } = useQuery(() => props.id, async signal => {
   const event = await fetchEvent(props.id, { signal })
   let cameras = []
@@ -16,7 +18,7 @@ const { data, loading, error, reload } = useQuery(() => props.id, async signal =
 </script>
 <template>
   <div class="catalog-page">
-    <RouterLink to="/events">← 이벤트 목록</RouterLink>
+    <RouterLink :to="{ path: '/events', query: route.query }">← 이벤트 목록</RouterLink>
     <h1>탐지 이벤트 #{{ id }}</h1>
     <p v-if="loading" role="status">상세 정보를 불러오는 중입니다.</p>
     <div v-else-if="error" class="dashboard-panel" role="alert"><p>{{ error }}</p><button class="primary-button" @click="reload">다시 시도</button></div>

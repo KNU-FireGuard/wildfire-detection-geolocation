@@ -95,7 +95,7 @@ test('Test 진행 중 이벤트 조회를 갱신하고 지도에는 이벤트 �
 test('이벤트 전체 목록은 카메라 ID 대신 카메라 이름을 보여준다', () => {
   const catalog = readFileSync(new URL('../src/views/CatalogView.vue', import.meta.url), 'utf8')
   assert.doesNotMatch(catalog, /<th>카메라 ID<\/th>/)
-  assert.match(catalog, /<th>카메라<\/th>/)
+  assert.match(catalog, /<th\b[^>]*>카메라<\/th>/)
   assert.match(catalog, /row\.cameraName/)
 })
 

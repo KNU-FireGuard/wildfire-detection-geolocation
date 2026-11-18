@@ -1,5 +1,6 @@
 ﻿<script setup>
 import { computed, ref } from 'vue'
+import DashboardIcon from './DashboardIcon.vue'
 import { cameraName as nameOf } from '../utils/cameraName'
 import { formatDetectedAt, formatType, formatStatus } from '../utils/eventFormat'
 import { filterEvents } from '../utils/eventFilters'
@@ -62,7 +63,7 @@ function resetFilters() {
             <td><span class="event-number">{{ event.id }}</span></td>
             <td><button type="button" class="event-button" :aria-pressed="event.id === selectedId" :aria-label="`${cameraName(event.cameraId)} ${formatType(event.type)} 이벤트 ${event.id} 선택`" @click.stop="emit('select', event.id)"><time :datetime="event.detectedAt">{{ formatDetectedAt(event.detectedAt) }}</time></button></td>
             <td class="camera-cell">{{ cameraName(event.cameraId) }}</td>
-            <td><span class="type-label" :class="event.type"><i />{{ formatType(event.type) }}</span></td>
+            <td><span class="event-type-label" :class="event.type"><DashboardIcon v-if="event.type === 'fire' || event.type === 'smoke'" :name="event.type" :size="15" />{{ formatType(event.type) }}</span></td>
             <td><span class="status-badge" :class="{ pending: event.status === 'UNCONFIRMED', confirmed: event.status === 'CONFIRMED' }">{{ formatStatus(event.status) }}</span><button v-if="event.status === 'UNCONFIRMED'" type="button" class="ack-button" :disabled="ackBusy" :aria-label="`이벤트 ${event.id} 확인`" @click.stop="emit('acknowledge', event.id)">확인</button></td>
           </tr>
         </tbody>
@@ -91,7 +92,6 @@ tbody tr:hover { background: var(--surface-2); }
 tbody tr.selected { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
 .event-button { padding: 0; background: transparent; border: 0; color: var(--text); text-align: left; font-size: 11px; }
 .event-number { color: var(--text-3); }.camera-cell { font-weight: 650; }
-.type-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }.type-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }.type-label.fire { color: var(--text); }.type-label.fire i { background: var(--fire); box-shadow: 0 0 8px var(--fire); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 600px) { th, td { padding: 10px 8px; } }
 </style>

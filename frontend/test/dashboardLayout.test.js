@@ -71,10 +71,11 @@ test('CCTV 닫기는 대시보드의 선택을 해제하고 상세 패널을 숨
 })
 
 
-test('대시보드 헤더는 제목 "대시보드"만 보여 주고 홍보성 문구와 부제는 두지 않는다', () => {
+test('대시보드 헤더는 제목과 관제 기능 설명을 보여 주고 장식 아이콘은 읽기에서 제외한다', () => {
   const { descriptor } = parse(readFileSync(new URL('../src/views/DashboardView.vue', import.meta.url), 'utf8'))
   const header = descriptor.template.content.match(/<header class="dashboard-header">([\s\S]*?)<\/header>/)?.[1] ?? ''
   assert.match(header, /<h1>대시보드<\/h1>/)
   assert.doesNotMatch(header, /산불로부터|지켜줍니다/)
-  assert.doesNotMatch(header, /<p>/)
+  assert.match(header, /<p>CCTV 영상과 화재·연기 탐지 현황을 확인합니다<\/p>/)
+  assert.match(header, /<span class="page-title-icon" aria-hidden="true"><DashboardIcon name="home"/)
 })

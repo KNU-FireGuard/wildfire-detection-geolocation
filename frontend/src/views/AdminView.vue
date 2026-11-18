@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import DashboardIcon from '../components/DashboardIcon.vue'
 import { loginAdmin } from '../api/catalog'
 import { fetchAdminCameras, fetchSmsLogs, updateAlertPhone, deleteSmsLogs, fetchLiveMonitor, setLiveMonitor } from '../api/admin'
 import { useAdminSession } from '../composables/useAdminSession'
@@ -190,7 +191,10 @@ watch(isLoggedIn, loggedIn => {
 <template>
   <div class="catalog-page admin-page">
     <header class="page-heading">
-      <h1>관리자 설정</h1>
+      <div class="page-title">
+        <span class="page-title-icon" aria-hidden="true"><DashboardIcon name="settings" :size="24" /></span>
+        <div class="page-title-copy"><h1>관리자 설정</h1><p>SMS 알림 수신 번호와 발송 내역을 관리합니다</p></div>
+      </div>
       <button v-if="isLoggedIn" type="button" class="secondary-button" @click="logout">로그아웃</button>
     </header>
 
@@ -290,7 +294,7 @@ watch(isLoggedIn, loggedIn => {
 .delete-button { color: var(--fire); border-color: var(--fire); }
 input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
 .page-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.8px; margin: 0; }
+.page-heading { flex-wrap: wrap; }
 .hint { color: var(--text-3); font-size: 12px; line-height: 1.6; }
 .admin-login { max-width: 420px; }
 .admin-login form { display: grid; gap: 14px; margin-top: 14px; }
