@@ -326,7 +326,10 @@ onBeforeUnmount(() => {
 <template>
     <div id="dashboard-main" class="dashboard-content">
       <header class="dashboard-header">
-        <h1>대시보드</h1>
+        <div class="page-title">
+          <span class="page-title-icon" aria-hidden="true"><DashboardIcon name="home" :size="24" /></span>
+          <div class="page-title-copy"><h1>대시보드</h1><p>CCTV 영상과 화재·연기 탐지 현황을 확인합니다</p></div>
+        </div>
         <div class="header-tools">
           <time class="live-clock" :datetime="now.toISOString()">{{ clock }}</time>
           <span class="user-profile"><span class="avatar"><DashboardIcon name="user" :size="20" /></span>admin</span>
@@ -360,9 +363,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .dashboard-content { padding: 28px 30px 20px; max-width: 1740px; width: 100%; margin: 0 auto; }
-.dashboard-header { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
-h1 { margin: 0; font-size: clamp(23px, 2vw, 30px); letter-spacing: -1px; font-weight: 800; color: var(--text); }
-.header-tools { display: flex; align-items: center; gap: 14px; color: var(--text-2); font-size: 13px; white-space: nowrap; }
+.dashboard-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
+.header-tools { display: flex; align-items: center; gap: 14px; margin-left: auto; color: var(--text-2); font-size: 13px; white-space: nowrap; }
 .live-clock { padding: 7px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-variant-numeric: tabular-nums; }
 .user-profile { display: flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text-2); }
 .avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--on-accent); background: linear-gradient(135deg, #3d8ff0, #1b5fb8); }
@@ -394,5 +396,5 @@ h1 { margin: 0; font-size: clamp(23px, 2vw, 30px); letter-spacing: -1px; font-we
 @media (min-width: 1600px) { .dashboard-content { padding: 32px 38px; } }
 @media (max-width: 1200px) { .dashboard-content { padding: 22px 18px; }.header-tools { gap: 10px; }.live-clock { display: none; } }
 @media (max-width: 800px) { .dashboard-grid.with-detail:not(.map-hidden) { grid-template-columns: minmax(0, 1fr); }.detail-panel { grid-column: 1; } }
-@media (max-width: 600px) { .dashboard-content { padding: 18px 12px; }.dashboard-header { align-items: start; }.dashboard-header h1 { font-size: 20px; letter-spacing: -.7px; }.user-profile { padding: 4px; font-size: 0; }.summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }.summary-card { padding: 10px; }.dashboard-footer { flex-direction: column; } }
+@media (max-width: 600px) { .dashboard-content { padding: 18px 12px; }.dashboard-header { align-items: start; }.user-profile { padding: 4px; font-size: 0; }.summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }.summary-card { padding: 10px; }.dashboard-footer { flex-direction: column; } }
 </style>

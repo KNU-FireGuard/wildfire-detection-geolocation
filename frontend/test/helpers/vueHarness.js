@@ -11,6 +11,9 @@ export async function compileComponent(url, replacements = {}) {
 }
 
 export const makeNode = (tag, text = '') => ({ tag, text, props: {}, children: [], parent: null,
+  get options() { return this.children.filter(child => child.tag === 'option') },
+  get value() { return this.props.value ?? this.text },
+  set value(value) { this.props.value = value },
   style: { overflow: '' }, open: false, showCalls: 0,
   addEventListener() {}, removeEventListener() {},
   getRootNode() { return globalThis.document },
@@ -39,10 +42,11 @@ export function createHarness() {
     nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
     querySelector: selector => selector === 'body' ? body : null,
   })
-  function mount(Component, values = {}, handlers = {}) {
+  function mount(Component, values = {}, handlers = {}, plugins = []) {
     const props = reactive(values)
     const root = makeNode('root')
     const app = renderer.createApp({ render: () => h(Component, { ...props, ...handlers }) })
+    for (const plugin of plugins) app.use(plugin)
     app.mount(root)
     return { props, root, app, body }
   }

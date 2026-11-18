@@ -28,7 +28,7 @@ test('카메라 목록 행을 더블클릭하거나 Enter를 누르면 상세 �
 })
 
 test('탐지 이벤트 표의 ID 열은 그대로 둔다', () => {
-  assert.match(catalog, /<th>ID<\/th><th>탐지 시각<\/th>/)
+  assert.match(catalog, /<th\b[^>]*>ID<\/th>\s*<th\b[^>]*>탐지 시각 \(KST\)<\/th>/)
 })
 
 test('대시보드는 주소의 camera 값을 첫 조회 뒤 한 번만 선택에 반영한다', () => {
