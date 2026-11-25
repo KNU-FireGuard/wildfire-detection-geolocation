@@ -213,12 +213,10 @@ watch(selectedCamera, async (camera, _previous, onCleanup) => {
   cameraExtraLoading.value = false
 })
 const eventDetailError = ref('')
-const eventPosition = ref(0)
 const eventPlaybackSequence = ref(0)
 const eventRange = computed(() => errorRangeDisplay(selectedEvent.value?.estimatedLocation))
-function seekEventCapture(seconds) { eventPosition.value = seconds; eventPlaybackSequence.value++ }
 watch(() => selectedEvent.value?.id, (id, _previous, onCleanup) => {
-  eventDetailError.value = ''; eventPosition.value = 0; eventPlaybackSequence.value++
+  eventDetailError.value = ''; eventPlaybackSequence.value++
   if (!id) return
   let cancelled = false, reading = false, controller
   async function refresh() {
@@ -348,9 +346,9 @@ watch(() => selectedEvent.value?.id, (id, _previous, onCleanup) => {
       </dl>
       <p v-if="eventDetailError" role="alert" class="action-error">{{ eventDetailError }}</p>
       <template v-if="selectedEvent?.videoId">
-        <h3>원본 영상</h3><RecordedVideo :video-id="selectedEvent.videoId" :position="eventPosition" :sequence="eventPlaybackSequence" />
+        <h3>원본 영상</h3><RecordedVideo :video-id="selectedEvent.videoId" :sequence="eventPlaybackSequence" />
       </template>
-      <EventCaptures v-if="selectedEvent" :key="selectedEvent.id" :event-id="selectedEvent.id" :latest-capture="selectedEvent.latestCapture" @seek="seekEventCapture" />
+      <EventCaptures v-if="selectedEvent" :key="selectedEvent.id" :event-id="selectedEvent.id" :latest-capture="selectedEvent.latestCapture" />
       <template #actions><RouterLink v-if="selectedEvent" :to="{ path: `/events/${selectedEvent.id}`, query: route.query }">상세 보기</RouterLink></template>
     </RecordDialog>
   </div>

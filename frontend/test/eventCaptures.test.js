@@ -37,18 +37,15 @@ test('대시보드 미리보기는 최신 6장만 표시하고 더보기는 이�
   } finally { view.app.unmount(); globalThis.document = previous; delete globalThis.__capturesTest }
 })
 
-test('캡처는 시간순으로 표시·선택하고 새 캡처를 중복 없이 합치며 이벤트 전환 시 초기화한다', async () => {
+test('캡처는 시간순으로 표시하고 새 캡처를 중복 없이 합치며 이벤트 전환 시 초기화한다', async () => {
   const previous = globalThis.document
   globalThis.document = { hidden: true }
   const state = { items: [capture(2, 8800), capture(1, 3800)], requests: [] }
   globalThis.__capturesTest = state
-  const seeks = []
-  const view = createHarness().mount(component, { eventId: 9 }, { onSeek: time => seeks.push(time) })
+  const view = createHarness().mount(component, { eventId: 9 })
   try {
     await settle()
     assert.deepEqual(findAll(view.root, 'img').map(node => node.props.src), ['/api/event-captures/1/image', '/api/event-captures/2/image'])
-    findAll(view.root, 'button')[0].props.onClick()
-    assert.deepEqual(seeks, [3.8])
     state.items = [capture(3, 13800), ...state.items]
     view.props.latestCapture = { id: 3 }
     await settle()
